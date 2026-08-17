@@ -1,0 +1,5 @@
+module NanyinCore {
+    header "nanyin_core.h"
+    link "nanyin_core"
+    export *
+}

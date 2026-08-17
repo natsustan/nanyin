@@ -1,0 +1,21 @@
+# Build artifacts
+build/
+ DerivedData/
+*.xcuserstate
+.xcuserdata/
+
+# Rust
+rust/target/
+rust/Cargo.lock.bak
+
+# Swift Package Manager
+.build/
+
+# macOS
+.DS_Store
+
+# Research repos (reference only, not part of the app)
+research-repos/
+
+# Logs
+*.log

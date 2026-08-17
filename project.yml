@@ -1,0 +1,44 @@
+name: Nanyin
+options:
+  bundleIdPrefix: com.nanyin
+  deploymentTarget:
+    macOS: "15.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.10"
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+    CODE_SIGNING_ALLOWED: "NO"
+
+targets:
+  Nanyin:
+    type: application
+    platform: macOS
+    sources:
+      - NanyinApp
+    dependencies:
+      - sdk: SystemConfiguration.framework
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.nanyin.app
+        PRODUCT_NAME: Nanyin
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        # Rust core (built by the script phase below)
+        SWIFT_INCLUDE_PATHS: "$(SRCROOT)/build/rust/include"
+        OTHER_LDFLAGS: "$(SRCROOT)/build/rust/lib/libnanyin_core.a"
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks"
+        GENERATE_INFOPLIST_FILE: "YES"
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.music
+        INFOPLIST_KEY_CFBundleDisplayName: nanyin
+        ENABLE_HARDENED_RUNTIME: "YES"
+    preBuildScripts:
+      - name: Build Rust Core
+        script: |
+          set -e
+          export PATH="$HOME/.local/share/mise/shims:$HOME/.cargo/bin:$PATH"
+          cd "$SRCROOT/rust"
+          ./build.sh
+        basedOnDependencyAnalysis: false
