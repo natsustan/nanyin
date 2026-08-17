@@ -360,6 +360,10 @@ fn handle_player_event(event: librespot_playback::player::PlayerEvent) {
             }
             PlayerEvent::EndOfTrack { .. } => "EndOfTrack".to_string(),
             PlayerEvent::Seeked { position_ms, .. } => format!("Seeked {position_ms}ms"),
+            PlayerEvent::ShuffleChanged { shuffle } => format!("ShuffleChanged {shuffle}"),
+            PlayerEvent::RepeatChanged { context, track } => {
+                format!("RepeatChanged context={context} track={track}")
+            }
             other => format!("{other:?}"),
         };
         eprintln!("nanyin_core: {short}");
@@ -445,6 +449,16 @@ fn handle_player_event(event: librespot_playback::player::PlayerEvent) {
         PlayerEvent::EndOfTrack { .. } => {
             IS_PLAYING.store(false, Ordering::SeqCst);
             emit_state(json!({ "event": "end_of_track" }));
+        }
+        PlayerEvent::ShuffleChanged { shuffle } => {
+            emit_state(json!({ "event": "shuffle_changed", "shuffle": shuffle }));
+        }
+        PlayerEvent::RepeatChanged { context, track } => {
+            emit_state(json!({
+                "event": "repeat_changed",
+                "repeat_context": context,
+                "repeat_track": track,
+            }));
         }
         _ => {}
     }
@@ -620,6 +634,46 @@ pub extern "C" fn nanyin_seek(position_ms: u32) -> i32 {
 #[no_mangle]
 pub extern "C" fn nanyin_set_volume(volume: u16) -> i32 {
     require_spirc().map_or_else(|c| c, |s| s.set_volume(volume).map_or(-1, |_| 0))
+}
+
+#[no_mangle]
+pub extern "C" fn nanyin_shuffle(on: bool) -> i32 {
+    require_spirc().map_or_else(|c| c, |s| s.shuffle(on).map_or(-1, |_| 0))
+}
+
+#[no_mangle]
+pub extern "C" fn nanyin_repeat(on: bool) -> i32 {
+    require_spirc().map_or_else(|c| c, |s| s.repeat(on).map_or(-1, |_| 0))
+}
+
+#[no_mangle]
+pub extern "C" fn nanyin_repeat_track(on: bool) -> i32 {
+    require_spirc().map_or_else(|c| c, |s| s.repeat_track(on).map_or(-1, |_| 0))
+}
+
+/// Appends a track to the end of the active queue.
+#[no_mangle]
+pub extern "C" fn nanyin_add_to_queue(track_uri: *const c_char) -> i32 {
+    if track_uri.is_null() {
+        return -1;
+    }
+    let uri = unsafe {
+        match CStr::from_ptr(track_uri).to_str() {
+            Ok(s) => s.to_string(),
+            Err(_) => return -1,
+        }
+    };
+    let spirc = match require_spirc() {
+        Ok(s) => s,
+        Err(code) => return code,
+    };
+    match librespot_core::SpotifyUri::from_uri(&uri) {
+        Ok(id) => spirc.add_to_queue(id).map_or(-1, |_| 0),
+        Err(_) => {
+            eprintln!("nanyin_core: add_to_queue: invalid URI {uri}");
+            -1
+        }
+    }
 }
 
 #[no_mangle]

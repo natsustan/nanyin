@@ -116,6 +116,26 @@ private struct TrackRow: View {
         .padding(.vertical, 7)
         .background(rowBackground)
         .contentShape(Rectangle())
+        .contextMenu {
+            Button {
+                app.play(track: track, contextKey: contextKey)
+            } label: {
+                Label("Play", systemImage: "play")
+            }
+            Button {
+                app.addToQueue(track)
+            } label: {
+                Label("Add to Queue", systemImage: "text.badge.plus")
+            }
+            Divider()
+            Button {
+                let url = "https://open.spotify.com/track/\(track.id)"
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(url, forType: .string)
+            } label: {
+                Label("Copy Song Link", systemImage: "link")
+            }
+        }
         .onTapGesture(count: 2) {
             app.play(track: track, contextKey: contextKey)
         }

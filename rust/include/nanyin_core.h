@@ -42,6 +42,12 @@ int32_t nanyin_next(void);
 int32_t nanyin_prev(void);
 int32_t nanyin_seek(uint32_t position_ms);
 int32_t nanyin_set_volume(uint16_t volume);
+int32_t nanyin_shuffle(bool on);
+int32_t nanyin_repeat(bool on);
+int32_t nanyin_repeat_track(bool on);
+
+/// Appends a track (spotify:track:...) to the active queue.
+int32_t nanyin_add_to_queue(const char* track_uri);
 
 /// 1 if playing, 0 otherwise.
 int32_t nanyin_is_playing(void);

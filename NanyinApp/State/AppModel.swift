@@ -79,6 +79,14 @@ final class AppModel {
     // the model (including every track row) — PlayerBar ticks it locally.
     private(set) var durationMs: UInt32 = 0
     private(set) var volume: Double = 1.0 // 0…1
+    private(set) var shuffle = false
+    /// Classic client repeat: off / all(context) / one(track).
+    enum RepeatMode: Equatable {
+        case off
+        case all
+        case one
+    }
+    private(set) var repeatMode: RepeatMode = .off
 
     struct NowPlaying {
         let uri: String
@@ -123,6 +131,8 @@ final class AppModel {
         installCoreCallbacks()
     }
 
+    private var nowPlayingMgr: NowPlayingManager { NowPlayingManager.shared }
+
     func start() {
         Task {
             do {
@@ -134,6 +144,7 @@ final class AppModel {
                 apply(playbackToken: playback)
                 dlog("refresh OK, init player…")
                 try await initPlayerAndUser()
+                nowPlayingMgr.activate()
                 authState = .loggedIn
                 dlog("logged in (silent)")
             } catch {
@@ -152,6 +163,7 @@ final class AppModel {
                 apply(webToken: tokens.web)
                 apply(playbackToken: tokens.playback)
                 try await initPlayerAndUser()
+                nowPlayingMgr.activate()
                 authState = .loggedIn
             } catch {
                 authError = error.localizedDescription
@@ -340,13 +352,15 @@ final class AppModel {
         case .playing:
             isPlaying = true
             isBuffering = false
+            pushNowPlayingInfo()
         case let .paused(_, positionMs):
             isPlaying = false
-            // Rare low-frequency update; PlayerBar interpolates via Core polling.
             _ = positionMs
+            pushNowPlayingInfo()
         case .stopped:
             isPlaying = false
             isBuffering = false
+            pushNowPlayingInfo()
         case let .loading(uri, _):
             isBuffering = true
             fetchMetadata(uri: uri)
@@ -369,8 +383,17 @@ final class AppModel {
             }
         case .position:
             break // position handled by PlayerBar's local Core.positionMs polling
+        case let .shuffleChanged(on):
+            shuffle = on
+        case let .repeatChanged(context, track):
+            switch (context, track) {
+            case (true, true): repeatMode = .one
+            case (true, false): repeatMode = .all
+            case (false, true): repeatMode = .one
+            case (false, false): repeatMode = .off
+            }
         case .endOfTrack:
-            break // M2: auto-advance handling; Spirc usually advances itself
+            break // Spirc auto-advances within the context
         }
     }
 
@@ -445,6 +468,43 @@ final class AppModel {
         } else {
             _ = Core.resume()
         }
+    }
+
+    /// Mirrors current state into Control Center / lock screen.
+    private func pushNowPlayingInfo() {
+        guard let np = nowPlaying else {
+            nowPlayingMgr.clear()
+            return
+        }
+        nowPlayingMgr.updateNowPlaying(
+            title: np.title,
+            artist: np.artist,
+            album: np.album,
+            durationMs: durationMs,
+            positionMs: Core.positionMs,
+            isPlaying: isPlaying,
+            artworkURL: np.artworkURL
+        )
+    }
+
+    func toggleShuffle() {
+        shuffle.toggle()
+        _ = Core.setShuffle(shuffle)
+    }
+
+    func cycleRepeat() {
+        switch repeatMode {
+        case .off: repeatMode = .all
+        case .all: repeatMode = .one
+        case .one: repeatMode = .off
+        }
+        _ = Core.setRepeat(repeatMode != .off)
+        _ = Core.setRepeatTrack(repeatMode == .one)
+    }
+
+    /// Appends to the active queue (right-click → Add to queue).
+    func addToQueue(_ track: SpotifyClient.Track) {
+        _ = Core.addToQueue(track.uri)
     }
 
     func seek(to fraction: Double) {

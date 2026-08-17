@@ -25,6 +25,8 @@ enum Core {
             album: String?,
             coverURL: String?
         )
+        case shuffleChanged(Bool)
+        case repeatChanged(context: Bool, track: Bool)
         case endOfTrack
     }
 
@@ -92,6 +94,12 @@ enum Core {
                 coverURL: object["cover_url"] as? String
             )
         case "end_of_track": event = .endOfTrack
+        case "shuffle_changed": event = .shuffleChanged(object["shuffle"] as? Bool ?? false)
+        case "repeat_changed":
+            event = .repeatChanged(
+                context: object["repeat_context"] as? Bool ?? false,
+                track: object["repeat_track"] as? Bool ?? false
+            )
         default: return
         }
 
@@ -125,6 +133,12 @@ enum Core {
     nonisolated static func prev() -> Int32 { nanyin_prev() }
     nonisolated static func seek(_ positionMs: UInt32) -> Int32 { nanyin_seek(positionMs) }
     nonisolated static func setVolume(_ volume: UInt16) -> Int32 { nanyin_set_volume(volume) }
+    nonisolated static func setShuffle(_ on: Bool) -> Int32 { nanyin_shuffle(on) }
+    nonisolated static func setRepeat(_ on: Bool) -> Int32 { nanyin_repeat(on) }
+    nonisolated static func setRepeatTrack(_ on: Bool) -> Int32 { nanyin_repeat_track(on) }
+    nonisolated static func addToQueue(_ uri: String) -> Int32 {
+        uri.withCString { nanyin_add_to_queue($0) }
+    }
 
     nonisolated static var isPlaying: Bool { nanyin_is_playing() == 1 }
     nonisolated static var positionMs: UInt32 { nanyin_get_position_ms() }

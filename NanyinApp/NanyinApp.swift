@@ -5,8 +5,20 @@
 
 import SwiftUI
 
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    static var shared: AppDelegate?
+    let appModel = AppModel()
+
+    override init() {
+        super.init()
+        Self.shared = self
+    }
+}
+
 @main
 struct NanyinApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @State private var appModel = AppModel()
 
     var body: some Scene {

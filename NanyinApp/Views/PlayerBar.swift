@@ -64,8 +64,26 @@ struct PlayerBar: View {
             }
             .frame(maxWidth: .infinity)
 
-            // Volume (right)
-            HStack(spacing: 8) {
+            // Shuffle/repeat/volume (right)
+            HStack(spacing: 12) {
+                Button {
+                    app.toggleShuffle()
+                } label: {
+                    Image(systemName: "shuffle")
+                        .font(.system(size: 11))
+                        .foregroundStyle(app.shuffle ? Theme.accent : Theme.textSecondary)
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    app.cycleRepeat()
+                } label: {
+                    Image(systemName: app.repeatMode == .one ? "repeat.1" : "repeat")
+                        .font(.system(size: 11))
+                        .foregroundStyle(app.repeatMode == .off ? Theme.textSecondary : Theme.accent)
+                }
+                .buttonStyle(.plain)
+
                 Image(systemName: "speaker.fill")
                     .font(.system(size: 10))
                     .foregroundStyle(Theme.textSecondary)
