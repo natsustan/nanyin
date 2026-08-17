@@ -110,4 +110,11 @@ enum Core {
     nonisolated static var isPlaying: Bool { nanyin_is_playing() == 1 }
     nonisolated static var positionMs: UInt32 { nanyin_get_position_ms() }
     nonisolated static var durationMs: UInt32 { nanyin_get_duration_ms() }
+
+    /// Last error message from the Rust core (nil when none). Frees the C string.
+    nonisolated static func lastErrorMessage() -> String? {
+        guard let ptr = nanyin_last_error() else { return nil }
+        defer { nanyin_free_string(ptr) }
+        return String(cString: ptr)
+    }
 }

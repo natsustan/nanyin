@@ -61,6 +61,26 @@ static POSITION_TS_MS: AtomicU64 = AtomicU64::new(0);
 static DURATION_MS: AtomicU32 = AtomicU32::new(0);
 static CURRENT_URI: Mutex<Option<String>> = Mutex::new(None);
 
+static LAST_ERROR: Mutex<Option<String>> = Mutex::new(None);
+
+fn set_last_error(msg: &str) {
+    *LAST_ERROR.lock().unwrap() = Some(msg.to_string());
+}
+
+/// Returns the last error message from a failed call (caller must free with
+/// nanyin_free_string), or NULL.
+#[no_mangle]
+pub extern "C" fn nanyin_last_error() -> *mut c_char {
+    let guard = LAST_ERROR.lock().unwrap();
+    match guard.as_ref() {
+        Some(msg) => match CString::new(msg.clone()) {
+            Ok(s) => s.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        },
+        None => std::ptr::null_mut(),
+    }
+}
+
 // ============================================================================
 // Callbacks
 // ============================================================================
@@ -157,31 +177,42 @@ fn dirs_home_cache() -> Option<std::path::PathBuf> {
 #[no_mangle]
 pub extern "C" fn nanyin_init_player(access_token: *const c_char) -> i32 {
     let _ = env_logger::try_init();
+    eprintln!("nanyin_core: init_player called");
 
     if access_token.is_null() {
-        log::debug!("nanyin_init_player: access_token is null");
+        eprintln!("nanyin_core: init_player: token is null");
         return -1;
     }
     let token = unsafe {
         match CStr::from_ptr(access_token).to_str() {
             Ok(s) => s.to_string(),
-            Err(_) => return -1,
+            Err(_) => {
+                eprintln!("nanyin_core: init_player: invalid utf8 token");
+                return -1;
+            }
         }
     };
 
     {
         let guard = SESSION.lock().unwrap();
         if guard.is_some() {
-            return 0; // already initialized
+            eprintln!("nanyin_core: init_player: already initialized");
+            return 0;
         }
     }
 
     SHUTTING_DOWN.store(false, Ordering::SeqCst);
 
-    match RUNTIME.block_on(init_player_async(&token)) {
-        Ok(()) => 0,
+    let result = RUNTIME.block_on(init_player_async(&token));
+
+    match result {
+        Ok(()) => {
+            eprintln!("nanyin_core: init_player OK");
+            0
+        }
         Err(e) => {
-            log::debug!("nanyin_init_player failed: {e}");
+            eprintln!("nanyin_core: init_player FAILED: {e}");
+            set_last_error(&e);
             -1
         }
     }
@@ -189,6 +220,7 @@ pub extern "C" fn nanyin_init_player(access_token: *const c_char) -> i32 {
 
 async fn init_player_async(access_token: &str) -> Result<(), String> {
     let device_id = format!("nanyin_{}", std::process::id());
+    eprintln!("nanyin_core: init_player_async starting (device {device_id})");
 
     let session_config = SessionConfig {
         device_id: device_id.clone(),
@@ -211,10 +243,8 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
     };
 
     let session = Session::new(session_config, cache);
-    session
-        .connect(credentials.clone(), true)
-        .await
-        .map_err(|e| format!("session connect: {e:?}"))?;
+    // NOTE: do NOT connect here — Spirc::new() registers dealer listeners first
+    // and then connects the session itself. Connecting twice yields NotConnected.
 
     let mixer: Arc<SoftMixer> = Arc::new(
         SoftMixer::open(MixerConfig::default()).map_err(|e| format!("mixer: {e}"))?,

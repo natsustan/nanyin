@@ -6,6 +6,11 @@
 import Foundation
 import Observation
 
+/// Unbuffered debug logging to stderr (survives process kill, unlike print).
+func dlog(_ message: @autoclosure () -> String) {
+    FileHandle.standardError.write(Data("[nanyin] \(message())\n".utf8))
+}
+
 /// App-wide state: auth, playback, and glue between Web API and the Rust core.
 @Observable
 @MainActor
@@ -17,14 +22,20 @@ final class AppModel {
         case loggedIn
     }
 
+    struct PlayerInitError: Error, LocalizedError {
+        let message: String
+        init(detail: String) { message = detail }
+        var errorDescription: String? { message }
+    }
+
     // MARK: - Auth
 
     private(set) var authState: AuthState = .checking
     private(set) var userDisplayName: String = ""
     private(set) var authError: String?
 
-    private var accessToken: String = ""
-    private var tokenExpiry: Date = .distantPast
+    private var playbackAccessToken: String = ""
+    private var webAccessToken: String = ""
     private var api: SpotifyClient?
 
     // MARK: - Playback
@@ -57,11 +68,18 @@ final class AppModel {
     func start() {
         Task {
             do {
-                let token = try await SpotifyAuth.refreshAccessToken()
-                apply(token: token)
+                dlog("silent refresh…")
+                let web = try await SpotifyAuth.refreshAccessToken(for: .web)
+                apply(webToken: web)
+                dlog("web refresh OK, playback refresh…")
+                let playback = try await SpotifyAuth.refreshAccessToken(for: .playback)
+                apply(playbackToken: playback)
+                dlog("refresh OK, init player…")
                 try await initPlayerAndUser()
                 authState = .loggedIn
+                dlog("logged in (silent)")
             } catch {
+                dlog("silent login failed: \(error)")
                 authState = .loggedOut
             }
         }
@@ -72,8 +90,9 @@ final class AppModel {
         authError = nil
         Task {
             do {
-                let token = try await SpotifyAuth.signIn()
-                apply(token: token)
+                let tokens = try await SpotifyAuth.signIn()
+                apply(webToken: tokens.web)
+                apply(playbackToken: tokens.playback)
                 try await initPlayerAndUser()
                 authState = .loggedIn
             } catch {
@@ -86,26 +105,38 @@ final class AppModel {
     func signOut() {
         Core.stop()
         AudioRenderer.shared.stop()
-        SpotifyAuth.storedRefreshToken = nil
-        accessToken = ""
+        SpotifyAuth.setRefreshToken(nil, for: .web)
+        SpotifyAuth.setRefreshToken(nil, for: .playback)
+        playbackAccessToken = ""
+        webAccessToken = ""
         api = nil
         nowPlaying = nil
         authState = .loggedOut
     }
 
-    private func apply(token: SpotifyAuth.Token) {
-        accessToken = token.accessToken
-        tokenExpiry = token.expiresAt
-        api = SpotifyClient(accessToken: token.accessToken)
+    private func apply(webToken: SpotifyAuth.Token) {
+        webAccessToken = webToken.accessToken
+        api = SpotifyClient(accessToken: webToken.accessToken)
+    }
+
+    private func apply(playbackToken: SpotifyAuth.Token) {
+        playbackAccessToken = playbackToken.accessToken
     }
 
     private func initPlayerAndUser() async throws {
-        let rc = Core.initializePlayer(accessToken: accessToken)
+        let rc = Core.initializePlayer(accessToken: playbackAccessToken)
         guard rc == 0 else {
-            throw SpotifyClient.APIError.http(Int(rc), "player init failed")
+            let detail = Core.lastErrorMessage() ?? "unknown"
+            dlog("player init rc=\(rc): \(detail)")
+            throw PlayerInitError(detail: "Player init failed (rc \(rc)): \(detail)")
         }
-        if let profile = try? await api?.currentUser() {
-            userDisplayName = profile.displayName ?? profile.id
+        do {
+            if let profile = try await api?.currentUser() {
+                userDisplayName = profile.displayName ?? profile.id
+                dlog("/v1/me OK — \(userDisplayName)")
+            }
+        } catch {
+            dlog("/v1/me failed: \(error)")
         }
     }
 
@@ -184,9 +215,9 @@ final class AppModel {
         connectionNote = "Reconnecting…"
         Task {
             do {
-                let token = try await SpotifyAuth.refreshAccessToken()
-                apply(token: token)
-                let rc = Core.initializePlayer(accessToken: accessToken)
+                let token = try await SpotifyAuth.refreshAccessToken(for: .playback)
+                apply(playbackToken: token)
+                let rc = Core.initializePlayer(accessToken: playbackAccessToken)
                 if rc == 0 {
                     connectionNote = nil
                 } else {

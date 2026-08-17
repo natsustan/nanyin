@@ -76,7 +76,7 @@ struct SpotifyClient {
         self.accessToken = accessToken
     }
 
-    private func get<T: Decodable>(_ path: String, query: [String: String] = [:]) async throws -> T {
+    private func get<T: Decodable>(_ path: String, query: [String: String] = [:], retries: Int = 2) async throws -> T {
         var components = URLComponents(string: "https://api.spotify.com\(path)")!
         if !query.isEmpty {
             components.queryItems = query.map { .init(name: $0.key, value: $0.value) }
@@ -85,13 +85,25 @@ struct SpotifyClient {
         req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Accept")
 
-        let (data, response) = try await URLSession.shared.data(for: req)
-        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        guard status == 200 else {
+        var attempt = 0
+        while true {
+            let (data, response) = try await URLSession.shared.data(for: req)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            if status == 200 {
+                return try JSONDecoder().decode(T.self, from: data)
+            }
+            // 429: honor Retry-After, retry a bounded number of times (cliamp pattern).
+            if status == 429, attempt < retries {
+                let retryAfter = Double((response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Retry-After") ?? "") ?? 2.0
+                let wait = min(max(retryAfter, 1.0), 30.0)
+                dlog("web api 429 on \(path), retrying in \(wait)s")
+                try await Task.sleep(for: .seconds(wait))
+                attempt += 1
+                continue
+            }
             if status == 401 { throw APIError.needsAuth }
             throw APIError.http(status, String(data: data, encoding: .utf8) ?? "")
         }
-        return try JSONDecoder().decode(T.self, from: data)
     }
 
     func currentUser() async throws -> UserProfile {

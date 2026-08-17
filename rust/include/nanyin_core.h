@@ -43,6 +43,10 @@ int32_t nanyin_is_playing(void);
 /// Current playback position in ms (interpolated while playing).
 uint32_t nanyin_get_position_ms(void);
 
+/// Last error message from a failed call, or NULL.
+/// Caller must free the returned string with nanyin_free_string.
+char* nanyin_last_error(void);
+
 /// Duration of the current track in ms (0 if unknown).
 uint32_t nanyin_get_duration_ms(void);
 

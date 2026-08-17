@@ -9,13 +9,43 @@ import Foundation
 import Network
 
 /// Spotify OAuth (Authorization Code + PKCE) against a local loopback redirect.
-/// Single flow with the keymaster client: the resulting token works for both
-/// the Web API and librespot playback (same strategy as cliamp).
+///
+/// Two chained flows in ONE browser journey (cliamp's dual-client strategy):
+///   1. Web API access via ncspot's production-approved client (own quota —
+///      the keymaster pool is globally rate-limited).
+///   2. Playback credential via the librespot keymaster client (accepted by
+///      login5).
 enum SpotifyAuth {
+    enum TokenKind: String {
+        case web // ncspot client — Web API
+        case playback // keymaster client — librespot session
+
+        var clientId: String {
+            switch self {
+            case .web: SpotifyConfig.webApiClientId
+            case .playback: SpotifyConfig.playbackClientId
+            }
+        }
+
+        var scopes: [String] {
+            switch self {
+            case .web: SpotifyConfig.webApiScopes
+            case .playback: SpotifyConfig.playbackScopes
+            }
+        }
+
+        var keychainKey: String {
+            switch self {
+            case .web: "web_refresh_token"
+            case .playback: "playback_refresh_token"
+            }
+        }
+    }
+
     struct Token: Codable {
         let accessToken: String
         let refreshToken: String?
-        let expiresAt: Date // derived: now + expires_in
+        let expiresAt: Date
     }
 
     enum AuthError: Error, LocalizedError {
@@ -36,22 +66,32 @@ enum SpotifyAuth {
         }
     }
 
-    // MARK: - Token persistence (refresh token in Keychain)
+    // MARK: - Token persistence
 
-    static var storedRefreshToken: String? {
-        get { KeychainStore.string(forKey: "refresh_token") }
-        set {
-            if let newValue {
-                KeychainStore.setString(newValue, forKey: "refresh_token")
-            } else {
+    static func storedRefreshToken(for kind: TokenKind) -> String? {
+        // Migrate: the original single-flow keymaster token (all scopes incl.
+        // streaming) works as the playback refresh token.
+        if kind == .playback, KeychainStore.string(forKey: kind.keychainKey) == nil {
+            if let legacy = KeychainStore.string(forKey: "refresh_token") {
+                KeychainStore.setString(legacy, forKey: kind.keychainKey)
                 KeychainStore.delete(forKey: "refresh_token")
+                return legacy
             }
+        }
+        return KeychainStore.string(forKey: kind.keychainKey)
+    }
+
+    static func setRefreshToken(_ token: String?, for kind: TokenKind) {
+        if let token {
+            KeychainStore.setString(token, forKey: kind.keychainKey)
+        } else {
+            KeychainStore.delete(forKey: kind.keychainKey)
         }
     }
 
-    /// Refreshes the access token with the stored refresh token (no browser).
-    static func refreshAccessToken() async throws -> Token {
-        guard let refreshToken = storedRefreshToken else {
+    /// Refreshes the access token of the given kind (no browser).
+    static func refreshAccessToken(for kind: TokenKind) async throws -> Token {
+        guard let refreshToken = storedRefreshToken(for: kind) else {
             throw AuthError.refreshFailed("no stored refresh token")
         }
         var req = URLRequest(url: URL(string: "https://accounts.spotify.com/api/token")!)
@@ -60,7 +100,7 @@ enum SpotifyAuth {
         let body = [
             "grant_type": "refresh_token",
             "refresh_token": refreshToken,
-            "client_id": SpotifyConfig.clientId,
+            "client_id": kind.clientId,
         ]
         .map { "\($0)=\(escape($1))" }
         .joined(separator: "&")
@@ -70,48 +110,81 @@ enum SpotifyAuth {
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
             throw AuthError.refreshFailed(String(data: data, encoding: .utf8) ?? "unknown")
         }
-        return try decodeToken(data)
+        return try decodeToken(data, for: kind)
     }
 
-    // MARK: - Interactive flow
+    // MARK: - Interactive flow (two chained authorizations, one browser tab)
 
-    /// Runs the full PKCE flow: opens the browser, listens on the loopback
-    /// redirect, exchanges the code. Returns the token.
-    static func signIn() async throws -> Token {
-        let verifier = generateCodeVerifier()
-        let challenge = generateCodeChallenge(from: verifier)
-        let state = generateCodeVerifier()
+    /// Runs both flows: opens the browser once; after the first callback the
+    /// page redirects to the second authorization; returns both tokens.
+    static func signIn() async throws -> (web: Token, playback: Token) {
+        let webFlow = Flow(kind: .web)
+        let playbackFlow = Flow(kind: .playback)
 
-        // 1. Start the loopback listener before opening the browser.
-        let waiter = try LoopbackWaiter(port: SpotifyConfig.loopbackPort)
+        let waiter = try LoopbackWaiter(port: SpotifyConfig.loopbackPort, flows: [webFlow, playbackFlow])
 
-        // 2. Build the authorize URL and open it.
-        var components = URLComponents(string: "https://accounts.spotify.com/authorize")!
-        components.queryItems = [
-            .init(name: "client_id", value: SpotifyConfig.clientId),
-            .init(name: "response_type", value: "code"),
-            .init(name: "redirect_uri", value: SpotifyConfig.redirectUri),
-            .init(name: "code_challenge_method", value: "S256"),
-            .init(name: "code_challenge", value: challenge),
-            .init(name: "state", value: state),
-            .init(name: "scope", value: SpotifyConfig.scopes.joined(separator: " ")),
-        ]
-        guard let url = components.url else {
-            throw AuthError.loopbackListenerFailed("bad authorize URL")
+        NSWorkspace.shared.open(URL(string: webFlow.authorizeURL)!)
+
+        let callbacks = try await waiter.waitForCallbacks()
+        guard callbacks.count == 2 else {
+            throw AuthError.noAuthorizationCode
         }
-        NSWorkspace.shared.open(url)
 
-        // 3. Wait for the callback (browser hits 127.0.0.1:19873/login).
-        let callback = try await waiter.waitForCallback()
+        let webToken = try await exchange(callbacks[0], flow: webFlow)
+        let playbackToken = try await exchange(callbacks[1], flow: playbackFlow)
+        return (webToken, playbackToken)
+    }
 
-        guard callback.state == state else {
+    struct Flow {
+        let kind: TokenKind
+        let verifier: String
+        let state: String
+
+        init(kind: TokenKind) {
+            self.kind = kind
+            verifier = Self.generateCodeVerifier()
+            state = Self.generateCodeVerifier()
+        }
+
+        var authorizeURL: String {
+            var components = URLComponents(string: "https://accounts.spotify.com/authorize")!
+            components.queryItems = [
+                .init(name: "client_id", value: kind.clientId),
+                .init(name: "response_type", value: "code"),
+                .init(name: "redirect_uri", value: SpotifyConfig.redirectUri),
+                .init(name: "code_challenge_method", value: "S256"),
+                .init(name: "code_challenge", value: Self.generateCodeChallenge(from: verifier)),
+                .init(name: "state", value: state),
+                .init(name: "scope", value: kind.scopes.joined(separator: " ")),
+            ]
+            return components.url!.absoluteString
+        }
+
+        static func generateCodeVerifier() -> String {
+            var bytes = [UInt8](repeating: 0, count: 32)
+            _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+            return base64URLEncode(Data(bytes))
+        }
+
+        static func generateCodeChallenge(from verifier: String) -> String {
+            base64URLEncode(Data(SHA256.hash(data: Data(verifier.utf8))))
+        }
+
+        static func base64URLEncode(_ data: Data) -> String {
+            data.base64EncodedString()
+                .replacing("+", with: "-")
+                .replacing("/", with: "_")
+                .replacing("=", with: "")
+        }
+    }
+
+    private static func exchange(_ callback: LoopbackWaiter.Callback, flow: Flow) async throws -> Token {
+        guard callback.state == flow.state else {
             throw AuthError.loopbackListenerFailed("state mismatch")
         }
         guard let code = callback.code else {
             throw AuthError.noAuthorizationCode
         }
-
-        // 4. Exchange the code for tokens.
         var req = URLRequest(url: URL(string: "https://accounts.spotify.com/api/token")!)
         req.httpMethod = "POST"
         req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
@@ -119,8 +192,8 @@ enum SpotifyAuth {
             "grant_type": "authorization_code",
             "code": code,
             "redirect_uri": SpotifyConfig.redirectUri,
-            "client_id": SpotifyConfig.clientId,
-            "code_verifier": verifier,
+            "client_id": flow.kind.clientId,
+            "code_verifier": flow.verifier,
         ]
         .map { "\($0)=\(escape($1))" }
         .joined(separator: "&")
@@ -130,51 +203,38 @@ enum SpotifyAuth {
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
             throw AuthError.tokenExchangeFailed(String(data: data, encoding: .utf8) ?? "unknown")
         }
-        return try decodeToken(data)
+        return try decodeToken(data, for: flow.kind)
     }
 
     // MARK: - Helpers
 
-    private static func decodeToken(_ data: Data) throws -> Token {
+    private static func decodeToken(_ data: Data, for kind: TokenKind) throws -> Token {
         struct Response: Decodable {
             let access_token: String
             let refresh_token: String?
             let expires_in: Int
         }
         let r = try JSONDecoder().decode(Response.self, from: data)
-        let expiresAt = Date().addingTimeInterval(TimeInterval(r.expires_in))
         if let refresh = r.refresh_token {
-            storedRefreshToken = refresh
+            setRefreshToken(refresh, for: kind)
         }
-        return Token(accessToken: r.access_token, refreshToken: r.refresh_token, expiresAt: expiresAt)
+        return Token(
+            accessToken: r.access_token,
+            refreshToken: r.refresh_token,
+            expiresAt: Date().addingTimeInterval(TimeInterval(r.expires_in))
+        )
     }
 
     private static func escape(_ s: String) -> String {
         s.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? s
     }
-
-    private static func base64URLEncode(_ data: Data) -> String {
-        data.base64EncodedString()
-            .replacing("+", with: "-")
-            .replacing("/", with: "_")
-            .replacing("=", with: "")
-    }
-
-    private static func generateCodeVerifier() -> String {
-        var bytes = [UInt8](repeating: 0, count: 32)
-        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
-        return base64URLEncode(Data(bytes))
-    }
-
-    private static func generateCodeChallenge(from verifier: String) -> String {
-        base64URLEncode(Data(SHA256.hash(data: Data(verifier.utf8))))
-    }
 }
 
-// MARK: - Loopback listener
+// MARK: - Loopback listener (chained redirects)
 
-/// Listens on 127.0.0.1:port, accepts a single /login callback, replies with a
-/// small success page, then stops.
+/// Listens on 127.0.0.1:port; drives a chain of OAuth callbacks: each
+/// intermediate callback gets a 302 to the next flow's authorize URL, the
+/// last one gets the success page.
 private final class LoopbackWaiter {
     struct Callback {
         let code: String?
@@ -182,15 +242,19 @@ private final class LoopbackWaiter {
     }
 
     private let listener: NWListener
-    private var continuation: CheckedContinuation<Callback, Error>?
+    private let flows: [SpotifyAuth.Flow]
+    private var received: [Callback] = []
+    private var continuation: CheckedContinuation<[Callback], Error>?
+    private let queue = DispatchQueue(label: "com.nanyin.auth.loopback")
 
-    init(port: UInt16) throws {
+    init(port: UInt16, flows: [SpotifyAuth.Flow]) throws {
+        self.flows = flows
         let params = NWParameters.tcp
         params.allowLocalEndpointReuse = true
         listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: port)!)
     }
 
-    func waitForCallback() async throws -> Callback {
+    func waitForCallbacks() async throws -> [Callback] {
         try await withCheckedThrowingContinuation { cont in
             continuation = cont
             listener.newConnectionHandler = { [weak self] connection in
@@ -198,20 +262,21 @@ private final class LoopbackWaiter {
             }
             listener.stateUpdateHandler = { [weak self] state in
                 if case .failed(let error) = state {
-                    self?.continuation?.resume(throwing: SpotifyAuth.AuthError.loopbackListenerFailed(error.localizedDescription))
-                    self?.continuation = nil
+                    self?.fail(SpotifyAuth.AuthError.loopbackListenerFailed(error.localizedDescription))
                 }
             }
-            listener.start(queue: .global(qos: .userInitiated))
+            listener.start(queue: queue)
         }
     }
 
-    private func handle(_ connection: NWConnection) {
-        connection.start(queue: .global(qos: .userInitiated))
-        receiveRequest(connection)
+    private func fail(_ error: Error) {
+        continuation?.resume(throwing: error)
+        continuation = nil
+        listener.cancel()
     }
 
-    private func receiveRequest(_ connection: NWConnection) {
+    private func handle(_ connection: NWConnection) {
+        connection.start(queue: queue)
         connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { [weak self] data, _, _, error in
             guard let self, error == nil, let data,
                   let request = String(data: data, encoding: .utf8),
@@ -220,16 +285,40 @@ private final class LoopbackWaiter {
                 connection.cancel()
                 return
             }
+            self.handleRequest(String(firstLine), connection: connection)
+        }
+    }
 
-            // "GET /login?code=...&state=... HTTP/1.1"
-            let parts = firstLine.split(separator: " ")
-            guard parts.count >= 2 else {
-                connection.cancel()
-                return
+    private func handleRequest(_ firstLine: String, connection: NWConnection) {
+        let parts = firstLine.split(separator: " ")
+        guard parts.count >= 2 else {
+            connection.cancel()
+            return
+        }
+        let path = String(parts[1])
+
+        guard let queryStart = path.firstIndex(of: "?") else {
+            connection.cancel()
+            return
+        }
+        var params: [String: String] = [:]
+        for pair in String(path[path.index(after: queryStart)...]).split(separator: "&") {
+            let kv = pair.split(separator: "=", maxSplits: 1)
+            if kv.count == 2 {
+                params[String(kv[0]).removingPercentEncoding ?? String(kv[0])] =
+                    String(kv[1]).removingPercentEncoding ?? String(kv[1])
             }
-            let path = String(parts[1])
+        }
 
-            // Respond with a minimal success page.
+        let callback = Callback(code: params["code"], state: params["state"])
+
+        // Respond: redirect to next flow, or final success page.
+        let response: String
+        if received.count + 1 < flows.count, let code = callback.code {
+            response = """
+            HTTP/1.1 302 Found\r\nLocation: \(flows[received.count + 1].authorizeURL)\r\nConnection: close\r\n\r\n
+            """
+        } else {
             let body = """
             <!DOCTYPE html><html><head><meta charset="utf-8"><title>nanyin</title></head>
             <body style="font-family:system-ui;background:#121212;color:#fff;display:flex;justify-content:center;align-items:center;height:100vh;margin:0">
@@ -237,28 +326,26 @@ private final class LoopbackWaiter {
             <script>setTimeout(function(){window.close()},1500)</script>
             </body></html>
             """
-            let response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)"
-            connection.send(content: Data(response.utf8), completion: .contentProcessed { _ in
-                connection.cancel()
+            response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)"
+        }
+
+        connection.send(content: Data(response.utf8), completion: .contentProcessed { _ in
+            connection.cancel()
+            if self.received.count + 1 >= self.flows.count {
                 self.listener.cancel()
-            })
-
-            // Parse query params.
-            guard let queryStart = path.firstIndex(of: "?") else { return }
-            let query = String(path[path.index(after: queryStart)...])
-            var params: [String: String] = [:]
-            for pair in query.split(separator: "&") {
-                let kv = pair.split(separator: "=", maxSplits: 1)
-                if kv.count == 2 {
-                    params[String(kv[0]).removingPercentEncoding ?? String(kv[0])] =
-                        String(kv[1]).removingPercentEncoding ?? String(kv[1])
-                }
             }
+        })
 
-            if let cont = continuation {
+        // Only record callbacks whose state matches the expected flow.
+        if let state = callback.state, flows[received.count].state == state {
+            received.append(callback)
+            if received.count == flows.count {
+                continuation?.resume(returning: received)
                 continuation = nil
-                cont.resume(returning: Callback(code: params["code"], state: params["state"]))
             }
+        } else if callback.code == nil {
+            // Error callback (user denied) — fail the flow.
+            fail(SpotifyAuth.AuthError.noAuthorizationCode)
         }
     }
 }

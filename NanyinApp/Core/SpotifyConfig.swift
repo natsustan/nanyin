@@ -4,25 +4,27 @@
 //
 
 enum SpotifyConfig {
-    /// The librespot keymaster client_id — shared by librespot, spotify-player
-    /// and cliamp. Predates Spotify's Nov 27 2024 dev-mode quota restriction,
-    /// so catalog endpoints (/v1/search) keep working, and login5 accepts
-    /// playback credentials minted by it (cliamp).
-    nonisolated static let clientId = "65b708073fc0480ea92a077233ca87bd"
+    /// Web API client: ncspot's published client_id (same one NullSpot uses).
+    /// Production-approved (not Dev Mode) → own rate-limit quota and catalog
+    /// endpoints (/v1/search) work. Registered redirect: 127.0.0.1:8989/login.
+    nonisolated static let webApiClientId = "d420a117a32841c2b3474932e49fb54b"
 
-    /// Loopback redirect for the OAuth flow. Spotify's loopback exception
-    /// allows any port on 127.0.0.1 (RFC 8252); 19873 avoids cliamp (19872)
-    /// and NullSpot (8989).
-    nonisolated static let redirectUri = "http://127.0.0.1:19873/login"
-    nonisolated static let loopbackPort: UInt16 = 19_873
+    /// Playback client: the librespot keymaster client_id (shared by librespot,
+    /// spotify-player, cliamp). Accepted by login5 for playback sessions
+    /// (verified working). Any 127.0.0.1 port is allowed for it.
+    nonisolated static let playbackClientId = "65b708073fc0480ea92a077233ca87bd"
 
-    /// OAuth scopes (same set cliamp requests in its single keymaster flow).
-    nonisolated static let scopes: [String] = [
+    /// ncspot's client_id is registered with this exact loopback redirect.
+    /// Both flows run on this port (cliamp-style chained redirects).
+    nonisolated static let redirectUri = "http://127.0.0.1:8989/login"
+    nonisolated static let loopbackPort: UInt16 = 8989
+
+    /// Web API scopes (metadata, library, playlists).
+    nonisolated static let webApiScopes: [String] = [
         "playlist-read-collaborative",
         "playlist-read-private",
         "playlist-modify-public",
         "playlist-modify-private",
-        "streaming",
         "user-library-read",
         "user-library-modify",
         "user-read-private",
@@ -34,4 +36,7 @@ enum SpotifyConfig {
         "user-follow-read",
         "user-follow-modify",
     ]
+
+    /// Playback scopes for the keymaster flow (cliamp: only "streaming").
+    nonisolated static let playbackScopes: [String] = ["streaming"]
 }
