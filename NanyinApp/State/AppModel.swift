@@ -36,9 +36,39 @@ final class AppModel {
     private(set) var userId: String = ""
     private(set) var authError: String?
 
+    // MARK: - Token store (auto-refresh with in-flight dedup)
+
     private var playbackAccessToken: String = ""
     private var webAccessToken: String = ""
+    private var webTokenExpiry: Date = .distantPast
     private var api: SpotifyClient?
+    private var webRefreshInFlight: Task<SpotifyAuth.Token, Error>?
+
+    /// Returns a valid Web API access token, refreshing when near expiry.
+    /// Concurrent callers share one in-flight refresh.
+    private func ensureWebToken() async throws -> String {
+        if Date() < webTokenExpiry.addingTimeInterval(-60), !webAccessToken.isEmpty {
+            return webAccessToken
+        }
+        if let existing = webRefreshInFlight {
+            let token = try await existing.value
+            return token.accessToken
+        }
+        let task = Task<SpotifyAuth.Token, Error> {
+            try await SpotifyAuth.refreshAccessToken(for: .web)
+        }
+        webRefreshInFlight = task
+        defer { webRefreshInFlight = nil }
+        let token = try await task.value
+        apply(webToken: token)
+        return token.accessToken
+    }
+
+    /// Same as ensureWebToken but rebuilds the API client with a fresh token.
+    private func refreshAPIClient() async {
+        guard let token = try? await ensureWebToken() else { return }
+        api = SpotifyClient(accessToken: token)
+    }
 
     // MARK: - Playback
 
@@ -83,6 +113,8 @@ final class AppModel {
     private(set) var tracksByContext: [String: [SpotifyClient.Track]] = [:]
     private(set) var loadingTracks = false
     private(set) var tracksError: [String: String] = [:]
+    /// Increments on every open() — stale load tasks compare and discard.
+    private var loadEpoch = 0
 
 
     // MARK: - Lifecycle
@@ -142,6 +174,7 @@ final class AppModel {
 
     private func apply(webToken: SpotifyAuth.Token) {
         webAccessToken = webToken.accessToken
+        webTokenExpiry = webToken.expiresAt
         api = SpotifyClient(accessToken: webToken.accessToken)
     }
 
@@ -192,8 +225,12 @@ final class AppModel {
         guard let key = newPage.contextKey, tracksByContext[key] == nil else { return }
         loadingTracks = true
         tracksError[key] = nil
+        let epoch = loadEpoch
+        loadEpoch += 1
         Task {
             do {
+                // Token may have expired while the app sat idle — revalidate.
+                await refreshAPIClient()
                 let tracks: [SpotifyClient.Track]
                 switch newPage {
                 case .liked:
@@ -204,12 +241,17 @@ final class AppModel {
                     loadingTracks = false
                     return
                 }
+                // Discard if the user navigated elsewhere mid-flight (P0-3).
+                guard epoch == loadEpoch else { return }
                 tracksByContext[key] = tracks
             } catch {
+                guard epoch == loadEpoch else { return }
                 tracksError[key] = error.localizedDescription
                 dlog("tracks load failed: \(error)")
             }
-            loadingTracks = false
+            if epoch == loadEpoch {
+                loadingTracks = false
+            }
         }
     }
 

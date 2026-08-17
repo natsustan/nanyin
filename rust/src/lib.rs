@@ -348,7 +348,22 @@ pub extern "C" fn nanyin_shutdown() -> i32 {
 fn handle_player_event(event: librespot_playback::player::PlayerEvent) {
     use librespot_playback::player::PlayerEvent;
 
-    eprintln!("nanyin_core: event {event:?}");
+    // Compact one-line event log (AudioItem dumps were unreadable noise).
+    if !matches!(event, PlayerEvent::PositionCorrection { .. }) {
+        let short = match &event {
+            PlayerEvent::Playing { track_id, .. } => format!("Playing {track_id}"),
+            PlayerEvent::Paused { track_id, .. } => format!("Paused {track_id}"),
+            PlayerEvent::Loading { track_id, .. } => format!("Loading {track_id}"),
+            PlayerEvent::Stopped { track_id, .. } => format!("Stopped {track_id}"),
+            PlayerEvent::TrackChanged { audio_item } => {
+                format!("TrackChanged {} ({})", audio_item.track_id, audio_item.name)
+            }
+            PlayerEvent::EndOfTrack { .. } => "EndOfTrack".to_string(),
+            PlayerEvent::Seeked { position_ms, .. } => format!("Seeked {position_ms}ms"),
+            other => format!("{other:?}"),
+        };
+        eprintln!("nanyin_core: {short}");
+    }
 
     match event {
         PlayerEvent::Loading { track_id, position_ms, .. } => {

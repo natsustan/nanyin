@@ -39,8 +39,31 @@ final nonisolated class AudioRenderer: @unchecked Sendable {
     private let renderQueue = DispatchQueue(label: "com.nanyin.audio.render", qos: .userInteractive)
     private var running = false
 
+    /// Restart the engine when the default output device changes
+    /// (headphones plugged/unplugged, bluetooth switch) — AVAudioEngine does
+    /// not re-route on its own.
+    private var deviceObserver: Any?
+
     private init() {
         // Leak the buffer intentionally (lives for the process lifetime).
+        deviceObserver = NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("AVAudioEngineConfigurationChangeNotification"),
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            self?.restartAfterRouteChange()
+        }
+    }
+
+    private func restartAfterRouteChange() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            NSLog("[nanyin] audio route changed — restarting engine")
+            let wasRunning: Bool = self.lock.withLock { self.running }
+            guard wasRunning else { return }
+            self.stop()
+            self.start()
+        }
     }
 
     // MARK: - Public API
@@ -131,6 +154,12 @@ final nonisolated class AudioRenderer: @unchecked Sendable {
         var offset = 0
         while offset < count {
             lock.lock()
+            if !running {
+                // Engine stopped mid-write (track switch / quit) — drop the
+                // rest instead of blocking forever on a full ring.
+                lock.unlock()
+                return
+            }
             let free = ringCapacity - filled
             if free == 0 {
                 lock.unlock()
