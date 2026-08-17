@@ -6,9 +6,8 @@
 import SwiftUI
 
 /// Classic flat track table: # / TITLE+ARTIST / ALBUM / duration.
+/// Built on List (NSTableView recycling) — the native 60Hz path on macOS.
 /// Single click selects, double-click plays from the context.
-/// Perf-critical: hover/selection state is row-local so mouse movement
-/// never invalidates the whole list.
 struct TrackListView: View {
     @Environment(AppModel.self) private var app
     let tracks: [SpotifyClient.Track]
@@ -20,20 +19,22 @@ struct TrackListView: View {
         VStack(spacing: 0) {
             header
             Divider().overlay(Color(white: 0.18))
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
-                        TrackRow(
-                            track: track,
-                            index: index,
-                            contextKey: contextKey,
-                            isSelected: selectedURI == track.uri
-                        ) {
-                            selectedURI = track.uri
-                        }
-                    }
+            List(selection: $selectedURI) {
+                ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
+                    TrackRow(
+                        track: track,
+                        index: index,
+                        contextKey: contextKey
+                    )
+                    .tag(track.uri)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
                 }
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .environment(\.defaultMinListRowHeight, 40)
         }
     }
 
@@ -53,6 +54,7 @@ struct TrackListView: View {
         .foregroundStyle(Theme.textSecondary)
         .padding(.horizontal, 24)
         .padding(.vertical, 8)
+        .background(Theme.background)
     }
 }
 
@@ -61,11 +63,8 @@ private struct TrackRow: View {
     let track: SpotifyClient.Track
     let index: Int
     let contextKey: String
-    let isSelected: Bool
-    let onSelect: () -> Void
 
-    /// Row-local hover state — the perf-critical part: crossing rows with the
-    /// mouse only invalidates the two rows involved, never the whole list.
+    /// Row-local hover state: crossing rows only invalidates the rows involved.
     @State private var hovering = false
 
     private var isCurrent: Bool { app.nowPlaying?.uri == track.uri }
@@ -79,6 +78,7 @@ private struct TrackRow: View {
                 } else if hovering {
                     Image(systemName: "play.fill")
                         .font(.system(size: 9))
+                        .foregroundStyle(.white)
                 } else {
                     Text("\(index + 1)")
                         .font(.system(size: 12, design: .monospaced))
@@ -114,19 +114,19 @@ private struct TrackRow: View {
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 7)
-        .background(
-            hovering && !isCurrent ? Theme.hover : (isSelected ? Color(white: 0.13) : .clear)
-        )
+        .background(rowBackground)
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
             app.play(track: track, contextKey: contextKey)
         }
-        .onTapGesture(count: 1) {
-            onSelect()
-        }
         .onHover { h in
             hovering = h
         }
+    }
+
+    private var rowBackground: Color {
+        if hovering && !isCurrent { return Theme.hover }
+        return .clear
     }
 }
 

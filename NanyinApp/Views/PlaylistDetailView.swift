@@ -43,11 +43,13 @@ struct PlaylistDetailView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ScrollView {
-                    VStack(spacing: 0) {
-                        header
-                        TrackListView(tracks: tracks, contextKey: contextKey)
-                    }
+                // Single scroll region: fixed header + recycling List (the List
+                // inside TrackListView is the ONLY scroller on this page —
+                // the previous nested-ScrollView layout caused scroll jank).
+                VStack(spacing: 0) {
+                    header
+                    Divider().overlay(Color(white: 0.18))
+                    TrackListView(tracks: tracks, contextKey: contextKey)
                 }
             }
         }
@@ -57,7 +59,7 @@ struct PlaylistDetailView: View {
     private var header: some View {
         HStack(spacing: 24) {
             cover
-                .frame(width: 160, height: 160)
+                .frame(width: 140, height: 140)
                 .cornerRadius(6)
                 .shadow(color: .black.opacity(0.5), radius: 12, y: 6)
 
@@ -67,7 +69,7 @@ struct PlaylistDetailView: View {
                     .tracking(1.2)
                     .foregroundStyle(Theme.textSecondary)
                 Text(title)
-                    .font(.system(size: 36, weight: .bold))
+                    .font(.system(size: 32, weight: .bold))
                     .foregroundStyle(.white)
                     .lineLimit(2)
                 Text(subtitle)
@@ -100,8 +102,9 @@ struct PlaylistDetailView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 28)
-        .padding(.top, 36)
-        .padding(.bottom, 24)
+        .padding(.top, 24)
+        .padding(.bottom, 20)
+        .background(Theme.background)
     }
 
     @ViewBuilder
