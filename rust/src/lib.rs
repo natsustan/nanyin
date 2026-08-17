@@ -464,10 +464,22 @@ pub extern "C" fn nanyin_play_tracks(track_uris_json: *const c_char) -> i32 {
         },
     );
 
+    eprintln!("nanyin_core: play_tracks → activate + load");
+    // Claim the active-device role first — Spirc ignores commands while
+    // this device is Not Active (the "ignored while Not Active" WARN).
+    if let Err(e) = spirc.activate() {
+        eprintln!("nanyin_core: play_tracks: activate FAILED: {e:?}");
+        set_last_error(&format!("activate: {e:?}"));
+        return -1;
+    }
     match spirc.load(request) {
-        Ok(()) => 0,
+        Ok(()) => {
+            eprintln!("nanyin_core: play_tracks: load command sent");
+            0
+        }
         Err(e) => {
-            log::debug!("nanyin_play_tracks: load failed ({e:?})");
+            eprintln!("nanyin_core: play_tracks: load FAILED: {e:?}");
+            set_last_error(&format!("load: {e:?}"));
             -1
         }
     }

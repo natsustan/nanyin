@@ -233,13 +233,15 @@ final class AppModel {
 
     func playURI(_ input: String) {
         var uri = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        if SpotifyClient.trackId(from: uri) != nil, !uri.hasPrefix("spotify:") {
-            // Convert URL form to URI form.
-            if let id = SpotifyClient.trackId(from: uri) {
-                uri = "spotify:track:\(id)"
-            }
+        if !uri.hasPrefix("spotify:"), let id = SpotifyClient.trackId(from: uri) {
+            uri = "spotify:track:\(id)"
         }
-        _ = Core.playTracks([uri])
+        dlog("playURI → \(uri)")
+        let rc = Core.playTracks([uri])
+        dlog("playTracks rc=\(rc)")
+        if rc == 0 {
+            isBuffering = true
+        }
     }
 
     func togglePlay() {

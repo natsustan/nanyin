@@ -266,6 +266,11 @@ private final class LoopbackWaiter {
                 }
             }
             listener.start(queue: queue)
+            // Safety timeout: never hang forever if the browser journey stalls.
+            queue.asyncAfter(deadline: .now() + 300) { [weak self] in
+                guard let self, self.continuation != nil else { return }
+                self.fail(SpotifyAuth.AuthError.userCancelled)
+            }
         }
     }
 
@@ -331,7 +336,9 @@ private final class LoopbackWaiter {
 
         connection.send(content: Data(response.utf8), completion: .contentProcessed { _ in
             connection.cancel()
-            if self.received.count + 1 >= self.flows.count {
+            // Only tear down the listener once ALL expected callbacks arrived
+            // (cancelling early would refuse the chained flow's redirect back).
+            if self.received.count >= self.flows.count {
                 self.listener.cancel()
             }
         })
