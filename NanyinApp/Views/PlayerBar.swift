@@ -8,6 +8,9 @@ import SwiftUI
 struct PlayerBar: View {
     @Environment(AppModel.self) private var app
     @State private var draggingProgress: Double?
+    /// Local playback-position tick — deliberately NOT in AppModel so the
+    /// 2Hz update only invalidates this bar, never the track list.
+    @State private var displayPosition: UInt32 = 0
 
     var body: some View {
         HStack(spacing: 0) {
@@ -76,10 +79,20 @@ struct PlayerBar: View {
             .padding(.trailing, 16)
         }
         .background(Theme.playerBar)
+        .task(id: app.nowPlaying?.uri) {
+            displayPosition = 0
+            while !Task.isCancelled {
+                if draggingProgress == nil {
+                    let p = Core.positionMs
+                    if p != displayPosition { displayPosition = p }
+                }
+                try? await Task.sleep(for: .milliseconds(400))
+            }
+        }
     }
 
     private var effectivePosition: UInt32 {
-        min(draggingProgress.map { UInt32($0 * Double(max(app.durationMs, 1))) } ?? app.positionMs, max(app.durationMs, 0))
+        min(draggingProgress.map { UInt32($0 * Double(max(app.durationMs, 1))) } ?? displayPosition, max(app.durationMs, 0))
     }
 
     private var slider: some View {
@@ -112,7 +125,7 @@ struct PlayerBar: View {
 
     private func progressWidth(_ geo: GeometryProxy) -> CGFloat {
         guard app.durationMs > 0 else { return 0 }
-        let fraction = draggingProgress ?? Double(app.positionMs) / Double(app.durationMs)
+        let fraction = draggingProgress ?? Double(displayPosition) / Double(max(app.durationMs, 1))
         return geo.size.width * min(max(fraction, 0), 1)
     }
 

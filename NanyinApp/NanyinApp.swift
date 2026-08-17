@@ -17,7 +17,6 @@ struct NanyinApp: App {
                 .frame(minWidth: 900, minHeight: 600)
                 .onAppear {
                     appModel.start()
-                    appModel.startPositionPolling()
                 }
         }
         .windowStyle(.hiddenTitleBar)

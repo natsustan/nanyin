@@ -7,13 +7,14 @@ import SwiftUI
 
 /// Classic flat track table: # / TITLE+ARTIST / ALBUM / duration.
 /// Single click selects, double-click plays from the context.
+/// Perf-critical: hover/selection state is row-local so mouse movement
+/// never invalidates the whole list.
 struct TrackListView: View {
     @Environment(AppModel.self) private var app
     let tracks: [SpotifyClient.Track]
     let contextKey: String
 
     @State private var selectedURI: String?
-    @State private var hoverURI: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -22,7 +23,14 @@ struct TrackListView: View {
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
-                        row(track, index: index)
+                        TrackRow(
+                            track: track,
+                            index: index,
+                            contextKey: contextKey,
+                            isSelected: selectedURI == track.uri
+                        ) {
+                            selectedURI = track.uri
+                        }
                     }
                 }
             }
@@ -46,18 +54,29 @@ struct TrackListView: View {
         .padding(.horizontal, 24)
         .padding(.vertical, 8)
     }
+}
 
-    private func row(_ track: SpotifyClient.Track, index: Int) -> some View {
-        let isCurrent = app.nowPlaying?.uri == track.uri
-        let isHovering = hoverURI == track.uri
+private struct TrackRow: View {
+    @Environment(AppModel.self) private var app
+    let track: SpotifyClient.Track
+    let index: Int
+    let contextKey: String
+    let isSelected: Bool
+    let onSelect: () -> Void
 
-        return HStack(spacing: 0) {
-            // Index / eq indicator
+    /// Row-local hover state — the perf-critical part: crossing rows with the
+    /// mouse only invalidates the two rows involved, never the whole list.
+    @State private var hovering = false
+
+    private var isCurrent: Bool { app.nowPlaying?.uri == track.uri }
+
+    var body: some View {
+        HStack(spacing: 0) {
             Group {
                 if isCurrent, app.isPlaying {
                     EqIndicator()
                         .frame(width: 14, height: 14)
-                } else if isHovering {
+                } else if hovering {
                     Image(systemName: "play.fill")
                         .font(.system(size: 9))
                 } else {
@@ -68,7 +87,6 @@ struct TrackListView: View {
             }
             .frame(width: 44, alignment: .trailing)
 
-            // Title + artist
             VStack(alignment: .leading, spacing: 2) {
                 Text(track.name)
                     .font(.system(size: 13, weight: isCurrent ? .semibold : .regular))
@@ -83,14 +101,12 @@ struct TrackListView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            // Album
             Text(track.albumName)
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.textSecondary)
                 .lineLimit(1)
                 .frame(width: 260, alignment: .leading)
 
-            // Duration
             Text(Theme.fmtTime(UInt32(track.durationMs)))
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(Theme.textSecondary)
@@ -99,24 +115,18 @@ struct TrackListView: View {
         .padding(.horizontal, 24)
         .padding(.vertical, 7)
         .background(
-            isHovering && !isCurrent ? Theme.hover : (selectedURI == track.uri ? Color(white: 0.13) : .clear)
+            hovering && !isCurrent ? Theme.hover : (isSelected ? Color(white: 0.13) : .clear)
         )
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
             app.play(track: track, contextKey: contextKey)
         }
         .onTapGesture(count: 1) {
-            selectedURI = track.uri
+            onSelect()
         }
-        .onHover { hovering in
-            hoverURI = hovering ? track.uri : nil
-            if hovering {
-                NSCursor.pointingHand.push()
-            } else {
-                NSCursor.pop()
-            }
+        .onHover { h in
+            hovering = h
         }
-        .id(track.uri)
     }
 }
 
@@ -126,19 +136,19 @@ private struct EqIndicator: View {
 
     var body: some View {
         HStack(spacing: 2) {
-            bar(height: 7, delay: 0)
-            bar(height: 12, delay: 0.15)
-            bar(height: 5, delay: 0.3)
+            bar(phase: 0.55, delay: 0)
+            bar(phase: 1.0, delay: 0.15)
+            bar(phase: 0.7, delay: 0.3)
         }
         .frame(width: 14, height: 14)
         .onAppear { animate = true }
     }
 
-    private func bar(height: CGFloat, delay: Double) -> some View {
+    private func bar(phase: CGFloat, delay: Double) -> some View {
         RoundedRectangle(cornerRadius: 1)
             .fill(Theme.accent)
-            .frame(width: 3, height: height)
-            .scaleEffect(y: animate ? [0.5, 1.0].randomElement()! : 0.8, anchor: .bottom)
+            .frame(width: 3, height: 12)
+            .scaleEffect(y: animate ? phase : 0.8, anchor: .bottom)
             .animation(
                 animate
                     ? .easeInOut(duration: 0.35).repeatForever(autoreverses: true).delay(delay)

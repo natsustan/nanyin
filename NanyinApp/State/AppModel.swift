@@ -42,7 +42,9 @@ final class AppModel {
 
     private(set) var isPlaying = false
     private(set) var isBuffering = false
-    private(set) var positionMs: UInt32 = 0
+    // NOTE: playback position is intentionally NOT stored here. Polling it at
+    // 2Hz from the app-wide observable would invalidate every view reading
+    // the model (including every track row) — PlayerBar ticks it locally.
     private(set) var durationMs: UInt32 = 0
     private(set) var volume: Double = 1.0 // 0…1
 
@@ -80,7 +82,6 @@ final class AppModel {
     private(set) var loadingTracks = false
     private(set) var tracksError: [String: String] = [:]
 
-    private var positionTimer: Timer?
 
     // MARK: - Lifecycle
 
@@ -256,13 +257,13 @@ final class AppModel {
 
     private func handle(_ event: Core.Event) {
         switch event {
-        case let .playing(_, positionMs):
+        case .playing:
             isPlaying = true
             isBuffering = false
-            self.positionMs = UInt32(positionMs)
         case let .paused(_, positionMs):
             isPlaying = false
-            self.positionMs = UInt32(positionMs)
+            // Rare low-frequency update; PlayerBar interpolates via Core polling.
+            _ = positionMs
         case .stopped:
             isPlaying = false
             isBuffering = false
@@ -272,8 +273,8 @@ final class AppModel {
         case let .trackChanged(uri, durationMs):
             self.durationMs = UInt32(durationMs)
             fetchMetadata(uri: uri)
-        case let .position(positionMs):
-            self.positionMs = UInt32(positionMs)
+        case .position:
+            break // position handled by PlayerBar's local Core.positionMs polling
         case .endOfTrack:
             break // M2: auto-advance handling; Spirc usually advances itself
         }
@@ -353,9 +354,7 @@ final class AppModel {
     }
 
     func seek(to fraction: Double) {
-        let target = UInt32(fraction * Double(max(durationMs, 1)))
-        _ = Core.seek(target)
-        positionMs = target
+        _ = Core.seek(UInt32(fraction * Double(max(durationMs, 1))))
     }
 
     func setVolume(_ fraction: Double) {
@@ -367,15 +366,4 @@ final class AppModel {
     func next() { _ = Core.next() }
     func prev() { _ = Core.prev() }
 
-    // MARK: - Position polling
-
-    func startPositionPolling() {
-        positionTimer?.invalidate()
-        positionTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                guard let self, self.isPlaying else { return }
-                self.positionMs = Core.positionMs
-            }
-        }
-    }
 }
