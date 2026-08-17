@@ -28,7 +28,12 @@ int32_t nanyin_shutdown(void);
 
 /// Plays the given track URIs (JSON array: ["spotify:track:...", ...]),
 /// starting playback at start_index (0-based index into the array).
+/// For large contexts prefer nanyin_play_context (server-side resolution).
 int32_t nanyin_play_tracks(const char* track_uris_json, uint32_t start_index);
+
+/// Plays a server-resolved context URI (e.g. "spotify:playlist:...",
+/// "spotify:user:<name>:collection" for Liked Songs) starting at start_index.
+int32_t nanyin_play_context(const char* context_uri, uint32_t start_index);
 
 int32_t nanyin_pause(void);
 int32_t nanyin_resume(void);

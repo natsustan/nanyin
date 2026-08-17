@@ -32,6 +32,8 @@ final class AppModel {
 
     private(set) var authState: AuthState = .checking
     private(set) var userDisplayName: String = ""
+    /// Spotify user id (login5 username form) — builds the collection context URI.
+    private(set) var userId: String = ""
     private(set) var authError: String?
 
     private var playbackAccessToken: String = ""
@@ -157,7 +159,8 @@ final class AppModel {
         do {
             if let profile = try await api?.currentUser() {
                 userDisplayName = profile.displayName ?? profile.id
-                dlog("/v1/me OK — \(userDisplayName)")
+                userId = profile.id
+                dlog("/v1/me OK — \(userDisplayName) (id \(userId))")
             }
         } catch {
             dlog("/v1/me failed: \(error)")
@@ -210,24 +213,59 @@ final class AppModel {
         }
     }
 
-    /// Plays a track within its loaded context (playlist / liked),
-    /// continuing with the rest of the context afterwards.
+    /// Plays a track within its loaded context. Large contexts go through
+    /// server-resolved context URIs (liked = spotify:user:<id>:collection,
+    /// playlist = spotify:playlist:<id>) — uploading thousands of URIs into
+    /// Connect state gets 429-rejected. Falls back to a bounded track window
+    /// if the context path doesn't start audio in time.
     func play(track: SpotifyClient.Track, contextKey: String) {
-        let uris: [String]
-        let startIndex: Int
-        if let context = tracksByContext[contextKey],
-           let index = context.firstIndex(where: { $0.uri == track.uri })
-        {
-            uris = context.map(\.uri)
-            startIndex = index
-        } else {
-            uris = [track.uri]
-            startIndex = 0
-        }
         applyNowPlaying(track)
         isBuffering = true
-        let rc = Core.playTracks(uris, startIndex: startIndex)
-        dlog("playTracks(\(uris.count) uris, index \(startIndex)) rc=\(rc)")
+
+        let index = tracksByContext[contextKey]?.firstIndex(where: { $0.uri == track.uri }) ?? 0
+
+        let contextURI: String?
+        switch page {
+        case .liked:
+            contextURI = userId.isEmpty ? nil : "spotify:user:\(userId):collection"
+        case let .playlist(id, _):
+            contextURI = "spotify:playlist:\(id)"
+        case .home:
+            contextURI = nil
+        }
+
+        if let contextURI {
+            let rc = Core.playContext(contextURI, startIndex: index)
+            dlog("playContext(\(contextURI), index \(index)) rc=\(rc)")
+            if rc == 0 {
+                scheduleContextFallback(track: track, contextKey: contextKey, index: index)
+                return
+            }
+        }
+
+        playWindowed(track: track, contextKey: contextKey, index: index)
+    }
+
+    /// Bounded-context fallback: 50 tracks from the clicked index.
+    private func playWindowed(track: SpotifyClient.Track, contextKey: String, index: Int) {
+        guard let context = tracksByContext[contextKey] else {
+            _ = Core.playTracks([track.uri])
+            return
+        }
+        let window = context.map(\.uri).dropFirst(index).prefix(50)
+        let rc = Core.playTracks(Array(window), startIndex: 0)
+        dlog("playWindowed(\(window.count) uris) rc=\(rc)")
+    }
+
+    /// If a context load doesn't produce audio within 8s, retry windowed.
+    private func scheduleContextFallback(track: SpotifyClient.Track, contextKey: String, index: Int) {
+        let uri = track.uri
+        Task {
+            try? await Task.sleep(for: .seconds(8))
+            guard !Task.isCancelled, isBuffering, nowPlaying?.uri == uri else { return }
+            dlog("context load stalled — falling back to windowed tracks")
+            playWindowed(track: track, contextKey: contextKey, index: index)
+        }
     }
 
     // MARK: - Core callbacks
@@ -270,9 +308,23 @@ final class AppModel {
         case let .loading(uri, _):
             isBuffering = true
             fetchMetadata(uri: uri)
-        case let .trackChanged(uri, durationMs):
+        case let .trackChanged(uri, durationMs, title, artists, album, coverURL):
             self.durationMs = UInt32(durationMs)
-            fetchMetadata(uri: uri)
+            // TrackChanged carries full metadata — no Web API round trip needed.
+            if let title, !title.isEmpty {
+                let known = nowPlaying?.uri == uri && nowPlaying?.title == title
+                if !known {
+                    nowPlaying = NowPlaying(
+                        uri: uri,
+                        title: title,
+                        artist: artists ?? "",
+                        album: album ?? "",
+                        artworkURL: coverURL.flatMap(URL.init(string:))
+                    )
+                }
+            } else {
+                fetchMetadata(uri: uri)
+            }
         case .position:
             break // position handled by PlayerBar's local Core.positionMs polling
         case .endOfTrack:

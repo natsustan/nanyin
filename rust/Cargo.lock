@@ -1515,6 +1515,7 @@ dependencies = [
  "env_logger",
  "librespot-connect",
  "librespot-core",
+ "librespot-metadata",
  "librespot-playback",
  "log",
  "once_cell",

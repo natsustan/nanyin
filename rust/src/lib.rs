@@ -348,8 +348,7 @@ pub extern "C" fn nanyin_shutdown() -> i32 {
 fn handle_player_event(event: librespot_playback::player::PlayerEvent) {
     use librespot_playback::player::PlayerEvent;
 
-    let current_uri = CURRENT_URI.lock().unwrap().clone();
-    let _ = current_uri;
+    eprintln!("nanyin_core: event {event:?}");
 
     match event {
         PlayerEvent::Loading { track_id, position_ms, .. } => {
@@ -401,10 +400,31 @@ fn handle_player_event(event: librespot_playback::player::PlayerEvent) {
             *CURRENT_URI.lock().unwrap() = Some(uri.clone());
             DURATION_MS.store(duration, Ordering::SeqCst);
             update_position(0);
+
+            // Full metadata comes with the event — no extra Web API round trip.
+            // covers[0] is the LARGE variant (Spotify orders by size).
+            let (album, artists) = match &audio_item.unique_fields {
+                librespot_metadata::audio::item::UniqueFields::Track { artists, album, .. } => (
+                    album.clone(),
+                    artists
+                        .iter()
+                        .map(|a| a.name.clone())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                ),
+                _ => (String::new(), String::new()),
+            };
+            let title = audio_item.name.clone();
+            let cover = audio_item.covers.first().map(|c| c.url.clone());
+
             emit_state(json!({
                 "event": "track_changed",
                 "track_uri": uri,
                 "duration_ms": duration,
+                "title": title,
+                "artists": artists,
+                "album": album,
+                "cover_url": cover,
             }));
         }
         PlayerEvent::EndOfTrack { .. } => {
@@ -481,6 +501,55 @@ pub extern "C" fn nanyin_play_tracks(track_uris_json: *const c_char, start_index
         }
         Err(e) => {
             eprintln!("nanyin_core: play_tracks: load FAILED: {e:?}");
+            set_last_error(&format!("load: {e:?}"));
+            -1
+        }
+    }
+}
+
+/// Plays a server-resolved context (playlist / album / collection) starting
+/// at start_index. Preferred over nanyin_play_tracks for large contexts —
+/// uploading thousands of track URIs into Connect state gets rejected (429).
+#[no_mangle]
+pub extern "C" fn nanyin_play_context(context_uri: *const c_char, start_index: u32) -> i32 {
+    if context_uri.is_null() {
+        return -1;
+    }
+    let uri = unsafe {
+        match CStr::from_ptr(context_uri).to_str() {
+            Ok(s) => s.to_string(),
+            Err(_) => return -1,
+        }
+    };
+
+    let spirc = match require_spirc() {
+        Ok(s) => s,
+        Err(code) => return code,
+    };
+
+    eprintln!("nanyin_core: play_context → activate + load ({uri}, index {start_index})");
+    if let Err(e) = spirc.activate() {
+        eprintln!("nanyin_core: play_context: activate FAILED: {e:?}");
+        set_last_error(&format!("activate: {e:?}"));
+        return -1;
+    }
+
+    let request = LoadRequest::from_context_uri(
+        uri,
+        LoadRequestOptions {
+            start_playing: true,
+            playing_track: Some(librespot_connect::PlayingTrack::Index(start_index)),
+            ..Default::default()
+        },
+    );
+
+    match spirc.load(request) {
+        Ok(()) => {
+            eprintln!("nanyin_core: play_context: load command sent");
+            0
+        }
+        Err(e) => {
+            eprintln!("nanyin_core: play_context: load FAILED: {e:?}");
             set_last_error(&format!("load: {e:?}"));
             -1
         }

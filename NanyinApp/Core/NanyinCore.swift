@@ -17,7 +17,14 @@ enum Core {
         case paused(uri: String, positionMs: Int)
         case stopped(uri: String)
         case position(positionMs: Int)
-        case trackChanged(uri: String, durationMs: Int)
+        case trackChanged(
+            uri: String,
+            durationMs: Int,
+            title: String?,
+            artists: String?,
+            album: String?,
+            coverURL: String?
+        )
         case endOfTrack
     }
 
@@ -75,7 +82,15 @@ enum Core {
         case "paused": event = .paused(uri: uri, positionMs: position)
         case "stopped": event = .stopped(uri: uri)
         case "position": event = .position(positionMs: position)
-        case "track_changed": event = .trackChanged(uri: uri, durationMs: duration)
+        case "track_changed":
+            event = .trackChanged(
+                uri: uri,
+                durationMs: duration,
+                title: object["title"] as? String,
+                artists: object["artists"] as? String,
+                album: object["album"] as? String,
+                coverURL: object["cover_url"] as? String
+            )
         case "end_of_track": event = .endOfTrack
         default: return
         }
@@ -97,6 +112,10 @@ enum Core {
               let json = String(data: data, encoding: .utf8)
         else { return -1 }
         return json.withCString { nanyin_play_tracks($0, UInt32(startIndex)) }
+    }
+
+    nonisolated static func playContext(_ uri: String, startIndex: Int = 0) -> Int32 {
+        uri.withCString { nanyin_play_context($0, UInt32(startIndex)) }
     }
 
     nonisolated static func pause() -> Int32 { nanyin_pause() }
