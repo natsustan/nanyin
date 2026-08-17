@@ -92,11 +92,11 @@ enum Core {
         return accessToken.withCString { nanyin_init_player($0) }
     }
 
-    nonisolated static func playTracks(_ uris: [String]) -> Int32 {
+    nonisolated static func playTracks(_ uris: [String], startIndex: Int = 0) -> Int32 {
         guard let data = try? JSONSerialization.data(withJSONObject: uris),
               let json = String(data: data, encoding: .utf8)
         else { return -1 }
-        return json.withCString { nanyin_play_tracks($0) }
+        return json.withCString { nanyin_play_tracks($0, UInt32(startIndex)) }
     }
 
     nonisolated static func pause() -> Int32 { nanyin_pause() }

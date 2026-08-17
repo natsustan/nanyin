@@ -26,8 +26,9 @@ int32_t nanyin_shutdown(void);
 
 // === Playback ===
 
-/// Plays the given track URIs (JSON array: ["spotify:track:...", ...]).
-int32_t nanyin_play_tracks(const char* track_uris_json);
+/// Plays the given track URIs (JSON array: ["spotify:track:...", ...]),
+/// starting playback at start_index (0-based index into the array).
+int32_t nanyin_play_tracks(const char* track_uris_json, uint32_t start_index);
 
 int32_t nanyin_pause(void);
 int32_t nanyin_resume(void);

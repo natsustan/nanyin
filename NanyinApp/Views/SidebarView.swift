@@ -23,8 +23,8 @@ struct SidebarView: View {
             .padding(.top, 20)
             .padding(.bottom, 18)
 
-            sidebarLink("house", "Home")
-            sidebarLink("magnifyingglass", "Search")
+            entry(.home, icon: "house", title: "Home")
+            entry(nil, icon: "magnifyingglass", title: "Search (M3)", disabled: true)
 
             Divider()
                 .overlay(Theme.playerBar)
@@ -38,19 +38,36 @@ struct SidebarView: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 8)
 
-            sidebarLink("heart.fill", "Liked Songs", disabled: true)
+            entry(.liked, icon: "heart.fill", title: "Liked Songs", count: app.likedCount)
 
-            Text("PLAYLISTS")
-                .font(.system(size: 10, weight: .bold))
-                .tracking(1.2)
-                .foregroundStyle(Theme.textSecondary)
-                .padding(.horizontal, 16)
-                .padding(.top, 14)
-                .padding(.bottom, 8)
+            if !app.playlists.isEmpty {
+                Text("PLAYLISTS")
+                    .font(.system(size: 10, weight: .bold))
+                    .tracking(1.2)
+                    .foregroundStyle(Theme.textSecondary)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 14)
+                    .padding(.bottom, 8)
+            } else {
+                Text("Loading playlists…")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.textSecondary.opacity(0.6))
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+            }
 
-            sidebarLink("music.quarternote.3", "Coming in M1…", disabled: true)
-
-            Spacer()
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(app.playlists) { playlist in
+                        entry(
+                            .playlist(id: playlist.id, name: playlist.name),
+                            icon: "music.quarternote.3",
+                            title: playlist.name,
+                            count: playlist.trackCount
+                        )
+                    }
+                }
+            }
 
             if let note = app.connectionNote {
                 Text(note)
@@ -64,20 +81,45 @@ struct SidebarView: View {
         .background(Theme.sidebar)
     }
 
-    private func sidebarLink(_ icon: String, _ title: String, disabled: Bool = false) -> some View {
-        HStack(spacing: 12) {
+    private func entry(
+        _ page: AppModel.Page?,
+        icon: String,
+        title: String,
+        count: Int? = nil,
+        disabled: Bool = false
+    ) -> some View {
+        let isSelected = page != nil && app.page == page
+
+        return HStack(spacing: 12) {
             Image(systemName: icon)
                 .font(.system(size: 13))
                 .frame(width: 20)
             Text(title)
-                .font(.system(size: 13))
+                .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
+                .lineLimit(1)
+            Spacer()
+            if let count {
+                Text("\(count)")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(Theme.textSecondary.opacity(0.6))
+            }
         }
-        .foregroundStyle(disabled ? Theme.textSecondary.opacity(0.6) : Theme.textSecondary)
+        .foregroundStyle(
+            disabled
+                ? Theme.textSecondary.opacity(0.5)
+                : (isSelected ? .white : Theme.textSecondary)
+        )
         .padding(.horizontal, 16)
         .padding(.vertical, 6)
+        .background(isSelected ? Color(white: 0.12) : .clear)
         .contentShape(Rectangle())
+        .onTapGesture {
+            if let page {
+                app.open(page)
+            }
+        }
         .onHover { hovering in
-            if hovering {
+            if hovering, !disabled {
                 NSCursor.pointingHand.push()
             } else {
                 NSCursor.pop()

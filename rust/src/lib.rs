@@ -428,9 +428,10 @@ fn require_spirc() -> Result<Arc<Spirc>, i32> {
     }
 }
 
-/// Plays the given track URIs (JSON array, e.g. ["spotify:track:..."]).
+/// Plays the given track URIs (JSON array, e.g. ["spotify:track:..."]),
+/// starting at start_index. Spirc becomes active first.
 #[no_mangle]
-pub extern "C" fn nanyin_play_tracks(track_uris_json: *const c_char) -> i32 {
+pub extern "C" fn nanyin_play_tracks(track_uris_json: *const c_char, start_index: u32) -> i32 {
     if track_uris_json.is_null() {
         return -1;
     }
@@ -460,11 +461,12 @@ pub extern "C" fn nanyin_play_tracks(track_uris_json: *const c_char) -> i32 {
         uris,
         LoadRequestOptions {
             start_playing: true,
+            playing_track: Some(librespot_connect::PlayingTrack::Index(start_index)),
             ..Default::default()
         },
     );
 
-    eprintln!("nanyin_core: play_tracks → activate + load");
+    eprintln!("nanyin_core: play_tracks → activate + load (index {start_index})");
     // Claim the active-device role first — Spirc ignores commands while
     // this device is Not Active (the "ignored while Not Active" WARN).
     if let Err(e) = spirc.activate() {

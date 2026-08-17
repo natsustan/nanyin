@@ -29,9 +29,9 @@ struct RootView: View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 SidebarView()
-                    .frame(width: 220)
+                    .frame(width: 230)
                 Divider().overlay(Theme.playerBar)
-                HomeView()
+                content
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             Divider().overlay(Theme.playerBar)
@@ -40,5 +40,28 @@ struct RootView: View {
         }
         .background(Theme.background)
         .ignoresSafeArea()
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch app.page {
+        case .home:
+            HomeView()
+        case .liked:
+            PlaylistDetailView(
+                title: "Liked Songs",
+                subtitle: "\(app.tracksByContext["liked"]?.count ?? app.likedCount) songs · \(app.userDisplayName)",
+                coverURL: nil,
+                contextKey: "liked"
+            )
+        case let .playlist(id, name):
+            let info = app.playlists.first { $0.id == id }
+            PlaylistDetailView(
+                title: name,
+                subtitle: "\(info?.trackCount ?? (app.tracksByContext[id]?.count ?? 0)) songs",
+                coverURL: info?.artworkURL,
+                contextKey: id
+            )
+        }
     }
 }

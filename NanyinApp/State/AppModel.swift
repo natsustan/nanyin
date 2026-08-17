@@ -57,6 +57,29 @@ final class AppModel {
     private(set) var nowPlaying: NowPlaying?
     private(set) var connectionNote: String?
 
+    // MARK: - Library (M1)
+
+    enum Page: Hashable {
+        case home
+        case liked
+        case playlist(id: String, name: String)
+
+        var contextKey: String? {
+            switch self {
+            case .home: nil
+            case .liked: "liked"
+            case let .playlist(id, _): id
+            }
+        }
+    }
+
+    private(set) var page: Page = .home
+    private(set) var playlists: [SpotifyClient.PlaylistInfo] = []
+    private(set) var likedCount = 0
+    private(set) var tracksByContext: [String: [SpotifyClient.Track]] = [:]
+    private(set) var loadingTracks = false
+    private(set) var tracksError: [String: String] = [:]
+
     private var positionTimer: Timer?
 
     // MARK: - Lifecycle
@@ -138,6 +161,72 @@ final class AppModel {
         } catch {
             dlog("/v1/me failed: \(error)")
         }
+        loadLibrary()
+    }
+
+    /// Loads playlists + liked songs in the background after login.
+    private func loadLibrary() {
+        Task {
+            do {
+                let lists = try await api!.playlists()
+                playlists = lists
+                likedCount = try await api!.likedTotal()
+                // Warm the liked-songs cache; it powers the most common entry point.
+                if tracksByContext["liked"] == nil {
+                    tracksByContext["liked"] = try? await api!.likedTracks()
+                }
+            } catch {
+                dlog("library load failed: \(error)")
+            }
+        }
+    }
+
+    // MARK: - Navigation
+
+    func open(_ newPage: Page) {
+        page = newPage
+        guard let key = newPage.contextKey, tracksByContext[key] == nil else { return }
+        loadingTracks = true
+        tracksError[key] = nil
+        Task {
+            do {
+                let tracks: [SpotifyClient.Track]
+                switch newPage {
+                case .liked:
+                    tracks = try await api!.likedTracks()
+                case let .playlist(id, _):
+                    tracks = try await api!.playlistTracks(id)
+                case .home:
+                    loadingTracks = false
+                    return
+                }
+                tracksByContext[key] = tracks
+            } catch {
+                tracksError[key] = error.localizedDescription
+                dlog("tracks load failed: \(error)")
+            }
+            loadingTracks = false
+        }
+    }
+
+    /// Plays a track within its loaded context (playlist / liked),
+    /// continuing with the rest of the context afterwards.
+    func play(track: SpotifyClient.Track, contextKey: String) {
+        let uris: [String]
+        let startIndex: Int
+        if let context = tracksByContext[contextKey],
+           let index = context.firstIndex(where: { $0.uri == track.uri })
+        {
+            uris = context.map(\.uri)
+            startIndex = index
+        } else {
+            uris = [track.uri]
+            startIndex = 0
+        }
+        applyNowPlaying(track)
+        isBuffering = true
+        let rc = Core.playTracks(uris, startIndex: startIndex)
+        dlog("playTracks(\(uris.count) uris, index \(startIndex)) rc=\(rc)")
     }
 
     // MARK: - Core callbacks
@@ -191,8 +280,9 @@ final class AppModel {
     }
 
     private func fetchMetadata(uri: String) {
+        // Skip when we already have richer local data for this URI.
+        if nowPlaying?.uri == uri, nowPlaying?.title != "…" { return }
         guard let id = SpotifyClient.trackId(from: uri) else { return }
-        // Update immediately from URI form; enrich via Web API.
         if nowPlaying?.uri != uri {
             nowPlaying = NowPlaying(uri: uri, title: "…", artist: "", album: "", artworkURL: nil)
         }
@@ -207,6 +297,16 @@ final class AppModel {
                 artworkURL: artwork
             )
         }
+    }
+
+    private func applyNowPlaying(_ track: SpotifyClient.Track) {
+        nowPlaying = NowPlaying(
+            uri: track.uri,
+            title: track.name,
+            artist: track.artists.joined(separator: ", "),
+            album: track.albumName,
+            artworkURL: track.artworkURL
+        )
     }
 
     /// Session dropped: silently refresh the token and re-init the player

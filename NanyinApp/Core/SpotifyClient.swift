@@ -5,54 +5,25 @@
 
 import Foundation
 
-/// Minimal Spotify Web API client (M0: me + track metadata).
-/// Token refresh is handled by AppModel before calls.
+/// Spotify Web API client (ncspot client quota).
 struct SpotifyClient {
-    struct Track: Decodable, Identifiable, Hashable {
+    // MARK: - Models
+
+    struct Track: Identifiable, Hashable {
         let id: String
+        let uri: String // spotify:track:...
         let name: String
         let durationMs: Int
         let artists: [String]
         let albumName: String
         let artworkURL: URL?
+    }
 
-        enum CodingKeys: String, CodingKey {
-            case id, name
-            case durationMs = "duration_ms"
-            case artists
-            case album
-        }
-
-        enum AlbumKeys: String, CodingKey {
-            case name
-            case images
-        }
-
-        init(from decoder: Decoder) throws {
-            let c = try decoder.container(keyedBy: CodingKeys.self)
-            id = try c.decode(String.self, forKey: .id)
-            name = try c.decode(String.self, forKey: .name)
-            durationMs = try c.decode(Int.self, forKey: .durationMs)
-            let artistsContainer = try c.nestedUnkeyedContainer(forKey: .artists)
-            var names: [String] = []
-            var iter = artistsContainer
-            while !iter.isAtEnd {
-                var artist: KeyedDecodingContainer<ArtistKeys>
-                artist = try iter.nestedContainer(keyedBy: ArtistKeys.self)
-                names.append(try artist.decode(String.self, forKey: .name))
-            }
-            artists = names
-            let album = try c.nestedContainer(keyedBy: AlbumKeys.self, forKey: .album)
-            albumName = try album.decode(String.self, forKey: .name)
-            let images = try album.decode([Image].self, forKey: .images)
-            artworkURL = images.first?.url
-        }
-
-        private enum ArtistKeys: String, CodingKey { case name }
-
-        private struct Image: Codable {
-            let url: URL
-        }
+    struct PlaylistInfo: Identifiable, Hashable {
+        let id: String
+        let name: String
+        let trackCount: Int
+        let artworkURL: URL?
     }
 
     struct UserProfile: Codable {
@@ -69,6 +40,8 @@ struct SpotifyClient {
         case needsAuth
         case http(Int, String)
     }
+
+    // MARK: - Core
 
     private var accessToken: String
 
@@ -106,12 +79,165 @@ struct SpotifyClient {
         }
     }
 
+    // MARK: - JSON shapes
+
+    private struct Image: Codable {
+        let url: URL
+    }
+
+    private struct ArtistDTO: Codable {
+        let name: String
+    }
+
+    private struct AlbumDTO: Codable {
+        let name: String
+        let images: [Image]?
+    }
+
+    private struct TrackDTO: Codable {
+        let id: String?
+        let uri: String?
+        let name: String?
+        let durationMs: Int?
+        let artists: [ArtistDTO]?
+        let album: AlbumDTO?
+        let isPlayable: Bool?
+
+        enum CodingKeys: String, CodingKey {
+            case id, uri, name, artists, album
+            case durationMs = "duration_ms"
+            case isPlayable = "is_playable"
+        }
+
+        var toTrack: Track? {
+            guard let id, let uri, let name else { return nil }
+            guard isPlayable ?? true else { return nil } // unavailable in market
+            return Track(
+                id: id,
+                uri: uri,
+                name: name,
+                durationMs: durationMs ?? 0,
+                artists: (artists ?? []).map(\.name),
+                albumName: album?.name ?? "",
+                artworkURL: album?.images?.first?.url
+            )
+        }
+    }
+
+    private struct PagedTracksDTO: Codable {
+        struct Item: Codable {
+            let track: TrackDTO?
+        }
+        let items: [Item]
+        let total: Int
+    }
+
+    private struct PlaylistDTO: Codable {
+        let id: String
+        let name: String
+        let snapshotId: String?
+        let images: [Image]?
+        let owner: OwnerDTO?
+        struct TracksDTO: Codable { let total: Int? }
+        let tracks: TracksDTO?
+
+        struct OwnerDTO: Codable {
+            let id: String?
+            let displayName: String?
+
+            enum CodingKeys: String, CodingKey {
+                case id
+                case displayName = "display_name"
+            }
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case id, name, images, owner, tracks
+            case snapshotId = "snapshot_id"
+        }
+    }
+
+    private struct PagedPlaylistsDTO: Codable {
+        let items: [PlaylistDTO]?
+        let total: Int
+    }
+
+    // MARK: - Endpoints
+
     func currentUser() async throws -> UserProfile {
         try await get("/v1/me")
     }
 
     func track(id: String) async throws -> Track {
-        try await get("/v1/tracks/\(id)")
+        let dto = try await get("/v1/tracks/\(id)") as TrackDTO
+        guard let t = dto.toTrack else { throw APIError.http(0, "unplayable track") }
+        return t
+    }
+
+    /// All playlists in the user's library (owned + followed), paginated.
+    func playlists() async throws -> [PlaylistInfo] {
+        var result: [PlaylistInfo] = []
+        var offset = 0
+        let limit = 50
+        while true {
+            let page: PagedPlaylistsDTO = try await get(
+                "/v1/me/playlists",
+                query: ["limit": "\(limit)", "offset": "\(offset)"]
+            )
+            for p in page.items ?? [] {
+                result.append(
+                    PlaylistInfo(
+                        id: p.id,
+                        name: p.name,
+                        trackCount: p.tracks?.total ?? 0,
+                        artworkURL: p.images?.first?.url
+                    )
+                )
+            }
+            offset += limit
+            if offset >= page.total { break }
+        }
+        return result
+    }
+
+    /// Tracks of a playlist, paginated.
+    func playlistTracks(_ playlistId: String) async throws -> [Track] {
+        var result: [Track] = []
+        var offset = 0
+        let limit = 50
+        while true {
+            let page: PagedTracksDTO = try await get(
+                "/v1/playlists/\(playlistId)/items",
+                query: ["limit": "\(limit)", "offset": "\(offset)"]
+            )
+            result += page.items.compactMap(\.track?.toTrack)
+            offset += limit
+            if offset >= page.total { break }
+        }
+        return result
+    }
+
+    /// Liked songs, paginated.
+    func likedTracks() async throws -> [Track] {
+        var result: [Track] = []
+        var offset = 0
+        let limit = 50
+        while true {
+            let page: PagedTracksDTO = try await get(
+                "/v1/me/tracks",
+                query: ["limit": "\(limit)", "offset": "\(offset)"]
+            )
+            result += page.items.compactMap(\.track?.toTrack)
+            offset += limit
+            if offset >= page.total { break }
+        }
+        return result
+    }
+
+    /// Total liked-songs count (single tiny request).
+    func likedTotal() async throws -> Int {
+        let page: PagedTracksDTO = try await get("/v1/me/tracks", query: ["limit": "1"])
+        return page.total
     }
 
     /// Extracts the 22-char base62 id from any URI/URL form.
