@@ -10,9 +10,9 @@
 mod proxy_sink;
 
 use std::ffi::{c_char, CStr, CString};
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use librespot_connect::{ConnectConfig, LoadRequest, LoadRequestOptions, Spirc};
 use librespot_core::authentication::Credentials;
@@ -59,8 +59,7 @@ static PLAYER: Mutex<Option<Arc<Player>>> = Mutex::new(None);
 static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
 
 static IS_PLAYING: AtomicBool = AtomicBool::new(false);
-static POSITION_MS: AtomicU32 = AtomicU32::new(0);
-static POSITION_TS_MS: AtomicU64 = AtomicU64::new(0);
+static POSITION: Mutex<PlaybackPosition> = Mutex::new(PlaybackPosition::empty());
 static DURATION_MS: AtomicU32 = AtomicU32::new(0);
 static CURRENT_URI: Mutex<Option<String>> = Mutex::new(None);
 
@@ -147,16 +146,47 @@ fn notify_disconnected() {
 // Session lifecycle
 // ============================================================================
 
-fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
+struct PlaybackPosition {
+    stored_ms: u32,
+    updated_at: Option<Instant>,
+}
+
+impl PlaybackPosition {
+    const fn empty() -> Self {
+        Self {
+            stored_ms: 0,
+            updated_at: None,
+        }
+    }
+
+    #[cfg(test)]
+    fn new(position_ms: u32, now: Instant) -> Self {
+        Self {
+            stored_ms: position_ms,
+            updated_at: Some(now),
+        }
+    }
+
+    fn update(&mut self, position_ms: u32, now: Instant) {
+        self.stored_ms = position_ms;
+        self.updated_at = Some(now);
+    }
+
+    fn get_at(&self, now: Instant, is_playing: bool, duration_ms: u32) -> u32 {
+        let elapsed_ms = self
+            .updated_at
+            .map(|updated_at| now.saturating_duration_since(updated_at).as_millis())
+            .unwrap_or(0)
+            .min(u32::MAX as u128) as u32;
+        interpolated_position_ms(self.stored_ms, elapsed_ms, is_playing, duration_ms)
+    }
 }
 
 fn update_position(position_ms: u32) {
-    POSITION_MS.store(position_ms, Ordering::SeqCst);
-    POSITION_TS_MS.store(now_ms(), Ordering::SeqCst);
+    POSITION
+        .lock()
+        .unwrap()
+        .update(position_ms, Instant::now());
 }
 
 /// Audio cache: 1 GiB LRU under ~/Library/Caches/nanyin/audio.
@@ -741,21 +771,34 @@ pub extern "C" fn nanyin_is_playing() -> i32 {
     IS_PLAYING.load(Ordering::SeqCst) as i32
 }
 
-/// Current playback position in ms, interpolated while playing
-/// (capped at 5 s without a fresh event).
+fn interpolated_position_ms(
+    stored: u32,
+    elapsed_ms: u32,
+    is_playing: bool,
+    duration_ms: u32,
+) -> u32 {
+    if !is_playing {
+        return stored;
+    }
+
+    let position = stored.saturating_add(elapsed_ms);
+    if duration_ms > 0 {
+        position.min(duration_ms)
+    } else {
+        position
+    }
+}
+
+/// Current playback position in ms, interpolated while playing and capped at
+/// the current track duration. Playing/paused/disconnected events own the
+/// clock state; librespot does not emit periodic position events.
 #[no_mangle]
 pub extern "C" fn nanyin_get_position_ms() -> u32 {
-    let stored = POSITION_MS.load(Ordering::SeqCst);
-    let ts = POSITION_TS_MS.load(Ordering::SeqCst);
-    if ts == 0 {
-        return 0;
-    }
-    if IS_PLAYING.load(Ordering::SeqCst) {
-        let elapsed = (now_ms().saturating_sub(ts)).min(5000) as u32;
-        stored.saturating_add(elapsed)
-    } else {
-        stored
-    }
+    POSITION.lock().unwrap().get_at(
+        Instant::now(),
+        IS_PLAYING.load(Ordering::SeqCst),
+        DURATION_MS.load(Ordering::SeqCst),
+    )
 }
 
 #[no_mangle]
@@ -774,3 +817,44 @@ pub extern "C" fn nanyin_free_string(s: *mut c_char) {
 // Silence "unused" warnings for the mpsc import kept for parity.
 #[allow(unused)]
 fn _unused(m: mpsc::UnboundedSender<()>) {}
+
+#[cfg(test)]
+mod tests {
+    use super::{interpolated_position_ms, PlaybackPosition};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn position_uses_only_monotonic_elapsed_time() {
+        let started_at = Instant::now();
+        let position = PlaybackPosition::new(0, started_at);
+
+        assert_eq!(
+            position.get_at(started_at + Duration::from_secs(10), true, 180_000),
+            10_000
+        );
+    }
+
+    #[test]
+    fn playing_position_keeps_advancing_without_periodic_player_events() {
+        assert_eq!(
+            interpolated_position_ms(0, 10_000, true, 180_000),
+            10_000
+        );
+    }
+
+    #[test]
+    fn paused_position_does_not_advance() {
+        assert_eq!(
+            interpolated_position_ms(7_500, 10_000, false, 180_000),
+            7_500
+        );
+    }
+
+    #[test]
+    fn playing_position_does_not_exceed_track_duration() {
+        assert_eq!(
+            interpolated_position_ms(179_000, 10_000, true, 180_000),
+            180_000
+        );
+    }
+}
