@@ -68,11 +68,33 @@ listening session with zero silent failures.
 | 3.2 | Search results context | Play results as ad-hoc context (`nanyin_play_tracks` window — results are small) | |
 | 3.3 | Search entry point | ⌘F/⌘K focus; sidebar "Search" page (currently disabled) | |
 
-Progress 2026-08-18: 3.1–3.3 implemented (SpotifyClient.searchTracks, SearchView
+Progress 2026-08-18: 3.1–3.3 implemented (SpotifyClient.search, SearchView
 with 350ms debounce + ⌘K/⌘F + sidebar entry, results play via nanyin_play_tracks
 window). Search verified end-to-end (`search "daft punk" → 50 tracks`, UI shows
 results). 3.2 playback verify blocked on an account penalty window — retest
 double-click play after the dealer probe survives 300s.
+
+Progress 2026-08-18 (later): artist search added — one /v1/search request
+with `type=track,artist`, Artists card row (circular portraits, ≤10) above
+Songs, click → artist page (part of 4.1 pulled forward): circular portrait
+header + `/v1/artists/{id}/top-tracks` list, plays as a windowed ad-hoc
+context. Verified live (OCR on real UI): search row + artist page render;
+harness verified decode (50 artists, 10 top tracks). While testing, found a
+pre-existing open() epoch bug (capture-before-increment → every page-load
+result discarded; playlist pages stuck on "Loading tracks…" since the
+hardening pass) — fixed by incrementing loadEpoch before capture.
+
+Progress 2026-08-18 (later): artist discography + album pages — artist page
+gains Albums/Singles/compilations rows (LazyHStack horizontal strips, from
+`/v1/artists/{id}/albums?include_groups=album,single,compilation`, paginated),
+header count "N top tracks · N albums · N singles"; album cards click into an
+album page reusing PlaylistDetailView (new `label` param → "ALBUM" eyebrow),
+tracks from `/v1/albums/{id}` + paginated `/tracks` (simplified tracks get the
+album name/artwork filled in via `Track.withAlbum`), playback via
+`spotify:album:<id>` server context (same as playlist path). Verified live:
+harness (36 releases: 16 albums + 20 singles; RAM Drumless 13 tracks) + OCR on
+real UI (artist page rows, album page header + track list). Remaining M4.1:
+clickable artist/album names in track rows and player bar.
 
 Note: ncspot client id keeps /v1/search working (production-approved app).
 

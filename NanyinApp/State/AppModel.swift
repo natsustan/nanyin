@@ -106,6 +106,8 @@ final class AppModel {
         case search
         case liked
         case playlist(id: String, name: String)
+        case artist(id: String, name: String, artworkURL: URL?)
+        case album(id: String, name: String, subtitle: String, artworkURL: URL?)
 
         var contextKey: String? {
             switch self {
@@ -113,14 +115,24 @@ final class AppModel {
             case .search: "search"
             case .liked: "liked"
             case let .playlist(id, _): id
+            case let .artist(id, _, _): "artist:\(id)"
+            case let .album(id, _, _, _): "album:\(id)"
             }
         }
     }
+
+    /// Cache keys mirrored by RootView when building detail views; keep in sync.
+    static func artistContextKey(_ id: String) -> String { "artist:\(id)" }
+    static func albumContextKey(_ id: String) -> String { "album:\(id)" }
 
     private(set) var page: Page = .home
     private(set) var playlists: [SpotifyClient.PlaylistInfo] = []
     private(set) var likedCount = 0
     private(set) var tracksByContext: [String: [SpotifyClient.Track]] = [:]
+
+    /// Artist discography (albums + singles + compilations), keyed by artist
+    /// context key. Absent = still loading; [] = artist has none.
+    private(set) var albumsByArtist: [String: [SpotifyClient.AlbumInfo]] = [:]
     private(set) var loadingTracks = false
     private(set) var tracksError: [String: String] = [:]
     /// Increments on every open() — stale load tasks compare and discard.
@@ -150,12 +162,26 @@ final class AppModel {
                 authState = .loggedIn
                 dlog("logged in (silent)")
             } catch {
-                dlog("silent login failed: \(error)")
                 if case SpotifyAuth.AuthError.refreshTokenRevoked = error {
                     // SpotifyAuth already dropped the dead credential.
+                    dlog("silent login failed: \(error)")
                     authError = "Playback session was revoked — sign in again."
+                    authState = .loggedOut
+                } else if error is PlayerInitError {
+                    // Credentials are valid — only the player couldn't start
+                    // (typically Spotify accesspoint risk-control throttling).
+                    // Don't bounce to the login page: Web API (library,
+                    // search) works without the dealer; playback recovers on
+                    // a later launch once the block decays.
+                    dlog("player init failed, keeping session: \(error)")
+                    authState = .loggedIn
+                    connectionNote = "Playback service unavailable — will retry on relaunch"
+                    loadLibrary()
+                } else {
+                    dlog("silent login failed: \(error)")
+                    authError = error.localizedDescription
+                    authState = .loggedOut
                 }
-                authState = .loggedOut
             }
         }
     }
@@ -248,6 +274,8 @@ final class AppModel {
     private(set) var isSearching = false
     /// Search field text — kept here so it survives page switches.
     var searchQuery = ""
+    /// Artist results of the current search (top row; click → artist page).
+    private(set) var searchArtists: [SpotifyClient.Artist] = []
     /// Increments on focusSearch() — SearchView focuses its field on change.
     private(set) var searchFocusToken = 0
     private var searchEpoch = 0
@@ -276,6 +304,7 @@ final class AppModel {
         tracksError["search"] = nil
         guard !query.isEmpty else {
             tracksByContext["search"] = nil
+            searchArtists = []
             isSearching = false
             return
         }
@@ -285,11 +314,12 @@ final class AppModel {
             do {
                 // Token may have expired while idle — revalidate (same as open()).
                 await refreshAPIClient()
-                let results = try await api!.searchTracks(query)
+                let results = try await api!.search(query)
                 // Discard if the query changed mid-flight.
                 guard epoch == searchEpoch else { return }
-                dlog("search \"\(query)\" → \(results.count) tracks")
-                tracksByContext["search"] = results
+                dlog("search \"\(query)\" → \(results.tracks.count) tracks, \(results.artists.count) artists")
+                tracksByContext["search"] = results.tracks
+                searchArtists = results.artists
             } catch {
                 guard epoch == searchEpoch else { return }
                 tracksError["search"] = error.localizedDescription
@@ -308,18 +338,27 @@ final class AppModel {
         guard let key = newPage.contextKey, tracksByContext[key] == nil else { return }
         loadingTracks = true
         tracksError[key] = nil
-        let epoch = loadEpoch
         loadEpoch += 1
+        let epoch = loadEpoch
         Task {
             do {
                 // Token may have expired while the app sat idle — revalidate.
                 await refreshAPIClient()
+                var discography: [SpotifyClient.AlbumInfo]?
                 let tracks: [SpotifyClient.Track]
                 switch newPage {
                 case .liked:
                     tracks = try await api!.likedTracks()
                 case let .playlist(id, _):
                     tracks = try await api!.playlistTracks(id)
+                case let .artist(id, _, _):
+                    // Top tracks and discography in parallel; discography is a
+                    // bonus section — its failure must not fail the page.
+                    async let albums = api!.artistAlbums(id)
+                    tracks = try await api!.artistTopTracks(id)
+                    discography = try? await albums
+                case let .album(id, _, _, _):
+                    tracks = try await api!.albumTracks(id)
                 case .search:
                     // Results are fetched by search(), not by page-open.
                     loadingTracks = false
@@ -331,6 +370,10 @@ final class AppModel {
                 // Discard if the user navigated elsewhere mid-flight (P0-3).
                 guard epoch == loadEpoch else { return }
                 tracksByContext[key] = tracks
+                if let discography {
+                    albumsByArtist[key] = discography
+                    dlog("discography \(key) → \(discography.count) releases")
+                }
             } catch {
                 guard epoch == loadEpoch else { return }
                 tracksError[key] = error.localizedDescription
@@ -358,10 +401,10 @@ final class AppModel {
             contextURI = userId.isEmpty ? nil : "spotify:user:\(userId):collection"
         case let .playlist(id, _):
             contextURI = "spotify:playlist:\(id)"
-        case .search:
+        case let .album(id, _, _, _):
+            contextURI = "spotify:album:\(id)"
+        case .search, .artist, .home:
             // Ad-hoc context: results are small — play the window directly.
-            contextURI = nil
-        case .home:
             contextURI = nil
         }
 

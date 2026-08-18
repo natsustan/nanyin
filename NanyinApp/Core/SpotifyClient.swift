@@ -17,6 +17,37 @@ struct SpotifyClient {
         let artists: [String]
         let albumName: String
         let artworkURL: URL?
+
+        /// Copy with album name/artwork filled in — album endpoints return
+        /// simplified track objects without the album field.
+        func withAlbum(_ name: String, artwork: URL?) -> Track {
+            Track(
+                id: id,
+                uri: uri,
+                name: name,
+                durationMs: durationMs,
+                artists: artists,
+                albumName: albumName.isEmpty ? name : albumName,
+                artworkURL: artworkURL ?? artwork
+            )
+        }
+    }
+
+    struct Artist: Identifiable, Hashable {
+        let id: String
+        let name: String
+        let artworkURL: URL?
+    }
+
+    struct AlbumInfo: Identifiable, Hashable {
+        let id: String
+        let name: String
+        let artistName: String
+        /// Release group on the artist's discography: album / single / compilation.
+        let group: String
+        let year: String?
+        let trackCount: Int
+        let artworkURL: URL?
     }
 
     struct PlaylistInfo: Identifiable, Hashable {
@@ -79,14 +110,18 @@ struct SpotifyClient {
         }
     }
 
-    // MARK: - JSON shapes
+    private struct ArtistDTO: Codable {
+        let id: String?
+        let name: String
+        let images: [Image]?
 
+        var toArtist: Artist? {
+            guard let id else { return nil }
+            return Artist(id: id, name: name, artworkURL: images?.first?.url)
+        }
+    }
     private struct Image: Codable {
         let url: URL
-    }
-
-    private struct ArtistDTO: Codable {
-        let name: String
     }
 
     private struct AlbumDTO: Codable {
@@ -162,11 +197,64 @@ struct SpotifyClient {
         let total: Int
     }
 
+    private struct DiscographyAlbumDTO: Codable {
+        let id: String
+        let name: String
+        let images: [Image]?
+        let releaseDate: String?
+        let totalTracks: Int?
+        /// Only present on /v1/artists/{id}/albums responses.
+        let albumGroup: String?
+        let artists: [ArtistDTO]?
+        let tracks: TracksPageDTO?
+
+        struct TracksPageDTO: Codable {
+            let items: [TrackDTO]?
+            let total: Int?
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case id, name, images, artists, tracks
+            case releaseDate = "release_date"
+            case totalTracks = "total_tracks"
+            case albumGroup = "album_group"
+        }
+
+        var toAlbumInfo: AlbumInfo {
+            AlbumInfo(
+                id: id,
+                name: name,
+                artistName: artists?.first?.name ?? "",
+                group: albumGroup ?? "album",
+                year: releaseDate.map { String($0.prefix(4)) },
+                trackCount: totalTracks ?? 0,
+                artworkURL: images?.first?.url
+            )
+        }
+    }
+
+    private struct ArtistAlbumsDTO: Codable {
+        let items: [DiscographyAlbumDTO]?
+        let total: Int
+    }
+
+    private struct AlbumTracksPageDTO: Codable {
+        let items: [TrackDTO]?
+        let total: Int
+    }
     private struct SearchDTO: Codable {
         struct TracksDTO: Codable {
             let items: [TrackDTO]?
         }
+        struct ArtistsDTO: Codable {
+            let items: [ArtistDTO]?
+        }
         let tracks: TracksDTO?
+        let artists: ArtistsDTO?
+    }
+
+    private struct TopTracksDTO: Codable {
+        let tracks: [TrackDTO]?
     }
 
     // MARK: - Endpoints
@@ -247,14 +335,68 @@ struct SpotifyClient {
         return page.total
     }
 
-    /// Track search (ncspot client id keeps /v1/search working).
-    /// Single page — results play as a bounded ad-hoc context (M3).
-    func searchTracks(_ query: String, limit: Int = 50) async throws -> [Track] {
+    /// Track + artist search in one request (ncspot client id keeps
+    /// /v1/search working). Single page — results play as a bounded
+    /// ad-hoc context (M3).
+    func search(_ query: String, limit: Int = 50) async throws -> (tracks: [Track], artists: [Artist]) {
         let dto: SearchDTO = try await get(
             "/v1/search",
-            query: ["q": query, "type": "track", "limit": "\(limit)"]
+            query: ["q": query, "type": "track,artist", "limit": "\(limit)"]
         )
-        return (dto.tracks?.items ?? []).compactMap(\.toTrack)
+        let tracks = (dto.tracks?.items ?? []).compactMap(\.toTrack)
+        let artists = (dto.artists?.items ?? []).compactMap(\.toArtist)
+        return (tracks, artists)
+    }
+
+    /// An artist's top tracks (small — plays as a bounded ad-hoc context).
+    func artistTopTracks(_ artistId: String) async throws -> [Track] {
+        let dto: TopTracksDTO = try await get(
+            "/v1/artists/\(artistId)/top-tracks",
+            query: ["market": "from_token"]
+        )
+        return (dto.tracks ?? []).compactMap(\.toTrack)
+    }
+
+    /// An artist's albums + singles + compilations, paginated.
+    func artistAlbums(_ artistId: String) async throws -> [AlbumInfo] {
+        var result: [AlbumInfo] = []
+        var offset = 0
+        let limit = 50
+        while true {
+            let page: ArtistAlbumsDTO = try await get(
+                "/v1/artists/\(artistId)/albums",
+                query: [
+                    "include_groups": "album,single,compilation",
+                    "limit": "\(limit)",
+                    "offset": "\(offset)",
+                    "market": "from_token",
+                ]
+            )
+            result += (page.items ?? []).map(\.toAlbumInfo)
+            offset += limit
+            if offset >= page.total { break }
+        }
+        return result
+    }
+
+    /// An album's tracks, paginated past the first page embedded in the
+    /// album object. Simplified tracks get the album's name/artwork filled in.
+    func albumTracks(_ albumId: String) async throws -> [Track] {
+        let dto: DiscographyAlbumDTO = try await get("/v1/albums/\(albumId)", query: ["market": "from_token"])
+        let albumName = dto.name
+        let artwork = dto.images?.first?.url
+        var result = (dto.tracks?.items ?? []).compactMap(\.toTrack)
+        let total = dto.tracks?.total ?? result.count
+        var offset = max(result.count, 50)
+        while offset < total {
+            let page: AlbumTracksPageDTO = try await get(
+                "/v1/albums/\(albumId)/tracks",
+                query: ["limit": "50", "offset": "\(offset)", "market": "from_token"]
+            )
+            result += (page.items ?? []).compactMap(\.toTrack)
+            offset += 50
+        }
+        return result.map { $0.withAlbum(albumName, artwork: artwork) }
     }
 
     /// Extracts the 22-char base62 id from any URI/URL form.

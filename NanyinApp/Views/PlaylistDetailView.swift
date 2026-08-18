@@ -14,6 +14,8 @@ struct PlaylistDetailView: View {
     let subtitle: String
     let coverURL: URL?
     let contextKey: String
+    /// Header eyebrow: PLAYLIST / ALBUM / …
+    var label = "PLAYLIST"
 
     private var tracks: [SpotifyClient.Track] {
         app.tracksByContext[contextKey] ?? []
@@ -64,7 +66,7 @@ struct PlaylistDetailView: View {
                 .shadow(color: .black.opacity(0.5), radius: 12, y: 6)
 
             VStack(alignment: .leading, spacing: 10) {
-                Text("PLAYLIST")
+                Text(label)
                     .font(.system(size: 10, weight: .bold))
                     .tracking(1.2)
                     .foregroundStyle(Theme.textSecondary)

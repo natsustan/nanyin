@@ -64,6 +64,20 @@ struct RootView: View {
                 coverURL: info?.artworkURL,
                 contextKey: id
             )
+        case let .artist(id, name, artworkURL):
+            ArtistDetailView(
+                title: name,
+                artworkURL: artworkURL,
+                contextKey: AppModel.artistContextKey(id)
+            )
+        case let .album(id, name, subtitle, artworkURL):
+            PlaylistDetailView(
+                title: name,
+                subtitle: subtitle,
+                coverURL: artworkURL,
+                contextKey: AppModel.albumContextKey(id),
+                label: "ALBUM"
+            )
         }
     }
 }

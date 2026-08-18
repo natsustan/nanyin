@@ -58,7 +58,9 @@ struct TrackListView: View {
     }
 }
 
-private struct TrackRow: View {
+/// Shared row (also used by ArtistDetailView's 10-row top-tracks list, which
+/// renders in a plain VStack inside a ScrollView — no NSTableView there).
+struct TrackRow: View {
     @Environment(AppModel.self) private var app
     let track: SpotifyClient.Track
     let index: Int
