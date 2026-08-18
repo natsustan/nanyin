@@ -1,6 +1,6 @@
 # nanyin — Roadmap
 
-> Status: M0 ✅ · M1 ✅ · hardening ✅ · M2 batch 1 (2.1/2.2/2.5) ✅ · M3 in progress (search done, playback verify pending)
+> Status: M0 ✅ · M1 ✅ · hardening ✅ · M2 batch 1 (2.1/2.2/2.5) ✅ · M3 in progress (search done, playback verify pending) · M4.1 ✅
 > Last updated: 2026-08-18
 
 ## Completed
@@ -102,7 +102,7 @@ Note: ncspot client id keeps /v1/search working (production-approved app).
 
 | # | Item | Notes |
 |---|------|-------|
-| 4.1 | Album / artist pages | `/v1/albums/{id}`, `/v1/artists/{id}/top-tracks`; clickable artist/album in rows and player bar | 1d |
+| 4.1 | Album / artist pages | ✅ done 2026-08-18. Clickable artist/album names in track rows (per-artist buttons, multi-artist tracks each clickable) and player bar (artist → artist page, album → album page; id-less external starts fall back to /v1/tracks fetch). Also fixed pre-existing `withAlbum` bug: album name was overwriting the track title on album pages | 1d |
 | 4.2 | Likes round-trip | Heart toggle in rows + player bar; `/v1/me/tracks` PUT/DELETE; liked cache invalidation | 0.5d |
 | 4.3 | Playlist create/add | `+` in sidebar, context menu "Add to playlist"; `/v1/users/{id}/playlists` + `/v1/playlists/{id}/tracks` (scopes already granted) | 0.5d |
 | 4.4 | Playlist search/filter | Client-side filter row in detail view | 0.25d |
