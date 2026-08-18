@@ -30,18 +30,26 @@ DO NOT "upgrade" the librespot dependency to crates.io or a git rev until #1741 
 3. **Never auto-open a browser from error paths** (cliamp lesson) — only from explicit user action.
 4. **Playback/Web API token split**: Web API uses ncspot client id (`d420a117…`, own quota); playback uses keymaster id (`65b70807…`, required by login5). Keymaster's Web API quota is globally shared and often 429-limited — never call Web API with the keymaster flow's token.
 5. **Large contexts via `nanyin_play_context`** (server-resolved `spotify:playlist:…` / `spotify:user:<id>:collection`). Uploading 1000+ track URIs into Connect state gets 429-rejected silently (rc=0 but nothing plays).
-6. **One running instance at a time**: before launching a test build, `pgrep -f Nanyin.app` and stop existing instances first. Two processes sharing the keychain device id register as one Connect device over two dealer connections — this triggered a fresh penalty on 2026-08-18 (double instance + /v1/search 429 burst → accesspoint TLS drops → probe died at t+130s).
+6. **One running instance, always**: before ANY launch (manual or automated test), run `pgrep -f Nanyin.app` and stop existing instances first. Two processes sharing the keychain device id register as one Connect device over two dealer connections — this triggered the 2026-08-18 penalty. Applies to `open`, `hub start`, and clicking the app in Finder alike.
+7. **Stop-loss discipline during automated testing**: UI automation (keystroke/click scripts) triggers REAL API calls and REAL dealer traffic. At the FIRST sign of spirc/dealer trouble (`failed to put connect state`, spirc task ended, dealer TLS error) — kill ALL nanyin processes immediately and switch to the idle probe. Do not keep automating through errors; each dealer reconnect during a penalty window deepens it. In the 2026-08-18 incident the automated session kept running ~2 minutes past the first `connect state PUT failed` error.
 
-## Account penalization (recognition & procedure)
 
-If playback becomes flaky with repeated `Websocket peer does not respond` + spirc restarts while connect-state PUTs succeed (no 429), the account is being ghosted server-side. Code is NOT the cause. Verify with the idle probe:
+Penalization signatures (any one is enough to suspect; confirm with the probe):
+
+- Flaky playback + repeated `Websocket peer does not respond` + spirc restarts while connect-state PUTs succeed (no 429) — ghosting.
+- `failed to put connect state for new device` / `IncompleteMessage` on PUT + spirc task exit + auto re-init loop — 2026-08-18 first symptom.
+- Accesspoint TLS handshakes silently dropped (TCP connects, then timeout / `-9806 connection closed`) on ap-gew1/gue1/guc3 while `apresolve.spotify.com` and `accounts.spotify.com` (CDN) still work — server-side accesspoint block, NOT a local network issue. Quick triage: `python3 -c "import socket,ssl; s=ssl.create_default_context().wrap_socket(socket.create_connection(('ap-gew1.spotify.com',443),timeout=6),server_hostname='ap-gew1.spotify.com'); print('TLS OK')"` (timeout = blocked).
+
+The code is NOT the cause. Verify with the idle probe:
 
 ```sh
 cd rust
 RT=$(security find-generic-password -s com.nanyin.app.spotify -a playback_refresh_token -w)
 # refresh → token, then:
 cargo run --release --example dealer_test -- <token> nanyin_probe_check
-# "survived 300s" = account fine (investigate code); dies at ~65s = penalized (wait it out)
+# "survived 300s" = account fine (investigate code); dies mid-run (65s–130s
+# observed) = penalized (wait it out). Spirc::new panicking on connect means
+# the block is at TLS-handshake depth — the deepest tier; it softens first.
 ```
 
 Penalties decay within hours to ~a day. During a penalty window, UI/Web-API work proceeds normally (dealer-independent); defer playback-smoothness verification. Recommend using a secondary Premium account for daily listening.
