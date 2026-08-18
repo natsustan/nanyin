@@ -45,14 +45,25 @@ Penalization signatures (any one is enough to suspect; confirm with the probe):
 The code is NOT the cause. Verify with the idle probe:
 
 ```sh
-cd rust
-RT=$(security find-generic-password -s com.nanyin.app.spotify -a playback_refresh_token -w)
-# refresh → token, then:
-cargo run --release --example dealer_test -- <token> nanyin_probe_check
-# "survived 300s" = account fine (investigate code); dies mid-run (65s–130s
-# observed) = penalized (wait it out). Spirc::new panicking on connect means
-# the block is at TLS-handshake depth — the deepest tier; it softens first.
+script/dealer_probe.sh [device_id]   # exits 0 = fine, 1/3 = penalized, 2 = token dead
 ```
+
+**CRITICAL — keymaster refresh tokens ROTATE on every refresh**: the keymaster
+flow (65b70807…) returns a NEW `refresh_token` in the refresh response and
+kills the old one immediately. `dealer_probe.sh` captures the rotated token
+and writes it back to keychain (`playback_refresh_token`). NEVER hand-roll a
+refresh one-liner that drops the rotated token — it burns the keychain
+credential and the next probe dies with `BadCredentials` on a stale token
+(latest probe session: that failure mode masqueraded as a penalty). The app's
+`SpotifyAuth.decodeToken` already does this correctly; only manual refresh
+shell lines are the trap. `web_refresh_token` (ncspot client d420a117…) does
+NOT rotate — it is safe to reuse.
+
+Probe verdicts: "survived 300s" = account fine (investigate code); dies
+mid-run (65s–130s observed) = penalized (wait it out). `Spirc::new` panicking
+on connect means the block is at TLS-handshake depth — the deepest tier; it
+softens first. A probe that connects then dies with `-9806 connection closed`
+at ~90s is the softening stage — still penalized, but recovery is near.
 
 Penalties decay within hours to ~a day. During a penalty window, UI/Web-API work proceeds normally (dealer-independent); defer playback-smoothness verification. Recommend using a secondary Premium account for daily listening.
 
