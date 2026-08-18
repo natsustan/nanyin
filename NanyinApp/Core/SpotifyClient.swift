@@ -353,6 +353,16 @@ struct SpotifyClient {
         return (tracks, artists)
     }
 
+    /// Full artist profile. Track responses contain simplified artist objects
+    /// without images, so artist pages use this endpoint when needed.
+    func artist(_ artistId: String) async throws -> Artist {
+        let dto: ArtistDTO = try await get("/v1/artists/\(artistId)")
+        guard let artist = dto.toArtist else {
+            throw APIError.http(0, "invalid artist")
+        }
+        return artist
+    }
+
     /// An artist's top tracks (small — plays as a bounded ad-hoc context).
     func artistTopTracks(_ artistId: String) async throws -> [Track] {
         let dto: TopTracksDTO = try await get(

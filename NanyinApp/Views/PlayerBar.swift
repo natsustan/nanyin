@@ -8,7 +8,7 @@ import SwiftUI
 struct PlayerBar: View {
     @Environment(AppModel.self) private var app
     @State private var draggingProgress: Double?
-    /// Now-playing block hover — brightens the artist/album links (M4.1).
+    /// Now-playing block hover — brightens the artist link (M4.1).
     @State private var npHover = false
     /// Local playback-position tick — deliberately NOT in AppModel so the
     /// 2Hz update only invalidates this bar, never the track list.
@@ -38,18 +38,6 @@ struct PlayerBar: View {
                             } label: {
                                 Text(np.artist)
                                     .font(.system(size: 11))
-                                    .foregroundStyle(npHover ? .white : Theme.textSecondary)
-                                    .lineLimit(1)
-                            }
-                            .buttonStyle(.plain)
-                            .linkCursor()
-                        }
-                        if !np.album.isEmpty {
-                            Button {
-                                app.openNowPlayingAlbum()
-                            } label: {
-                                Text(np.album)
-                                    .font(.system(size: 10))
                                     .foregroundStyle(npHover ? .white : Theme.textSecondary)
                                     .lineLimit(1)
                             }

@@ -67,6 +67,7 @@ struct RootView: View {
             )
         case let .artist(id, name, artworkURL):
             ArtistDetailView(
+                artistID: id,
                 title: name,
                 artworkURL: artworkURL,
                 contextKey: AppModel.artistContextKey(id)

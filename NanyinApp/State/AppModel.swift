@@ -144,6 +144,10 @@ final class AppModel {
     /// Artist discography (albums + singles + compilations), keyed by artist
     /// context key. Absent = still loading; [] = artist has none.
     private(set) var albumsByArtist: [String: [SpotifyClient.AlbumInfo]] = [:]
+    /// Full artist profiles, including portrait URLs. Track responses only
+    /// carry simplified artists and usually omit their images.
+    private(set) var artistsByID: [String: SpotifyClient.Artist] = [:]
+    private var artistProfileFetches: Set<String> = []
     private(set) var loadingTracks = false
     private(set) var tracksError: [String: String] = [:]
     /// Increments on every open() — stale load tasks compare and discard.
@@ -391,6 +395,11 @@ final class AppModel {
     /// (back/forward into an already-visited page is instant).
     private func navigate(to newPage: Page) {
         page = newPage
+        if case let .artist(id, _, artworkURL) = newPage, artworkURL == nil {
+            // Start the portrait request at the same time as the page data,
+            // instead of waiting for ArtistDetailView's first render.
+            loadArtistProfileIfNeeded(id: id)
+        }
         guard let key = newPage.contextKey, tracksByContext[key] == nil else { return }
         loadingTracks = true
         tracksError[key] = nil
@@ -411,7 +420,18 @@ final class AppModel {
                     // Top tracks and discography in parallel; discography is a
                     // bonus section — its failure must not fail the page.
                     async let albums = api!.artistAlbums(id)
-                    tracks = try await api!.artistTopTracks(id)
+                    do {
+                        tracks = try await api!.artistTopTracks(id)
+                    } catch {
+                        // Preserve a successful discography even when the
+                        // top-tracks endpoint fails, so the artist page can
+                        // still show Albums/Singles alongside the error.
+                        if let releases = try? await albums, epoch == loadEpoch {
+                            albumsByArtist[key] = releases
+                            dlog("discography \(key) → \(releases.count) releases (top tracks failed)")
+                        }
+                        throw error
+                    }
                     discography = try? await albums
                 case let .album(id, _, _, _):
                     tracks = try await api!.albumTracks(id)
@@ -438,6 +458,35 @@ final class AppModel {
             if epoch == loadEpoch {
                 loadingTracks = false
             }
+        }
+    }
+
+    /// Loads a full artist profile when a navigation source did not include
+    /// the artist portrait (track artist objects commonly omit images).
+    func loadArtistProfileIfNeeded(id: String) {
+        guard artistsByID[id] == nil, !artistProfileFetches.contains(id) else { return }
+        artistProfileFetches.insert(id)
+        Task {
+            defer { artistProfileFetches.remove(id) }
+            var artist: SpotifyClient.Artist?
+            do {
+                if let client = api {
+                    // The existing client is already authenticated in the
+                    // normal path; avoid a redundant token check here.
+                    artist = try await client.artist(id)
+                } else {
+                    await refreshAPIClient()
+                    artist = try? await api?.artist(id)
+                }
+            } catch SpotifyClient.APIError.needsAuth {
+                // Refresh only when the current client is actually rejected.
+                await refreshAPIClient()
+                artist = try? await api?.artist(id)
+            } catch {
+                return
+            }
+            guard let artist else { return }
+            artistsByID[id] = artist
         }
     }
 
