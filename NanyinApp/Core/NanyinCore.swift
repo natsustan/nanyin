@@ -110,9 +110,11 @@ enum Core {
 
     // MARK: - FFI calls
 
-    nonisolated static func initializePlayer(accessToken: String) -> Int32 {
+    nonisolated static func initializePlayer(accessToken: String, deviceId: String) -> Int32 {
         installCallbacks()
-        return accessToken.withCString { nanyin_init_player($0) }
+        return accessToken.withCString { token in
+            deviceId.withCString { nanyin_init_player(token, $0) }
+        }
     }
 
     nonisolated static func playTracks(_ uris: [String], startIndex: Int = 0) -> Int32 {

@@ -19,7 +19,11 @@ extern "C" {
 
 /// Initializes session + player + Spotify Connect with an OAuth access token
 /// (obtained by Swift via PKCE with the keymaster client id).
-int32_t nanyin_init_player(const char* access_token);
+/// Initializes session + player + Spotify Connect.
+/// device_id: STABLE per-install identifier (persist by the caller). A fresh
+/// pid-based id every launch floods connect-state with zombie devices and
+/// gets the account throttled (dealer goes silent, spirc dies at ~33s).
+int32_t nanyin_init_player(const char* access_token, const char* device_id);
 
 /// Shuts down Spirc and the session (call on app quit).
 int32_t nanyin_shutdown(void);

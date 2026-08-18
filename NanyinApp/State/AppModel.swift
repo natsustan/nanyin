@@ -172,6 +172,13 @@ final class AppModel {
         }
     }
 
+    /// Clean shutdown of the Rust core (Connect goodbye) — app quit path.
+    func shutdown() {
+        Core.stop()
+        AudioRenderer.shared.stop()
+        NowPlayingManager.shared.clear()
+    }
+
     func signOut() {
         Core.stop()
         AudioRenderer.shared.stop()
@@ -195,7 +202,7 @@ final class AppModel {
     }
 
     private func initPlayerAndUser() async throws {
-        let rc = Core.initializePlayer(accessToken: playbackAccessToken)
+        let rc = Core.initializePlayer(accessToken: playbackAccessToken, deviceId: KeychainStore.spotifyDeviceId)
         guard rc == 0 else {
             let detail = Core.lastErrorMessage() ?? "unknown"
             dlog("player init rc=\(rc): \(detail)")
@@ -435,7 +442,7 @@ final class AppModel {
             do {
                 let token = try await SpotifyAuth.refreshAccessToken(for: .playback)
                 apply(playbackToken: token)
-                let rc = Core.initializePlayer(accessToken: playbackAccessToken)
+                let rc = Core.initializePlayer(accessToken: playbackAccessToken, deviceId: KeychainStore.spotifyDeviceId)
                 if rc == 0 {
                     connectionNote = nil
                 } else {

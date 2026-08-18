@@ -47,3 +47,17 @@ enum KeychainStore {
         SecItemDelete(query as CFDictionary)
     }
 }
+
+extension KeychainStore {
+    /// Stable per-install Spotify Connect device id (created once).
+    static var spotifyDeviceId: String {
+        if let existing = string(forKey: "device_id") {
+            return existing
+        }
+        var bytes = [UInt8](repeating: 0, count: 10)
+        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        let id = bytes.map { String(format: "%02x", $0) }.joined()
+        setString(id, forKey: "device_id")
+        return id
+    }
+}

@@ -175,7 +175,7 @@ fn dirs_home_cache() -> Option<std::path::PathBuf> {
 /// Initializes session + player + Spirc with the given OAuth access token.
 /// Must be called before playback commands.
 #[no_mangle]
-pub extern "C" fn nanyin_init_player(access_token: *const c_char) -> i32 {
+pub extern "C" fn nanyin_init_player(access_token: *const c_char, device_id: *const c_char) -> i32 {
     let _ = env_logger::try_init();
     eprintln!("nanyin_core: init_player called");
 
@@ -192,18 +192,41 @@ pub extern "C" fn nanyin_init_player(access_token: *const c_char) -> i32 {
             }
         }
     };
+    let device = unsafe {
+        if device_id.is_null() {
+            format!("nanyin_{}", std::process::id())
+        } else {
+            match CStr::from_ptr(device_id).to_str() {
+                Ok(s) => s.to_string(),
+                Err(_) => format!("nanyin_{}", std::process::id()),
+            }
+        }
+    };
 
+    // Full rebuild when spirc died (session may exist but be unusable).
+    let needs_init = {
+        let session = SESSION.lock().unwrap();
+        let spirc = SPIRC.lock().unwrap();
+        session.is_none() || spirc.is_none()
+    };
+    if !needs_init {
+        eprintln!("nanyin_core: init_player: already initialized");
+        return 0;
+    }
+    // Tear down stale state before rebuilding (spirc died or fresh start).
     {
-        let guard = SESSION.lock().unwrap();
-        if guard.is_some() {
-            eprintln!("nanyin_core: init_player: already initialized");
-            return 0;
+        let spirc = SPIRC.lock().unwrap().take();
+        let session = SESSION.lock().unwrap().take();
+        PLAYER.lock().unwrap().take();
+        if let (Some(spirc), Some(session)) = (spirc, session) {
+            let _ = spirc.shutdown();
+            session.shutdown();
         }
     }
 
     SHUTTING_DOWN.store(false, Ordering::SeqCst);
 
-    let result = RUNTIME.block_on(init_player_async(&token));
+    let result = RUNTIME.block_on(init_player_async(&token, &device));
 
     match result {
         Ok(()) => {
@@ -218,12 +241,11 @@ pub extern "C" fn nanyin_init_player(access_token: *const c_char) -> i32 {
     }
 }
 
-async fn init_player_async(access_token: &str) -> Result<(), String> {
-    let device_id = format!("nanyin_{}", std::process::id());
+async fn init_player_async(access_token: &str, device_id: &str) -> Result<(), String> {
     eprintln!("nanyin_core: init_player_async starting (device {device_id})");
 
     let session_config = SessionConfig {
-        device_id: device_id.clone(),
+        device_id: device_id.to_string(),
         ..Default::default()
     };
     let credentials = Credentials::with_access_token(access_token);
@@ -291,7 +313,17 @@ async fn init_player_async(access_token: &str) -> Result<(), String> {
     .map_err(|e| format!("spirc init: {e:?}"))?;
 
     let spirc = Arc::new(spirc);
-    RUNTIME.spawn(spirc_task);
+    let spirc_handle = RUNTIME.spawn(spirc_task);
+    // When the spirc task exits (dealer loss, fatal error), mark the session
+    // unusable and tell Swift to re-init — otherwise every command hits a
+    // closed channel forever (the "channel closed" failure mode).
+    RUNTIME.spawn(async move {
+        spirc_handle.await;
+        eprintln!("nanyin_core: spirc task ended — session unusable, notifying");
+        *SPIRC.lock().unwrap() = None;
+        IS_PLAYING.store(false, Ordering::SeqCst);
+        notify_disconnected();
+    });
 
     // Watch the session; when it drops (idle timeout, network loss, revoke),
     // tell Swift to re-authenticate.
