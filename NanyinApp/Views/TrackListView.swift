@@ -137,7 +137,13 @@ private struct TrackRow: View {
             }
         }
         .onTapGesture(count: 2) {
-            app.play(track: track, contextKey: contextKey)
+            // Mutating @Observable state synchronously here runs List's
+            // NSTableView sync inside the mouseDown/delegate window — the
+            // "reentrant operation in its NSTableView delegate" warning
+            // (future assert). Hop out of the event first.
+            Task { @MainActor in
+                app.play(track: track, contextKey: contextKey)
+            }
         }
         .onHover { h in
             hovering = h

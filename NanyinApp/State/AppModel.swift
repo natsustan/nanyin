@@ -151,6 +151,10 @@ final class AppModel {
                 dlog("logged in (silent)")
             } catch {
                 dlog("silent login failed: \(error)")
+                if case SpotifyAuth.AuthError.refreshTokenRevoked = error {
+                    // SpotifyAuth already dropped the dead credential.
+                    authError = "Playback session was revoked — sign in again."
+                }
                 authState = .loggedOut
             }
         }
@@ -176,13 +180,13 @@ final class AppModel {
 
     /// Clean shutdown of the Rust core (Connect goodbye) — app quit path.
     func shutdown() {
-        Core.stop()
+        _ = Core.stop()
         AudioRenderer.shared.stop()
         NowPlayingManager.shared.clear()
     }
 
     func signOut() {
-        Core.stop()
+        _ = Core.stop()
         AudioRenderer.shared.stop()
         SpotifyAuth.setRefreshToken(nil, for: .web)
         SpotifyAuth.setRefreshToken(nil, for: .playback)
@@ -528,7 +532,18 @@ final class AppModel {
                 let rc2 = Core.initializePlayer(accessToken: playbackAccessToken, deviceId: KeychainStore.spotifyDeviceId)
                 connectionNote = rc2 == 0 ? nil : "Connection lost"
             } catch {
-                connectionNote = "Connection lost — sign in again"
+                if case SpotifyAuth.AuthError.refreshTokenRevoked = error {
+                    // Dead credential: surface re-auth instead of a footnote.
+                    // Retrying against a revoked token only feeds risk control.
+                    dlog("playback refresh token revoked — forcing re-auth")
+                    _ = Core.stop()
+                    AudioRenderer.shared.stop()
+                    nowPlaying = nil
+                    authError = "Playback session was revoked — sign in again."
+                    authState = .loggedOut
+                } else {
+                    connectionNote = "Connection lost — sign in again"
+                }
             }
         }
     }

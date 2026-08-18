@@ -54,6 +54,9 @@ enum SpotifyAuth {
         case tokenExchangeFailed(String)
         case userCancelled
         case refreshFailed(String)
+        /// The stored refresh token was rejected (revoked/expired). The
+        /// credential is dead — only an interactive re-auth recovers.
+        case refreshTokenRevoked
 
         var errorDescription: String? {
             switch self {
@@ -62,6 +65,7 @@ enum SpotifyAuth {
             case let .tokenExchangeFailed(msg): "Token exchange failed: \(msg)"
             case .userCancelled: "Sign-in cancelled"
             case let .refreshFailed(msg): "Token refresh failed: \(msg)"
+            case .refreshTokenRevoked: "Session expired — sign in again"
             }
         }
     }
@@ -108,7 +112,14 @@ enum SpotifyAuth {
 
         let (data, response) = try await URLSession.shared.data(for: req)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-            throw AuthError.refreshFailed(String(data: data, encoding: .utf8) ?? "unknown")
+            let body = String(data: data, encoding: .utf8) ?? "unknown"
+            if body.contains("invalid_grant") {
+                // Dead credential: drop it now so we never replay it (token
+                // rotation against a revoked token looks like abuse).
+                setRefreshToken(nil, for: kind)
+                throw AuthError.refreshTokenRevoked
+            }
+            throw AuthError.refreshFailed(body)
         }
         return try decodeToken(data, for: kind)
     }
@@ -235,7 +246,9 @@ enum SpotifyAuth {
 /// Listens on 127.0.0.1:port; drives a chain of OAuth callbacks: each
 /// intermediate callback gets a 302 to the next flow's authorize URL, the
 /// last one gets the success page.
-private final class LoopbackWaiter {
+private final class LoopbackWaiter: @unchecked Sendable {
+    // All mutable state (received, continuation, listener) is confined to
+    // `queue`; NWConnection/timeout closures capture self only onto it.
     struct Callback {
         let code: String?
         let state: String?
@@ -319,7 +332,7 @@ private final class LoopbackWaiter {
 
         // Respond: redirect to next flow, or final success page.
         let response: String
-        if received.count + 1 < flows.count, let code = callback.code {
+        if received.count + 1 < flows.count, callback.code != nil {
             response = """
             HTTP/1.1 302 Found\r\nLocation: \(flows[received.count + 1].authorizeURL)\r\nConnection: close\r\n\r\n
             """

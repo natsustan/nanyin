@@ -321,7 +321,9 @@ async fn init_player_async(access_token: &str, device_id: &str) -> Result<(), St
     // unusable and tell Swift to re-init — otherwise every command hits a
     // closed channel forever (the "channel closed" failure mode).
     RUNTIME.spawn(async move {
-        spirc_handle.await;
+        if let Err(join_err) = spirc_handle.await {
+            eprintln!("nanyin_core: spirc task panicked: {join_err}");
+        }
         eprintln!("nanyin_core: spirc task ended — session unusable, notifying");
         *SPIRC.lock().unwrap() = None;
         IS_PLAYING.store(false, Ordering::SeqCst);
