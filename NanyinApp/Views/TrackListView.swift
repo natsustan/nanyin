@@ -5,6 +5,13 @@
 
 import SwiftUI
 
+private enum TrackTableLayout {
+    static let indexColumnWidth: CGFloat = 64
+    static let albumColumnWidth: CGFloat = 260
+    static let durationColumnWidth: CGFloat = 56
+    static let rowHorizontalInset: CGFloat = 24
+}
+
 /// Classic flat track table: # / TITLE+ARTIST / ALBUM / duration.
 /// Built on List (NSTableView recycling) — the native 60Hz path on macOS.
 /// Single click selects, double-click plays from the context.
@@ -16,10 +23,8 @@ struct TrackListView: View {
     @State private var selectedURI: String?
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider().overlay(Color(white: 0.18))
-            List(selection: $selectedURI) {
+        List(selection: $selectedURI) {
+            Section {
                 ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
                     TrackRow(
                         track: track,
@@ -31,30 +36,37 @@ struct TrackListView: View {
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
                 }
+            } header: {
+                header
+                    .listRowInsets(EdgeInsets())
             }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
-            .environment(\.defaultMinListRowHeight, 40)
         }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .environment(\.defaultMinListRowHeight, 40)
     }
 
     private var header: some View {
         HStack(spacing: 0) {
             Text("#")
-                .frame(width: 44, alignment: .trailing)
-            Text("TITLE")
+                .frame(width: TrackTableLayout.indexColumnWidth, alignment: .center)
+            Text("Track")
                 .frame(maxWidth: .infinity, alignment: .leading)
-            Text("ALBUM")
-                .frame(width: 260, alignment: .leading)
-            Text("⏱")
-                .frame(width: 56, alignment: .trailing)
+            Text("Album")
+                .frame(width: TrackTableLayout.albumColumnWidth, alignment: .leading)
+            Image(systemName: "clock")
+                .font(.system(size: 13, weight: .semibold))
+                .frame(width: TrackTableLayout.durationColumnWidth, alignment: .trailing)
         }
         .font(.system(size: 10, weight: .bold))
         .tracking(0.8)
         .foregroundStyle(Theme.textSecondary)
-        .padding(.horizontal, 24)
+        .padding(.horizontal, TrackTableLayout.rowHorizontalInset)
         .padding(.vertical, 8)
         .background(Theme.background)
+        .overlay(alignment: .bottom) {
+            Divider().overlay(Color(white: 0.18))
+        }
     }
 }
 
@@ -87,7 +99,7 @@ struct TrackRow: View {
                         .foregroundStyle(Theme.textSecondary)
                 }
             }
-            .frame(width: 44, alignment: .trailing)
+            .frame(width: TrackTableLayout.indexColumnWidth, alignment: .center)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(track.name)
@@ -101,14 +113,14 @@ struct TrackRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             albumCell
-                .frame(width: 260, alignment: .leading)
+                .frame(width: TrackTableLayout.albumColumnWidth, alignment: .leading)
 
             Text(Theme.fmtTime(UInt32(track.durationMs)))
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(Theme.textSecondary)
-                .frame(width: 56, alignment: .trailing)
+                .frame(width: TrackTableLayout.durationColumnWidth, alignment: .trailing)
         }
-        .padding(.horizontal, 24)
+        .padding(.horizontal, TrackTableLayout.rowHorizontalInset)
         .padding(.vertical, 7)
         .background(rowBackground)
         .contentShape(Rectangle())
