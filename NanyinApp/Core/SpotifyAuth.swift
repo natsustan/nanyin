@@ -56,7 +56,7 @@ enum SpotifyAuth {
         case refreshFailed(String)
         /// The stored refresh token was rejected (revoked/expired). The
         /// credential is dead — only an interactive re-auth recovers.
-        case refreshTokenRevoked
+        case refreshTokenRevoked(cleanupError: String?)
 
         var errorDescription: String? {
             switch self {
@@ -65,37 +65,42 @@ enum SpotifyAuth {
             case let .tokenExchangeFailed(msg): "Token exchange failed: \(msg)"
             case .userCancelled: "Sign-in cancelled"
             case let .refreshFailed(msg): "Token refresh failed: \(msg)"
-            case .refreshTokenRevoked: "Session expired — sign in again"
+            case let .refreshTokenRevoked(cleanupError):
+                if let cleanupError {
+                    "Session expired and its stored credential could not be removed: \(cleanupError)"
+                } else {
+                    "Session expired — sign in again"
+                }
             }
         }
     }
 
     // MARK: - Token persistence
 
-    static func storedRefreshToken(for kind: TokenKind) -> String? {
+    static func storedRefreshToken(for kind: TokenKind) throws -> String? {
         // Migrate: the original single-flow keymaster token (all scopes incl.
         // streaming) works as the playback refresh token.
-        if kind == .playback, KeychainStore.string(forKey: kind.keychainKey) == nil {
-            if let legacy = KeychainStore.string(forKey: "refresh_token") {
-                KeychainStore.setString(legacy, forKey: kind.keychainKey)
-                KeychainStore.delete(forKey: "refresh_token")
+        if kind == .playback, try KeychainStore.string(forKey: kind.keychainKey) == nil {
+            if let legacy = try KeychainStore.string(forKey: "refresh_token") {
+                try KeychainStore.setString(legacy, forKey: kind.keychainKey)
+                try KeychainStore.delete(forKey: "refresh_token")
                 return legacy
             }
         }
-        return KeychainStore.string(forKey: kind.keychainKey)
+        return try KeychainStore.string(forKey: kind.keychainKey)
     }
 
-    static func setRefreshToken(_ token: String?, for kind: TokenKind) {
+    static func setRefreshToken(_ token: String?, for kind: TokenKind) throws {
         if let token {
-            KeychainStore.setString(token, forKey: kind.keychainKey)
+            try KeychainStore.setString(token, forKey: kind.keychainKey)
         } else {
-            KeychainStore.delete(forKey: kind.keychainKey)
+            try KeychainStore.delete(forKey: kind.keychainKey)
         }
     }
 
     /// Refreshes the access token of the given kind (no browser).
     static func refreshAccessToken(for kind: TokenKind) async throws -> Token {
-        guard let refreshToken = storedRefreshToken(for: kind) else {
+        guard let refreshToken = try storedRefreshToken(for: kind) else {
             throw AuthError.refreshFailed("no stored refresh token")
         }
         var req = URLRequest(url: URL(string: "https://accounts.spotify.com/api/token")!)
@@ -114,10 +119,15 @@ enum SpotifyAuth {
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
             let body = String(data: data, encoding: .utf8) ?? "unknown"
             if body.contains("invalid_grant") {
-                // Dead credential: drop it now so we never replay it (token
-                // rotation against a revoked token looks like abuse).
-                setRefreshToken(nil, for: kind)
-                throw AuthError.refreshTokenRevoked
+                // Preserve the rejected-token diagnosis even if Keychain
+                // cleanup fails, while surfacing that failure to the caller.
+                var cleanupError: String?
+                do {
+                    try setRefreshToken(nil, for: kind)
+                } catch {
+                    cleanupError = error.localizedDescription
+                }
+                throw AuthError.refreshTokenRevoked(cleanupError: cleanupError)
             }
             throw AuthError.refreshFailed(body)
         }
@@ -227,7 +237,7 @@ enum SpotifyAuth {
         }
         let r = try JSONDecoder().decode(Response.self, from: data)
         if let refresh = r.refresh_token {
-            setRefreshToken(refresh, for: kind)
+            try setRefreshToken(refresh, for: kind)
         }
         return Token(
             accessToken: r.access_token,

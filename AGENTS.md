@@ -19,7 +19,7 @@ Run the binary with stderr captured for diagnostics — Swift `dlog` + Rust `epr
 
 `rust/Cargo.toml` points at `research-repos/librespot` via **path dependencies** — NOT crates.io, NOT the git rev. The checkout carries an applied-but-upstream-unmerged patch:
 
-- **PR #1741** (connect: don't answer our own cluster update with another state update). Without it, being an active Connect device causes a state-PUT echo loop → Spotify 429 → dealer websocket ghosting → spirc dies at ~33s → refresh tokens eventually revoked (account-level risk control). This happened; it cost a full debugging day and the account got temporarily penalized.
+- **PR #1741** (connect: don't answer our own cluster update with another state update). Without it, being an active Connect device causes a state-PUT echo loop that has repeatedly ended in Spotify 429 responses. Dealer ghosting, spirc termination, and credential rejection were observed in the same incident, but the server-side causal chain is not publicly documented.
 
 DO NOT "upgrade" the librespot dependency to crates.io or a git rev until #1741 is merged upstream — you would silently drop the patch and re-enter the echo loop. Check upstream: https://github.com/librespot-org/librespot/pull/1741
 
@@ -27,45 +27,42 @@ DO NOT "upgrade" the librespot dependency to crates.io or a git rev until #1741 
 
 ## Spotify risk-control hazards (do not regress)
 
-1. **Stable device id**: pass `KeychainStore.spotifyDeviceId` (persisted per-install) to `nanyin_init_player`. Never derive device ids from PIDs — every launch registering a new Connect device leaves zombies and looks like abuse.
-2. **Token refresh discipline**: on reconnect, reuse the current access token first; only mint via refresh when actually rejected (`AppModel.reconnect`). Token-rotation storms trigger risk control (we had a refresh token REVOKED this way).
+1. **Stable device id**: pass the per-install, successfully persisted `KeychainStore.spotifyDeviceId()` to `nanyin_init_player`. Never derive device ids from PIDs; repeated device registration produced zombie devices during the 2026-08-18 incident and may resemble abusive traffic.
+2. **Token refresh discipline**: on reconnect, reuse the current access token first; only mint via refresh when actually rejected (`AppModel.reconnect`). Repeated refreshes coincided with credential rejection during the 2026-08-18 incident, so avoid refresh storms even though Spotify's internal risk-control rules are not public.
 3. **Never auto-open a browser from error paths** (cliamp lesson) — only from explicit user action.
-4. **Playback/Web API token split**: Web API uses ncspot client id (`d420a117…`, own quota); playback uses keymaster id (`65b70807…`, required by login5). Keymaster's Web API quota is globally shared and often 429-limited — never call Web API with the keymaster flow's token.
-5. **Large contexts via `nanyin_play_context`** (server-resolved `spotify:playlist:…` / `spotify:user:<id>:collection`). Uploading 1000+ track URIs into Connect state gets 429-rejected silently (rc=0 but nothing plays).
-6. **One running instance, always**: before ANY launch (manual or automated test), run `pgrep -f Nanyin.app` and stop existing instances first. Two processes sharing the keychain device id register as one Connect device over two dealer connections — this triggered the 2026-08-18 penalty. Applies to `open`, `hub start`, and clicking the app in Finder alike.
-7. **Stop-loss discipline during automated testing**: UI automation (keystroke/click scripts) triggers REAL API calls and REAL dealer traffic. At the FIRST sign of spirc/dealer trouble (`failed to put connect state`, spirc task ended, dealer TLS error) — kill ALL nanyin processes immediately and switch to the idle probe. Do not keep automating through errors; each dealer reconnect during a penalty window deepens it. In the 2026-08-18 incident the automated session kept running ~2 minutes past the first `connect state PUT failed` error.
+4. **Playback/Web API token split**: Web API uses ncspot client id (`d420a117…`, own quota); playback uses keymaster id (`65b70807…`, required by login5). Web API calls using the keymaster flow repeatedly encountered 429 responses during development, so keep that token out of the Web API path.
+5. **Large contexts via `nanyin_play_context`** (server-resolved `spotify:playlist:…` / `spotify:user:<id>:collection`). In testing, uploading 1000+ track URIs into Connect state returned rc=0 but did not start playback and coincided with 429 responses; prefer server-resolved contexts.
+6. **One running instance, always**: before ANY launch (manual or automated test), run `pgrep -f Nanyin.app` and stop existing instances first. Two processes sharing the Keychain device id create two dealer connections for one Connect identity, producing ambiguous state; this coincided with the suspected 2026-08-18 restriction. Applies to `open`, `hub start`, and clicking the app in Finder alike.
+7. **Stop-loss discipline during automated testing**: UI automation (keystroke/click scripts) triggers REAL API calls and REAL dealer traffic. At the FIRST sign of spirc/dealer trouble (`failed to put connect state`, spirc task ended, dealer TLS error) — kill ALL nanyin processes immediately and switch to the idle probe. Do not keep automating through errors; repeated reconnect traffic may compound a suspected restriction. In the 2026-08-18 incident the automated session kept running ~2 minutes past the first `connect state PUT failed` error.
 
 
-Penalization signatures (any one is enough to suspect; confirm with the probe):
+Possible penalization signatures observed during the 2026-08-18 incident (also rule out local network, stale binaries, and Spotify service failures):
 
 - Flaky playback + repeated `Websocket peer does not respond` + spirc restarts while connect-state PUTs succeed (no 429) — ghosting.
 - `failed to put connect state for new device` / `IncompleteMessage` on PUT + spirc task exit + auto re-init loop — 2026-08-18 first symptom.
-- Accesspoint TLS handshakes silently dropped (TCP connects, then timeout / `-9806 connection closed`) on ap-gew1/gue1/guc3 while `apresolve.spotify.com` and `accounts.spotify.com` (CDN) still work — server-side accesspoint block, NOT a local network issue. Quick triage: `python3 -c "import socket,ssl; s=ssl.create_default_context().wrap_socket(socket.create_connection(('ap-gew1.spotify.com',443),timeout=6),server_hostname='ap-gew1.spotify.com'); print('TLS OK')"` (timeout = blocked).
+- Accesspoint TLS handshakes silently dropped (TCP connects, then timeout / `-9806 connection closed`) on ap-gew1/gue1/guc3 while `apresolve.spotify.com` and `accounts.spotify.com` still work. This is consistent with an accesspoint-specific block or outage, but does not by itself exclude local routing or TLS problems. Quick triage: `python3 -c "import socket,ssl; s=ssl.create_default_context().wrap_socket(socket.create_connection(('ap-gew1.spotify.com',443),timeout=6),server_hostname='ap-gew1.spotify.com'); print('TLS OK')"`.
 
-The code is NOT the cause. Verify with the idle probe:
+Use the idle probe to separate playback activity from dealer stability. Its result is diagnostic evidence, not proof of a specific server-side cause:
 
 ```sh
-script/dealer_probe.sh [device_id]   # exits 0 = fine, 1/3 = penalized, 2 = token dead
+script/dealer_probe.sh [device_id]   # 0 = stable for 300s; 1/3 = dealer failure; 2 = token missing/rejected; 5 = Keychain access failed
 ```
 
-**CRITICAL — keymaster refresh tokens ROTATE on every refresh**: the keymaster
-flow (65b70807…) returns a NEW `refresh_token` in the refresh response and
-kills the old one immediately. `dealer_probe.sh` captures the rotated token
-and writes it back to keychain (`playback_refresh_token`). NEVER hand-roll a
-refresh one-liner that drops the rotated token — it burns the keychain
-credential and the next probe dies with `BadCredentials` on a stale token
-(latest probe session: that failure mode masqueraded as a penalty). The app's
-`SpotifyAuth.decodeToken` already does this correctly; only manual refresh
-shell lines are the trap. `web_refresh_token` (ncspot client d420a117…) does
-NOT rotate — it is safe to reuse.
+**CRITICAL — persist replacement refresh tokens**: Spotify may return a new
+`refresh_token` in a refresh response. The keymaster flow (65b70807…) has been
+observed returning a replacement and then rejecting the previous token.
+`dealer_probe.sh` and `SpotifyAuth.decodeToken` therefore require any returned
+replacement to be saved to Keychain before continuing. If no replacement is
+returned, retain the existing token, as specified by Spotify's public OAuth
+documentation. Do not assume either client flow always or never rotates.
 
-Probe verdicts: "survived 300s" = account fine (investigate code); dies
-mid-run (65s–130s observed) = penalized (wait it out). `Spirc::new` panicking
-on connect means the block is at TLS-handshake depth — the deepest tier; it
-softens first. A probe that connects then dies with `-9806 connection closed`
-at ~90s is the softening stage — still penalized, but recovery is near.
+Probe interpretation based on the 2026-08-18 incident: surviving 300 seconds
+shows that one idle dealer session was stable and shifts suspicion toward the
+application path. Mid-run failures at 65–130 seconds and `-9806 connection
+closed` were observed during the suspected penalty window, but are not unique
+proof of penalization or a guaranteed recovery stage.
 
-Penalties decay within hours to ~a day. During a penalty window, UI/Web-API work proceeds normally (dealer-independent); defer playback-smoothness verification. Recommend using a secondary Premium account for daily listening.
+In the observed incident, the suspected restriction decayed within hours to about a day. Treat that as an incident note, not a guaranteed recovery time. During a suspected penalty window, UI/Web-API work can proceed independently; defer playback-smoothness verification. Recommend using a secondary Premium account for daily listening.
 
 ## librespot API traps (verified the hard way)
 

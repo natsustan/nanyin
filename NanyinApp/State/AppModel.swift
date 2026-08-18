@@ -174,9 +174,10 @@ final class AppModel {
                 dlog("logged in (silent)")
             } catch {
                 if case SpotifyAuth.AuthError.refreshTokenRevoked = error {
-                    // SpotifyAuth already dropped the dead credential.
+                    // SpotifyAuth attempted to drop the dead credential and
+                    // includes any cleanup failure in the surfaced error.
                     dlog("silent login failed: \(error)")
-                    authError = "Playback session was revoked — sign in again."
+                    authError = error.localizedDescription
                     authState = .loggedOut
                 } else if error is PlayerInitError {
                     // Credentials are valid — only the player couldn't start
@@ -232,13 +233,23 @@ final class AppModel {
     func signOut() {
         _ = Core.stop()
         AudioRenderer.shared.stop()
-        SpotifyAuth.setRefreshToken(nil, for: .web)
-        SpotifyAuth.setRefreshToken(nil, for: .playback)
+        var keychainErrors: [String] = []
+        for kind in [SpotifyAuth.TokenKind.web, .playback] {
+            do {
+                try SpotifyAuth.setRefreshToken(nil, for: kind)
+            } catch {
+                keychainErrors.append(error.localizedDescription)
+                dlog("sign-out credential cleanup failed: \(error)")
+            }
+        }
         playbackAccessToken = ""
         webAccessToken = ""
         api = nil
         nowPlaying = nil
         authState = .loggedOut
+        authError = keychainErrors.isEmpty
+            ? nil
+            : "Signed out, but stored credentials could not be removed: \(keychainErrors.joined(separator: "; "))"
     }
 
     private func apply(webToken: SpotifyAuth.Token) {
@@ -252,7 +263,8 @@ final class AppModel {
     }
 
     private func initPlayerAndUser() async throws {
-        let rc = await Core.initializePlayer(accessToken: playbackAccessToken, deviceId: KeychainStore.spotifyDeviceId)
+        let deviceId = try KeychainStore.spotifyDeviceId()
+        let rc = await Core.initializePlayer(accessToken: playbackAccessToken, deviceId: deviceId)
         guard rc == 0 else {
             let detail = Core.lastErrorMessage() ?? "unknown"
             dlog("player init rc=\(rc): \(detail)")
@@ -665,9 +677,17 @@ final class AppModel {
     private func reconnect() {
         connectionNote = "Reconnecting…"
         Task {
+            let deviceId: String
+            do {
+                deviceId = try KeychainStore.spotifyDeviceId()
+            } catch {
+                dlog("device id persistence failed: \(error)")
+                connectionNote = "Connection lost — \(error.localizedDescription)"
+                return
+            }
             // 1) Try re-init with the CURRENT access token — cheap and usually
             //    sufficient (librespot also refreshes internally via login5).
-            let rc = await Core.initializePlayer(accessToken: playbackAccessToken, deviceId: KeychainStore.spotifyDeviceId)
+            let rc = await Core.initializePlayer(accessToken: playbackAccessToken, deviceId: deviceId)
             if rc == 0 {
                 connectionNote = nil
                 return
@@ -676,7 +696,7 @@ final class AppModel {
             do {
                 let token = try await SpotifyAuth.refreshAccessToken(for: .playback)
                 apply(playbackToken: token)
-                let rc2 = await Core.initializePlayer(accessToken: playbackAccessToken, deviceId: KeychainStore.spotifyDeviceId)
+                let rc2 = await Core.initializePlayer(accessToken: playbackAccessToken, deviceId: deviceId)
                 connectionNote = rc2 == 0 ? nil : "Connection lost"
             } catch {
                 if case SpotifyAuth.AuthError.refreshTokenRevoked = error {
@@ -686,7 +706,7 @@ final class AppModel {
                     _ = Core.stop()
                     AudioRenderer.shared.stop()
                     nowPlaying = nil
-                    authError = "Playback session was revoked — sign in again."
+                    authError = error.localizedDescription
                     authState = .loggedOut
                 } else {
                     connectionNote = "Connection lost — sign in again"
