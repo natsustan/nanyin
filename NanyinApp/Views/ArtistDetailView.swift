@@ -233,8 +233,8 @@ private struct AlbumCard: View {
         .buttonStyle(.plain)
         .onHover { hovering in
             self.hovering = hovering
-            if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
         }
+        .linkCursor()
     }
 
     @ViewBuilder

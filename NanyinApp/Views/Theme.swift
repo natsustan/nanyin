@@ -19,3 +19,27 @@ enum Theme {
         return String(format: "%d:%02d", s / 60, s % 60)
     }
 }
+
+/// Pointing-hand cursor while hovering — shared by every clickable link
+/// (track-row artist/album names, player-bar links, artist/album cards).
+struct LinkCursor: ViewModifier {
+    @State private var inside = false
+
+    func body(content: Content) -> some View {
+        content
+            .onHover { hovering in
+                inside = hovering
+                if hovering {
+                    NSCursor.pointingHand.push()
+                } else {
+                    NSCursor.pop()
+                }
+            }
+    }
+}
+
+extension View {
+    func linkCursor() -> some View {
+        modifier(LinkCursor())
+    }
+}

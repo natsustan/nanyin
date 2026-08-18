@@ -14,20 +14,23 @@ struct SpotifyClient {
         let uri: String // spotify:track:...
         let name: String
         let durationMs: Int
-        let artists: [String]
+        /// Artists with ids — clickable names (M4.1) without index alignment.
+        let artists: [Artist]
         let albumName: String
+        let albumId: String?
         let artworkURL: URL?
 
-        /// Copy with album name/artwork filled in — album endpoints return
+        /// Copy with album name/artwork/id filled in — album endpoints return
         /// simplified track objects without the album field.
-        func withAlbum(_ name: String, artwork: URL?) -> Track {
+        func withAlbum(_ album: String, artwork: URL?, albumId: String?) -> Track {
             Track(
                 id: id,
                 uri: uri,
                 name: name,
                 durationMs: durationMs,
                 artists: artists,
-                albumName: albumName.isEmpty ? name : albumName,
+                albumName: albumName.isEmpty ? album : albumName,
+                albumId: albumId ?? self.albumId,
                 artworkURL: artworkURL ?? artwork
             )
         }
@@ -125,6 +128,7 @@ struct SpotifyClient {
     }
 
     private struct AlbumDTO: Codable {
+        let id: String?
         let name: String
         let images: [Image]?
     }
@@ -152,8 +156,9 @@ struct SpotifyClient {
                 uri: uri,
                 name: name,
                 durationMs: durationMs ?? 0,
-                artists: (artists ?? []).map(\.name),
+                artists: (artists ?? []).compactMap(\.toArtist),
                 albumName: album?.name ?? "",
+                albumId: album?.id,
                 artworkURL: album?.images?.first?.url
             )
         }
@@ -396,7 +401,7 @@ struct SpotifyClient {
             result += (page.items ?? []).compactMap(\.toTrack)
             offset += 50
         }
-        return result.map { $0.withAlbum(albumName, artwork: artwork) }
+        return result.map { $0.withAlbum(albumName, artwork: artwork, albumId: albumId) }
     }
 
     /// Extracts the 22-char base62 id from any URI/URL form.

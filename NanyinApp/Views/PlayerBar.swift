@@ -8,6 +8,8 @@ import SwiftUI
 struct PlayerBar: View {
     @Environment(AppModel.self) private var app
     @State private var draggingProgress: Double?
+    /// Now-playing block hover — brightens the artist/album links (M4.1).
+    @State private var npHover = false
     /// Local playback-position tick — deliberately NOT in AppModel so the
     /// 2Hz update only invalidates this bar, never the track list.
     @State private var displayPosition: UInt32 = 0
@@ -19,19 +21,52 @@ struct PlayerBar: View {
                 artwork
                     .frame(width: 52, height: 52)
                     .cornerRadius(4)
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text(app.nowPlaying?.title ?? "Not playing")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.white)
                         .lineLimit(1)
-                    Text(app.nowPlaying?.artist.isEmpty == false ? app.nowPlaying!.artist : "—")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.textSecondary)
-                        .lineLimit(1)
+                    if let np = app.nowPlaying {
+                        if np.artist.isEmpty {
+                            Text("—")
+                                .font(.system(size: 11))
+                                .foregroundStyle(Theme.textSecondary)
+                                .lineLimit(1)
+                        } else {
+                            Button {
+                                app.openNowPlayingArtist()
+                            } label: {
+                                Text(np.artist)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(npHover ? .white : Theme.textSecondary)
+                                    .lineLimit(1)
+                            }
+                            .buttonStyle(.plain)
+                            .linkCursor()
+                        }
+                        if !np.album.isEmpty {
+                            Button {
+                                app.openNowPlayingAlbum()
+                            } label: {
+                                Text(np.album)
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(npHover ? .white : Theme.textSecondary)
+                                    .lineLimit(1)
+                            }
+                            .buttonStyle(.plain)
+                            .linkCursor()
+                        }
+                    } else {
+                        Text("—")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.textSecondary)
+                            .lineLimit(1)
+                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.leading, 16)
+            .onHover { npHover = $0 }
 
             // Transport (center)
             VStack(spacing: 6) {

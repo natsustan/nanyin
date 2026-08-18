@@ -95,18 +95,12 @@ struct TrackRow: View {
                     .foregroundStyle(isCurrent ? Theme.accent : .white)
                     .lineLimit(1)
                 if !track.artists.isEmpty {
-                    Text(track.artists.joined(separator: ", "))
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.textSecondary)
-                        .lineLimit(1)
+                    artistLine
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Text(track.albumName)
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.textSecondary)
-                .lineLimit(1)
+            albumCell
                 .frame(width: 260, alignment: .leading)
 
             Text(Theme.fmtTime(UInt32(track.durationMs)))
@@ -149,6 +143,56 @@ struct TrackRow: View {
         }
         .onHover { h in
             hovering = h
+        }
+    }
+
+    /// Artist names as individual click targets (M4.1). Every parsed artist
+    /// carries an id, so links are never dead.
+    private var artistLine: some View {
+        HStack(spacing: 0) {
+            ForEach(Array(track.artists.enumerated()), id: \.element.id) { index, artist in
+                if index > 0 {
+                    Text(", ")
+                        .foregroundStyle(Theme.textSecondary)
+                }
+                Button {
+                    app.open(.artist(id: artist.id, name: artist.name, artworkURL: artist.artworkURL))
+                } label: {
+                    Text(artist.name)
+                        .foregroundStyle(hovering ? .white : Theme.textSecondary)
+                }
+                .buttonStyle(.plain)
+                .linkCursor()
+            }
+        }
+        .font(.system(size: 11))
+        .lineLimit(1)
+    }
+
+    private var albumCell: some View {
+        Group {
+            if let albumId = track.albumId, !albumId.isEmpty {
+                Button {
+                    app.open(.album(
+                        id: albumId,
+                        name: track.albumName,
+                        subtitle: track.artists.map(\.name).joined(separator: ", "),
+                        artworkURL: track.artworkURL
+                    ))
+                } label: {
+                    Text(track.albumName)
+                        .font(.system(size: 12))
+                        .foregroundStyle(hovering ? .white : Theme.textSecondary)
+                        .lineLimit(1)
+                }
+                .buttonStyle(.plain)
+                .linkCursor()
+            } else {
+                Text(track.albumName)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineLimit(1)
+            }
         }
     }
 

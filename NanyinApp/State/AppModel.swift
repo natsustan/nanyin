@@ -91,8 +91,12 @@ final class AppModel {
     struct NowPlaying {
         let uri: String
         let title: String
+        /// Display string ("A, B") — also feeds MPNowPlayingInfoCenter.
         let artist: String
+        /// Artists with ids — drives the player-bar artist link.
+        let artists: [SpotifyClient.Artist]
         let album: String
+        let albumId: String?
         let artworkURL: URL?
     }
 
@@ -417,6 +421,60 @@ final class AppModel {
         }
     }
 
+    /// Player-bar artist link → first artist's page. When ids aren't known
+    /// yet (track started from another device — TrackChanged carries names
+    /// only), fetch metadata first, then navigate. Failed fetches stop the
+    /// chain instead of retrying forever.
+    func openNowPlayingArtist() {
+        openNowPlaying { np in
+            guard let artist = np.artists.first else { return nil }
+            return .artist(id: artist.id, name: artist.name, artworkURL: artist.artworkURL)
+        }
+    }
+
+    /// Player-bar album link. Same id-missing fallback as the artist link.
+    func openNowPlayingAlbum() {
+        openNowPlaying { np in
+            guard let id = np.albumId, !id.isEmpty else { return nil }
+            return .album(id: id, name: np.album, subtitle: np.artist, artworkURL: np.artworkURL)
+        }
+    }
+
+    private var metadataFetchInFlight = false
+
+    private func openNowPlaying(buildPage: @escaping (NowPlaying) -> Page?) {
+        guard let np = nowPlaying else { return }
+        if let target = buildPage(np) {
+            open(target)
+            return
+        }
+        ensureNowPlayingMetadata { [weak self] succeeded in
+            if succeeded { self?.openNowPlaying(buildPage: buildPage) }
+        }
+    }
+
+    /// Fills in NowPlaying's artist/album ids via /v1/tracks when they're
+    /// missing (external start). Reports whether richer metadata was applied
+    /// — callers use that to decide whether retrying navigation is useful.
+    private func ensureNowPlayingMetadata(completion: @escaping (Bool) -> Void) {
+        guard !metadataFetchInFlight,
+              let uri = nowPlaying?.uri,
+              let id = SpotifyClient.trackId(from: uri) else {
+            completion(false)
+            return
+        }
+        metadataFetchInFlight = true
+        Task {
+            var succeeded = false
+            if let track = try? await api?.track(id: id) {
+                applyNowPlaying(track)
+                succeeded = true
+            }
+            metadataFetchInFlight = false
+            completion(succeeded)
+        }
+    }
+
     /// Plays a track within its loaded context. Large contexts go through
     /// server-resolved context URIs (liked = spotify:user:<id>:collection,
     /// playlist = spotify:playlist:<id>) — uploading thousands of URIs into
@@ -527,7 +585,9 @@ final class AppModel {
                         uri: uri,
                         title: title,
                         artist: artists ?? "",
+                        artists: [],
                         album: album ?? "",
+                        albumId: nil,
                         artworkURL: coverURL.flatMap(URL.init(string:))
                     )
                 }
@@ -555,7 +615,7 @@ final class AppModel {
         if nowPlaying?.uri == uri, nowPlaying?.title != "…" { return }
         guard let id = SpotifyClient.trackId(from: uri) else { return }
         if nowPlaying?.uri != uri {
-            nowPlaying = NowPlaying(uri: uri, title: "…", artist: "", album: "", artworkURL: nil)
+            nowPlaying = NowPlaying(uri: uri, title: "…", artist: "", artists: [], album: "", albumId: nil, artworkURL: nil)
         }
         Task {
             guard let track = try? await api?.track(id: id) else {
@@ -567,8 +627,10 @@ final class AppModel {
             nowPlaying = NowPlaying(
                 uri: uri,
                 title: track.name,
-                artist: track.artists.joined(separator: ", "),
+                artist: track.artists.map(\.name).joined(separator: ", "),
+                artists: track.artists,
                 album: track.albumName,
+                albumId: track.albumId,
                 artworkURL: artwork
             )
         }
@@ -578,8 +640,10 @@ final class AppModel {
         nowPlaying = NowPlaying(
             uri: track.uri,
             title: track.name,
-            artist: track.artists.joined(separator: ", "),
+            artist: track.artists.map(\.name).joined(separator: ", "),
+            artists: track.artists,
             album: track.albumName,
+            albumId: track.albumId,
             artworkURL: track.artworkURL
         )
     }
