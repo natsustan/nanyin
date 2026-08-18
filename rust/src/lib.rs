@@ -43,8 +43,11 @@ use proxy_sink::mk_proxy_sink;
 // ============================================================================
 
 static RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
+    // Default worker count (= CPU cores). A tiny fixed pool starves the
+    // dealer websocket's pong handling under decode/crypto load, tripping
+    // its 3s ping timeout and killing spirc (verified against NullSpot,
+    // which uses the default pool).
     tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
         .enable_all()
         .build()
         .expect("failed to build tokio runtime")
@@ -403,6 +406,10 @@ fn handle_player_event(event: librespot_playback::player::PlayerEvent) {
 
     match event {
         PlayerEvent::Loading { track_id, position_ms, .. } => {
+            // Buffering: audio hasn't started yet. Freeze the interpolated
+            // position clock — otherwise the UI keeps counting from the
+            // previous track's timestamp while nothing is audible.
+            IS_PLAYING.store(false, Ordering::SeqCst);
             *CURRENT_URI.lock().unwrap() = Some(track_id.to_string());
             update_position(position_ms);
             emit_state(json!({
@@ -548,6 +555,10 @@ pub extern "C" fn nanyin_play_tracks(track_uris_json: *const c_char, start_index
     );
 
     eprintln!("nanyin_core: play_tracks → activate + load (index {start_index})");
+    // Optimistic UI guard: stop the position clock immediately so the UI
+    // doesn't keep counting the previous track while this one buffers.
+    IS_PLAYING.store(false, Ordering::SeqCst);
+    update_position(0);
     // Claim the active-device role first — Spirc ignores commands while
     // this device is Not Active (the "ignored while Not Active" WARN).
     if let Err(e) = spirc.activate() {
@@ -589,6 +600,8 @@ pub extern "C" fn nanyin_play_context(context_uri: *const c_char, start_index: u
     };
 
     eprintln!("nanyin_core: play_context → activate + load ({uri}, index {start_index})");
+    IS_PLAYING.store(false, Ordering::SeqCst);
+    update_position(0);
     if let Err(e) = spirc.activate() {
         eprintln!("nanyin_core: play_context: activate FAILED: {e:?}");
         set_last_error(&format!("activate: {e:?}"));

@@ -373,6 +373,7 @@ final class AppModel {
             fetchMetadata(uri: uri)
         case let .trackChanged(uri, durationMs, title, artists, album, coverURL):
             self.durationMs = UInt32(durationMs)
+            dlog("trackChanged coverURL=\(coverURL ?? "nil") title=\(title ?? "nil")")
             // TrackChanged carries full metadata — no Web API round trip needed.
             if let title, !title.isEmpty {
                 let known = nowPlaying?.uri == uri && nowPlaying?.title == title
@@ -412,8 +413,12 @@ final class AppModel {
             nowPlaying = NowPlaying(uri: uri, title: "…", artist: "", album: "", artworkURL: nil)
         }
         Task {
-            guard let track = try? await api?.track(id: id) else { return }
+            guard let track = try? await api?.track(id: id) else {
+                dlog("fetchMetadata FAILED for \(id)")
+                return
+            }
             let artwork = track.artworkURL
+            dlog("fetchMetadata OK artwork=\(artwork?.absoluteString ?? "nil")")
             nowPlaying = NowPlaying(
                 uri: uri,
                 title: track.name,
@@ -434,20 +439,28 @@ final class AppModel {
         )
     }
 
-    /// Session dropped: silently refresh the token and re-init the player
-    /// (cliamp lesson: never auto-open a browser from the error path).
+    /// Session dropped: re-init the player with the existing token first
+    /// (session drops are usually network/dealer events, NOT expired tokens).
+    /// Only refresh the token when the existing one is actually rejected —
+    /// aggressive refresh on every disconnect rotates tokens in a loop,
+    /// which Spotify's risk control treats as abuse and revokes everything
+    /// (learned the hard way: refresh token got invalidated).
     private func reconnect() {
         connectionNote = "Reconnecting…"
         Task {
+            // 1) Try re-init with the CURRENT access token — cheap and usually
+            //    sufficient (librespot also refreshes internally via login5).
+            let rc = Core.initializePlayer(accessToken: playbackAccessToken, deviceId: KeychainStore.spotifyDeviceId)
+            if rc == 0 {
+                connectionNote = nil
+                return
+            }
+            // 2) Only if that fails, mint a fresh token via refresh.
             do {
                 let token = try await SpotifyAuth.refreshAccessToken(for: .playback)
                 apply(playbackToken: token)
-                let rc = Core.initializePlayer(accessToken: playbackAccessToken, deviceId: KeychainStore.spotifyDeviceId)
-                if rc == 0 {
-                    connectionNote = nil
-                } else {
-                    connectionNote = "Connection lost"
-                }
+                let rc2 = Core.initializePlayer(accessToken: playbackAccessToken, deviceId: KeychainStore.spotifyDeviceId)
+                connectionNote = rc2 == 0 ? nil : "Connection lost"
             } catch {
                 connectionNote = "Connection lost — sign in again"
             }
