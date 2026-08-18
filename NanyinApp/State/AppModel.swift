@@ -126,6 +126,12 @@ final class AppModel {
     static func albumContextKey(_ id: String) -> String { "album:\(id)" }
 
     private(set) var page: Page = .home
+    /// Back/forward navigation stacks (page-level, like the desktop client's
+    /// sidebar arrows). open() pushes; goBack()/goForward() walk both ways.
+    private var history: [Page] = []
+    private var forwardStack: [Page] = []
+    var canGoBack: Bool { !history.isEmpty }
+    var canGoForward: Bool { !forwardStack.isEmpty }
     private(set) var playlists: [SpotifyClient.PlaylistInfo] = []
     private(set) var likedCount = 0
     private(set) var tracksByContext: [String: [SpotifyClient.Track]] = [:]
@@ -333,7 +339,33 @@ final class AppModel {
 
     // MARK: - Navigation
 
+    /// Navigate forward to a new page (sidebar click, artist/album link…).
+    /// Pushes the current page onto the history stack and clears the forward
+    /// stack — a fresh branch of navigation.
     func open(_ newPage: Page) {
+        guard newPage != page else { return }
+        history.append(page)
+        forwardStack.removeAll()
+        navigate(to: newPage)
+    }
+
+    /// Walk back to the previous page (sidebar ◀ / ⌘[).
+    func goBack() {
+        guard let previous = history.popLast() else { return }
+        forwardStack.append(page)
+        navigate(to: previous)
+    }
+
+    /// Re-enter a page we walked back from (sidebar ▶ / ⌘]).
+    func goForward() {
+        guard let next = forwardStack.popLast() else { return }
+        history.append(page)
+        navigate(to: next)
+    }
+
+    /// Applies the page and loads its content only when the cache misses
+    /// (back/forward into an already-visited page is instant).
+    private func navigate(to newPage: Page) {
         page = newPage
         guard let key = newPage.contextKey, tracksByContext[key] == nil else { return }
         loadingTracks = true

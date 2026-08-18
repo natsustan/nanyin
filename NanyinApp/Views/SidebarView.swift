@@ -10,18 +10,19 @@ struct SidebarView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Brand
-            HStack(spacing: 8) {
-                Image(systemName: "music.note.quarters")
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(Theme.accent)
-                Text("nanyin")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(.white)
+            // Back/forward navigation (desktop-client style sidebar arrows).
+            HStack(spacing: 4) {
+                NavButton(systemImage: "chevron.left", shortcut: "[", enabled: app.canGoBack) {
+                    app.goBack()
+                }
+                NavButton(systemImage: "chevron.right", shortcut: "]", enabled: app.canGoForward) {
+                    app.goForward()
+                }
+                Spacer()
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 20)
-            .padding(.bottom, 18)
+            .padding(.horizontal, 12)
+            .padding(.top, 16)
+            .padding(.bottom, 10)
 
             entry(.home, icon: Image(systemName: "house"), title: "Home")
             entry(.search, icon: Image(systemName: "magnifyingglass"), title: "Search")
@@ -79,6 +80,32 @@ struct SidebarView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.sidebar)
+    }
+
+    /// Circular back/forward arrow — dims when the stack is empty and carries
+    /// the ⌘[ / ⌘] shortcuts (SwiftUI disables the shortcut with the button).
+    private struct NavButton: View {
+        let systemImage: String
+        let shortcut: KeyEquivalent
+        let enabled: Bool
+        let action: () -> Void
+
+        @State private var hovering = false
+
+        var body: some View {
+            Button(action: action) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(enabled ? (hovering ? .white : Color(white: 0.85)) : Theme.textSecondary)
+                    .frame(width: 28, height: 28)
+                    .background(hovering && enabled ? Color(white: 0.14) : .clear, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!enabled)
+            .keyboardShortcut(shortcut, modifiers: .command)
+            .onHover { hovering = $0 }
+            .help(enabled ? "Back / Forward" : "No navigation history")
+        }
     }
 
     private func entry(
