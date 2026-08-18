@@ -71,6 +71,15 @@ struct PlayerBar: View {
             // Transport (center)
             VStack(spacing: 6) {
                 HStack(spacing: 24) {
+                    Button {
+                        app.toggleShuffle()
+                    } label: {
+                        Image(systemName: "shuffle")
+                            .font(.system(size: 11))
+                            .foregroundStyle(app.shuffle ? Theme.accent : Theme.textSecondary)
+                    }
+                    .buttonStyle(.plain)
+
                     button("backward.fill") { app.prev() }
                     Button {
                         app.togglePlay()
@@ -81,6 +90,15 @@ struct PlayerBar: View {
                     }
                     .buttonStyle(.plain)
                     button("forward.fill") { app.next() }
+
+                    Button {
+                        app.cycleRepeat()
+                    } label: {
+                        Image(systemName: app.repeatMode == .one ? "repeat.1" : "repeat")
+                            .font(.system(size: 11))
+                            .foregroundStyle(app.repeatMode == .off ? Theme.textSecondary : Theme.accent)
+                    }
+                    .buttonStyle(.plain)
                 }
 
                 HStack(spacing: 8) {
@@ -99,26 +117,8 @@ struct PlayerBar: View {
             }
             .frame(maxWidth: .infinity)
 
-            // Shuffle/repeat/volume (right)
+            // Volume (right)
             HStack(spacing: 12) {
-                Button {
-                    app.toggleShuffle()
-                } label: {
-                    Image(systemName: "shuffle")
-                        .font(.system(size: 11))
-                        .foregroundStyle(app.shuffle ? Theme.accent : Theme.textSecondary)
-                }
-                .buttonStyle(.plain)
-
-                Button {
-                    app.cycleRepeat()
-                } label: {
-                    Image(systemName: app.repeatMode == .one ? "repeat.1" : "repeat")
-                        .font(.system(size: 11))
-                        .foregroundStyle(app.repeatMode == .off ? Theme.textSecondary : Theme.accent)
-                }
-                .buttonStyle(.plain)
-
                 Image(systemName: "speaker.fill")
                     .font(.system(size: 10))
                     .foregroundStyle(Theme.textSecondary)
@@ -127,6 +127,7 @@ struct PlayerBar: View {
                     set: { app.setVolume($0) }
                 ), in: 0 ... 1)
                 .controlSize(.mini)
+                .frame(width: 130)
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
             .padding(.trailing, 16)
