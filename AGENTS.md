@@ -5,7 +5,9 @@ Native macOS Spotify client (SwiftUI shell + Rust librespot core). See `ROADMAP.
 ## Build
 
 ```sh
-xcodegen generate   # if Nanyin.xcodeproj missing (XcodeGen via mise)
+./script/build_and_run.sh [--verify|--logs|--debug]
+# terminate → xcodegen (if needed) → xcodebuild → package to dist/ → launch.
+# stderr (dlog + eprintln) captured to build/nanyin-launch.log.
 xcodebuild -project Nanyin.xcodeproj -scheme Nanyin -configuration Debug build
 # Rust core builds as a pre-build phase (cargo via mise: rust@stable)
 # Or standalone: ./rust/build.sh

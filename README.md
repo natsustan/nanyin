@@ -37,6 +37,7 @@ mise use -g rust@stable   # cargo
 Build & run:
 
 ```sh
+./script/build_and_run.sh   # build + package to dist/ + launch (logs: build/nanyin-launch.log)
 xcodegen generate        # if Nanyin.xcodeproj doesn't exist
 open Nanyin.xcodeproj    # ⌘R — the Rust core builds as a pre-build phase
 ```
