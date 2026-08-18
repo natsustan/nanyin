@@ -5,6 +5,7 @@
 
 import Foundation
 import Observation
+import AppKit
 
 /// Unbuffered debug logging to stderr (survives process kill, unlike print).
 func dlog(_ message: @autoclosure () -> String) {
@@ -207,9 +208,16 @@ final class AppModel {
                 try await initPlayerAndUser()
                 nowPlayingMgr.activate()
                 authState = .loggedIn
+                // The browser that hosted the OAuth journey holds focus;
+                // pull nanyin back to the foreground so the completed
+                // sign-in is actually visible (no nanyin:// scheme needed).
+                NSApp.activate(ignoringOtherApps: true)
             } catch {
                 authError = error.localizedDescription
                 authState = .loggedOut
+                // Same for failures: surface the error instead of leaving
+                // the user staring at a closed browser tab.
+                NSApp.activate(ignoringOtherApps: true)
             }
         }
     }
