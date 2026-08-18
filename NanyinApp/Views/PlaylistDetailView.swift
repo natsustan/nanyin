@@ -14,6 +14,7 @@ struct PlaylistDetailView: View {
     let subtitle: String
     let coverURL: URL?
     let contextKey: String
+    var coverAssetName: String? = nil
     /// Header eyebrow: PLAYLIST / ALBUM / …
     var label = "PLAYLIST"
 
@@ -111,7 +112,11 @@ struct PlaylistDetailView: View {
 
     @ViewBuilder
     private var cover: some View {
-        if let url = coverURL {
+        if let coverAssetName {
+            Image(coverAssetName)
+                .resizable()
+                .scaledToFill()
+        } else if let url = coverURL {
             AsyncImage(url: url) { image in
                 image.resizable().scaledToFill()
             } placeholder: {
