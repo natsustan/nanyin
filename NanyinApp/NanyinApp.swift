@@ -40,6 +40,12 @@ struct NanyinApp: App {
         .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(.unified(showsTitle: false))
         .commands {
+            CommandGroup(after: .newItem) {
+                Button("Search") { delegate.appModel.focusSearch() }
+                    .keyboardShortcut("k", modifiers: .command)
+                Button("Find") { delegate.appModel.focusSearch() }
+                    .keyboardShortcut("f", modifiers: .command)
+            }
             CommandMenu("Playback") {
                 Button("Play / Pause") { delegate.appModel.togglePlay() }
                     .keyboardShortcut(.space, modifiers: [])

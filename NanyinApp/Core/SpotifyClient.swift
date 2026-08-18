@@ -162,6 +162,13 @@ struct SpotifyClient {
         let total: Int
     }
 
+    private struct SearchDTO: Codable {
+        struct TracksDTO: Codable {
+            let items: [TrackDTO]?
+        }
+        let tracks: TracksDTO?
+    }
+
     // MARK: - Endpoints
 
     func currentUser() async throws -> UserProfile {
@@ -238,6 +245,16 @@ struct SpotifyClient {
     func likedTotal() async throws -> Int {
         let page: PagedTracksDTO = try await get("/v1/me/tracks", query: ["limit": "1"])
         return page.total
+    }
+
+    /// Track search (ncspot client id keeps /v1/search working).
+    /// Single page — results play as a bounded ad-hoc context (M3).
+    func searchTracks(_ query: String, limit: Int = 50) async throws -> [Track] {
+        let dto: SearchDTO = try await get(
+            "/v1/search",
+            query: ["q": query, "type": "track", "limit": "\(limit)"]
+        )
+        return (dto.tracks?.items ?? []).compactMap(\.toTrack)
     }
 
     /// Extracts the 22-char base62 id from any URI/URL form.

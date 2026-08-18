@@ -1,7 +1,7 @@
 # nanyin — Roadmap
 
-> Status: M0 ✅ · M1 ✅ · hardening ✅ · M2 next
-> Last updated: 2026-08-17
+> Status: M0 ✅ · M1 ✅ · hardening ✅ · M2 batch 1 (2.1/2.2/2.5) ✅ · M3 in progress (search done, playback verify pending)
+> Last updated: 2026-08-18
 
 ## Completed
 
@@ -67,6 +67,12 @@ listening session with zero silent failures.
 | 3.1 | Search page | `/v1/search` (tracks first; type switch tracks/artists/albums/playlists later); debounced-as-you-type (≥300ms) or submit-on-return; reuse TrackListView | |
 | 3.2 | Search results context | Play results as ad-hoc context (`nanyin_play_tracks` window — results are small) | |
 | 3.3 | Search entry point | ⌘F/⌘K focus; sidebar "Search" page (currently disabled) | |
+
+Progress 2026-08-18: 3.1–3.3 implemented (SpotifyClient.searchTracks, SearchView
+with 350ms debounce + ⌘K/⌘F + sidebar entry, results play via nanyin_play_tracks
+window). Search verified end-to-end (`search "daft punk" → 50 tracks`, UI shows
+results). 3.2 playback verify blocked on an account penalty window — retest
+double-click play after the dealer probe survives 300s.
 
 Note: ncspot client id keeps /v1/search working (production-approved app).
 

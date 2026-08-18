@@ -30,6 +30,7 @@ DO NOT "upgrade" the librespot dependency to crates.io or a git rev until #1741 
 3. **Never auto-open a browser from error paths** (cliamp lesson) — only from explicit user action.
 4. **Playback/Web API token split**: Web API uses ncspot client id (`d420a117…`, own quota); playback uses keymaster id (`65b70807…`, required by login5). Keymaster's Web API quota is globally shared and often 429-limited — never call Web API with the keymaster flow's token.
 5. **Large contexts via `nanyin_play_context`** (server-resolved `spotify:playlist:…` / `spotify:user:<id>:collection`). Uploading 1000+ track URIs into Connect state gets 429-rejected silently (rc=0 but nothing plays).
+6. **One running instance at a time**: before launching a test build, `pgrep -f Nanyin.app` and stop existing instances first. Two processes sharing the keychain device id register as one Connect device over two dealer connections — this triggered a fresh penalty on 2026-08-18 (double instance + /v1/search 429 burst → accesspoint TLS drops → probe died at t+130s).
 
 ## Account penalization (recognition & procedure)
 

@@ -103,12 +103,14 @@ final class AppModel {
 
     enum Page: Hashable {
         case home
+        case search
         case liked
         case playlist(id: String, name: String)
 
         var contextKey: String? {
             switch self {
             case .home: nil
+            case .search: "search"
             case .liked: "liked"
             case let .playlist(id, _): id
             }
@@ -237,6 +239,64 @@ final class AppModel {
         }
     }
 
+    // MARK: - Search (M3)
+
+    private(set) var isSearching = false
+    /// Search field text — kept here so it survives page switches.
+    var searchQuery = ""
+    /// Increments on focusSearch() — SearchView focuses its field on change.
+    private(set) var searchFocusToken = 0
+    private var searchEpoch = 0
+    private var searchDebounce: Task<Void, Never>?
+
+    /// ⌘K/⌘F: open the Search page and focus the field.
+    func focusSearch() {
+        open(.search)
+        searchFocusToken += 1
+    }
+
+    /// Debounced as-you-type search (≥300ms, roadmap 3.1).
+    func searchDebounced(_ raw: String) {
+        searchDebounce?.cancel()
+        searchDebounce = Task {
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
+            search(raw)
+        }
+    }
+
+    func search(_ raw: String) {
+        let query = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        searchEpoch += 1
+        searchDebounce?.cancel() // submit supersedes a pending debounce
+        tracksError["search"] = nil
+        guard !query.isEmpty else {
+            tracksByContext["search"] = nil
+            isSearching = false
+            return
+        }
+        let epoch = searchEpoch
+        isSearching = true
+        Task {
+            do {
+                // Token may have expired while idle — revalidate (same as open()).
+                await refreshAPIClient()
+                let results = try await api!.searchTracks(query)
+                // Discard if the query changed mid-flight.
+                guard epoch == searchEpoch else { return }
+                dlog("search \"\(query)\" → \(results.count) tracks")
+                tracksByContext["search"] = results
+            } catch {
+                guard epoch == searchEpoch else { return }
+                tracksError["search"] = error.localizedDescription
+                dlog("search failed: \(error)")
+            }
+            if epoch == searchEpoch {
+                isSearching = false
+            }
+        }
+    }
+
     // MARK: - Navigation
 
     func open(_ newPage: Page) {
@@ -256,6 +316,10 @@ final class AppModel {
                     tracks = try await api!.likedTracks()
                 case let .playlist(id, _):
                     tracks = try await api!.playlistTracks(id)
+                case .search:
+                    // Results are fetched by search(), not by page-open.
+                    loadingTracks = false
+                    return
                 case .home:
                     loadingTracks = false
                     return
@@ -284,13 +348,15 @@ final class AppModel {
         isBuffering = true
 
         let index = tracksByContext[contextKey]?.firstIndex(where: { $0.uri == track.uri }) ?? 0
-
         let contextURI: String?
         switch page {
         case .liked:
             contextURI = userId.isEmpty ? nil : "spotify:user:\(userId):collection"
         case let .playlist(id, _):
             contextURI = "spotify:playlist:\(id)"
+        case .search:
+            // Ad-hoc context: results are small — play the window directly.
+            contextURI = nil
         case .home:
             contextURI = nil
         }

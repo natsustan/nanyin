@@ -24,7 +24,7 @@ struct SidebarView: View {
             .padding(.bottom, 18)
 
             entry(.home, icon: "house", title: "Home")
-            entry(nil, icon: "magnifyingglass", title: "Search (M3)", disabled: true)
+            entry(.search, icon: "magnifyingglass", title: "Search")
 
             Divider()
                 .overlay(Theme.playerBar)

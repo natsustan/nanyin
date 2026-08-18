@@ -26,6 +26,7 @@ targets:
         PRODUCT_NAME: Nanyin
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         # Rust core (built by the script phase below)
         SWIFT_INCLUDE_PATHS: "$(SRCROOT)/build/rust/include"
         OTHER_LDFLAGS: "$(SRCROOT)/build/rust/lib/libnanyin_core.a"

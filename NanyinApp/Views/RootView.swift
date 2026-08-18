@@ -47,6 +47,8 @@ struct RootView: View {
         switch app.page {
         case .home:
             HomeView()
+        case .search:
+            SearchView()
         case .liked:
             PlaylistDetailView(
                 title: "Liked Songs",

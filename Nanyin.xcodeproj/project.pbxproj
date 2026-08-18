@@ -9,12 +9,14 @@
 /* Begin PBXBuildFile section */
 		07B63577FDF07C65ECB1C8F8 /* TrackListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0ABCA0BD4B3997AAFAD3B222 /* TrackListView.swift */; };
 		12DF0C976BBA60272BE36C0C /* PlayerBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = C80E837723AE8C7766A7C226 /* PlayerBar.swift */; };
+		174C7CDED5FCAFF6647A63D9 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 76BAF3B565A2B4E3EC2BC956 /* Assets.xcassets */; };
 		17E0BAB2F9C35F875CAD6ADA /* SpotifyClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63B137ABBBF1D05325A8ED16 /* SpotifyClient.swift */; };
 		2E59FDD89A41153EA44A4C6D /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD9151ECFD94AFE44E6F5E27 /* LoginView.swift */; };
 		4E19435075ABA8781C392919 /* NanyinCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35BBB8602E40346141A75FC2 /* NanyinCore.swift */; };
 		546CCAB14C2F7992EBE66196 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 196502AD5E98E680CB17BD1E /* AppModel.swift */; };
 		56EA31B8738E2B0828584E14 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9DA62671ECF8B9C27AA8947 /* KeychainStore.swift */; };
 		5E25110C2C6F2BB024C3BE81 /* AudioRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 218760DB55414E5851E389CE /* AudioRenderer.swift */; };
+		7437C374A77C622C0833346E /* SearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE5EC6E22F04C69F48FC16FF /* SearchView.swift */; };
 		B4A205276406D7F4468DE96F /* NanyinApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D16BE0C19B1222A7FFFA360C /* NanyinApp.swift */; };
 		B4A7E0B8FA945E0D257077DB /* SpotifyAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3769801C838BE7FD6353F953 /* SpotifyAuth.swift */; };
 		B65B50DEC7B998D60E808DE4 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AE5477026638A4B5FD55C57 /* Theme.swift */; };
@@ -41,12 +43,14 @@
 		63B137ABBBF1D05325A8ED16 /* SpotifyClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotifyClient.swift; sourceTree = "<group>"; };
 		6AE5477026638A4B5FD55C57 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		6FB0ED02C7F536E98940B95B /* SystemConfiguration.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SystemConfiguration.framework; path = System/Library/Frameworks/SystemConfiguration.framework; sourceTree = SDKROOT; };
+		76BAF3B565A2B4E3EC2BC956 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A9DA62671ECF8B9C27AA8947 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
 		AA6332196A87845CF96EBF8B /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		C80E837723AE8C7766A7C226 /* PlayerBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerBar.swift; sourceTree = "<group>"; };
 		D16BE0C19B1222A7FFFA360C /* NanyinApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NanyinApp.swift; sourceTree = "<group>"; };
 		DD9151ECFD94AFE44E6F5E27 /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
 		E9E3597C813B3B8DD81E108D /* SpotifyConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotifyConfig.swift; sourceTree = "<group>"; };
+		EE5EC6E22F04C69F48FC16FF /* SearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -107,6 +111,7 @@
 				C80E837723AE8C7766A7C226 /* PlayerBar.swift */,
 				04B2F003CBEB64EB848C8C21 /* PlaylistDetailView.swift */,
 				0B556474766D52B6DCB11E76 /* RootView.swift */,
+				EE5EC6E22F04C69F48FC16FF /* SearchView.swift */,
 				2639140FEC134E04BA4815ED /* SidebarView.swift */,
 				6AE5477026638A4B5FD55C57 /* Theme.swift */,
 				0ABCA0BD4B3997AAFAD3B222 /* TrackListView.swift */,
@@ -133,6 +138,7 @@
 		FE85B3A2A69326679E9422B4 /* NanyinApp */ = {
 			isa = PBXGroup;
 			children = (
+				76BAF3B565A2B4E3EC2BC956 /* Assets.xcassets */,
 				D16BE0C19B1222A7FFFA360C /* NanyinApp.swift */,
 				FE20EAE131182D00019CD5F1 /* Audio */,
 				044243CFFBA21FEF1B6F93F4 /* Core */,
@@ -151,6 +157,7 @@
 			buildPhases = (
 				16516ABD319F52DD89CAFC33 /* Build Rust Core */,
 				C9BB1F6E7404395BD9751A2C /* Sources */,
+				8AA45472763D92F20B28757D /* Resources */,
 				238571447602A0CB4AA19C9B /* Frameworks */,
 			);
 			buildRules = (
@@ -198,6 +205,17 @@
 		};
 /* End PBXProject section */
 
+/* Begin PBXResourcesBuildPhase section */
+		8AA45472763D92F20B28757D /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				174C7CDED5FCAFF6647A63D9 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
 /* Begin PBXShellScriptBuildPhase section */
 		16516ABD319F52DD89CAFC33 /* Build Rust Core */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -236,6 +254,7 @@
 				12DF0C976BBA60272BE36C0C /* PlayerBar.swift in Sources */,
 				E3147F1FBCE00F908E18C6DA /* PlaylistDetailView.swift in Sources */,
 				EFADA6F87C26753934251814 /* RootView.swift in Sources */,
+				7437C374A77C622C0833346E /* SearchView.swift in Sources */,
 				F9075742F490A3C781517BB4 /* SidebarView.swift in Sources */,
 				B4A7E0B8FA945E0D257077DB /* SpotifyAuth.swift in Sources */,
 				17E0BAB2F9C35F875CAD6ADA /* SpotifyClient.swift in Sources */,
