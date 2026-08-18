@@ -110,7 +110,30 @@ enum Core {
 
     // MARK: - FFI calls
 
-    nonisolated static func initializePlayer(accessToken: String, deviceId: String) -> Int32 {
+    /// Serial queue for nanyin_init_player: the call blocks for the full
+    /// dealer handshake (bounded by the Rust-side PLAYER_INIT_TIMEOUT).
+    /// Never run it on the main thread — a risk-control accesspoint stall
+    /// (observed 95s+) would freeze the whole app. Serial, not concurrent:
+    /// overlapping inits would race the core's stale-state teardown.
+    private static let initQueue = DispatchQueue(
+        label: "com.nanyin.core.init", qos: .userInitiated
+    )
+
+    nonisolated static func initializePlayer(accessToken: String, deviceId: String) async -> Int32 {
+        await withCheckedContinuation { cont in
+            initQueue.async {
+                cont.resume(
+                    returning: initializePlayerBlocking(
+                        accessToken: accessToken, deviceId: deviceId
+                    )
+                )
+            }
+        }
+    }
+
+    nonisolated private static func initializePlayerBlocking(
+        accessToken: String, deviceId: String
+    ) -> Int32 {
         installCallbacks()
         return accessToken.withCString { token in
             deviceId.withCString { nanyin_init_player(token, $0) }

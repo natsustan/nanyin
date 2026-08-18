@@ -208,7 +208,7 @@ final class AppModel {
     }
 
     private func initPlayerAndUser() async throws {
-        let rc = Core.initializePlayer(accessToken: playbackAccessToken, deviceId: KeychainStore.spotifyDeviceId)
+        let rc = await Core.initializePlayer(accessToken: playbackAccessToken, deviceId: KeychainStore.spotifyDeviceId)
         guard rc == 0 else {
             let detail = Core.lastErrorMessage() ?? "unknown"
             dlog("player init rc=\(rc): \(detail)")
@@ -520,7 +520,7 @@ final class AppModel {
         Task {
             // 1) Try re-init with the CURRENT access token — cheap and usually
             //    sufficient (librespot also refreshes internally via login5).
-            let rc = Core.initializePlayer(accessToken: playbackAccessToken, deviceId: KeychainStore.spotifyDeviceId)
+            let rc = await Core.initializePlayer(accessToken: playbackAccessToken, deviceId: KeychainStore.spotifyDeviceId)
             if rc == 0 {
                 connectionNote = nil
                 return
@@ -529,7 +529,7 @@ final class AppModel {
             do {
                 let token = try await SpotifyAuth.refreshAccessToken(for: .playback)
                 apply(playbackToken: token)
-                let rc2 = Core.initializePlayer(accessToken: playbackAccessToken, deviceId: KeychainStore.spotifyDeviceId)
+                let rc2 = await Core.initializePlayer(accessToken: playbackAccessToken, deviceId: KeychainStore.spotifyDeviceId)
                 connectionNote = rc2 == 0 ? nil : "Connection lost"
             } catch {
                 if case SpotifyAuth.AuthError.refreshTokenRevoked = error {

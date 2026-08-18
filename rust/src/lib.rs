@@ -162,6 +162,12 @@ fn update_position(position_ms: u32) {
 /// Audio cache: 1 GiB LRU under ~/Library/Caches/nanyin/audio.
 const AUDIO_CACHE_SIZE_LIMIT: u64 = 1_073_741_824;
 
+/// Upper bound for the Spirc/dealer handshake inside nanyin_init_player.
+/// Risk-control penalty windows drop accesspoint TLS handshakes silently —
+/// observed 95s+ to connect, or never (2026-08-18). Fail fast and loud
+/// instead of freezing the caller in block_on.
+const PLAYER_INIT_TIMEOUT: Duration = Duration::from_secs(30);
+
 fn audio_cache_path() -> Option<std::path::PathBuf> {
     dirs_home_cache().map(|c| c.join("audio"))
 }
@@ -305,14 +311,21 @@ async fn init_player_async(access_token: &str, device_id: &str) -> Result<(), St
         ..Default::default()
     };
 
-    let (spirc, spirc_task) = Spirc::new(
-        connect_config,
-        session.clone(),
-        credentials,
-        player.clone(),
-        mixer as Arc<dyn Mixer>,
+    let (spirc, spirc_task) = tokio::time::timeout(
+        PLAYER_INIT_TIMEOUT,
+        Spirc::new(
+            connect_config,
+            session.clone(),
+            credentials,
+            player.clone(),
+            mixer as Arc<dyn Mixer>,
+        ),
     )
     .await
+    .map_err(|_| {
+        "spirc init: timed out — Spotify accesspoints unreachable (risk-control throttling?)"
+            .to_string()
+    })?
     .map_err(|e| format!("spirc init: {e:?}"))?;
 
     let spirc = Arc::new(spirc);

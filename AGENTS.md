@@ -64,6 +64,11 @@ Penalties decay within hours to ~a day. During a penalty window, UI/Web-API work
 - `get_player_event_channel()` creates a NEW broadcast channel per call — multiple listeners all receive events.
 - `TrackChanged` carries full metadata (title/artists/album/cover URL) — use it; no Web API round trip on track change.
 - Tokio runtime: default worker pool. A small fixed pool starves the dealer pong handler under decode load → false ping timeouts → spirc death.
+- `nanyin_init_player` bounds the `Spirc::new` handshake with a 30s tokio
+  timeout (`PLAYER_INIT_TIMEOUT`), and Swift calls it OFF the main thread
+  (`Core.initializePlayer` → serial queue). Never call the FFI synchronously
+  from MainActor: penalty-window TLS drops stall it 95s+ (the 2026-08-18
+  "login spins forever" report was exactly this, not an auth regression).
 
 ## UI performance rules (60Hz, do not regress)
 
