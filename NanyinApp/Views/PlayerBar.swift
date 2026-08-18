@@ -107,6 +107,18 @@ struct PlayerBar: View {
 
             // Volume (right)
             HStack(spacing: 12) {
+                Button {
+                    app.open(.queue)
+                } label: {
+                    Image(systemName: "list.bullet")
+                        .font(.system(size: 12))
+                        .foregroundStyle(
+                            app.page == .queue ? Theme.accent : Theme.textSecondary
+                        )
+                }
+                .buttonStyle(.plain)
+                .help("Queue")
+
                 Image(systemName: "speaker.fill")
                     .font(.system(size: 10))
                     .foregroundStyle(Theme.textSecondary)

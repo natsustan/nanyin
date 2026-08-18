@@ -15,6 +15,7 @@
 		2E59FDD89A41153EA44A4C6D /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD9151ECFD94AFE44E6F5E27 /* LoginView.swift */; };
 		4E19435075ABA8781C392919 /* NanyinCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35BBB8602E40346141A75FC2 /* NanyinCore.swift */; };
 		546CCAB14C2F7992EBE66196 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 196502AD5E98E680CB17BD1E /* AppModel.swift */; };
+		5682C32BA41F5DA9D173E728 /* QueueView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61564C1B59DBCF7E35D071B3 /* QueueView.swift */; };
 		56EA31B8738E2B0828584E14 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9DA62671ECF8B9C27AA8947 /* KeychainStore.swift */; };
 		5E25110C2C6F2BB024C3BE81 /* AudioRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 218760DB55414E5851E389CE /* AudioRenderer.swift */; };
 		7437C374A77C622C0833346E /* SearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE5EC6E22F04C69F48FC16FF /* SearchView.swift */; };
@@ -41,6 +42,7 @@
 		3769801C838BE7FD6353F953 /* SpotifyAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotifyAuth.swift; sourceTree = "<group>"; };
 		407D7A1D4B2A09E284C8A895 /* Nanyin.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Nanyin.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		5362EA9DE5C94A675FC10A2A /* NowPlayingManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingManager.swift; sourceTree = "<group>"; };
+		61564C1B59DBCF7E35D071B3 /* QueueView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueView.swift; sourceTree = "<group>"; };
 		63B137ABBBF1D05325A8ED16 /* SpotifyClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotifyClient.swift; sourceTree = "<group>"; };
 		6AE5477026638A4B5FD55C57 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		6FB0ED02C7F536E98940B95B /* SystemConfiguration.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SystemConfiguration.framework; path = System/Library/Frameworks/SystemConfiguration.framework; sourceTree = SDKROOT; };
@@ -113,6 +115,7 @@
 				DD9151ECFD94AFE44E6F5E27 /* LoginView.swift */,
 				C80E837723AE8C7766A7C226 /* PlayerBar.swift */,
 				04B2F003CBEB64EB848C8C21 /* PlaylistDetailView.swift */,
+				61564C1B59DBCF7E35D071B3 /* QueueView.swift */,
 				0B556474766D52B6DCB11E76 /* RootView.swift */,
 				EE5EC6E22F04C69F48FC16FF /* SearchView.swift */,
 				2639140FEC134E04BA4815ED /* SidebarView.swift */,
@@ -257,6 +260,7 @@
 				C480BDD897799A7CF14CBCCC /* NowPlayingManager.swift in Sources */,
 				12DF0C976BBA60272BE36C0C /* PlayerBar.swift in Sources */,
 				E3147F1FBCE00F908E18C6DA /* PlaylistDetailView.swift in Sources */,
+				5682C32BA41F5DA9D173E728 /* QueueView.swift in Sources */,
 				EFADA6F87C26753934251814 /* RootView.swift in Sources */,
 				7437C374A77C622C0833346E /* SearchView.swift in Sources */,
 				F9075742F490A3C781517BB4 /* SidebarView.swift in Sources */,

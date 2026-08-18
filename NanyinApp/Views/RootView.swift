@@ -49,6 +49,8 @@ struct RootView: View {
             HomeView()
         case .search:
             SearchView()
+        case .queue:
+            QueueView()
         case .liked:
             PlaylistDetailView(
                 title: "Liked Songs",

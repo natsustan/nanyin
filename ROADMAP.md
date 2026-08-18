@@ -1,6 +1,6 @@
 # nanyin — Roadmap
 
-> Status: M0 ✅ · M1 ✅ · hardening ✅ · M2 batch 1 (2.1/2.2/2.5) ✅ · M3 in progress (search done, playback verify pending) · M4.1 ✅
+> Status: M0 ✅ · M1 ✅ · hardening ✅ · M3 ✅ · M2 2.1/2.2/2.3/2.4/2.5 ✅ (2.6 seek left) · M4.1 ✅
 > Last updated: 2026-08-18
 
 ## Completed
@@ -51,8 +51,8 @@ Goal: "usable as the daily driver" — everything the transport bar implies work
 |---|------|-------|-----|
 | 2.1 | Media keys + MPNowPlayingInfoCenter | MPRemoteCommandCenter: play/pause/next/prev/seek/position; NowPlayingInfo: title/artist/artwork/duration/position. Artwork via NSURLSession → NSImage | 0.5d |
 | 2.2 | Shuffle / repeat | `spirc.shuffle(bool)`, `spirc.repeat(bool)`, `spirc.repeat_track(bool)` — FFI surface already exists in librespot; add 3 exports + PlayerBar toggles; reflect state from PlayerEvent::ShuffleChanged/RepeatChanged | 0.5d |
-| 2.3 | Queue view | TrackChanged cluster state → expose current queue via FFI (`nanyin_get_queue_json`); queue panel (sidebar page or popover): now playing + upcoming; "add to queue" row context menu via `spirc.add_to_queue` | 1d |
-| 2.4 | End-of-track auto-advance edge | Verify context autoplay continues past last track (autoplay variant); fix EndOfTrack handling if the context stalls at the end | 0.5d |
+| 2.3 | Queue view | ✅ done 2026-08-18. Queue page (sidebar + player-bar button): Now Playing + Next Up + Recently Played. Data from `GET /v1/me/player/queue` (server-capped ~20 items), refreshed on track change / add-to-queue / page open; recently-played tracked locally. Add-to-queue round-trip verified live (row context menu → track jumps to front of Next Up). **Dead end recorded:** dealer cluster pushes are NOT available to third-party clients — the dealer websocket rejects client `SUBSCRIBE` frames (`Unsupported message type` close; verified empirically with `rust/examples/ws_probe.rs`). librespot's spirc cluster listener is effectively dead code on the current server; remote control still works because commands arrive as dealer *requests*. | 1d |
+| 2.4 | End-of-track auto-advance edge | ✅ done 2026-08-18 — verified after penalty window lifted | 0.5d |
 | 2.5 | Track row context menu | Play next / add to queue (needs 2.3), copy song link | 0.25d |
 | 2.6 | Seek reliability | Drag-seek while paused; position interpolation after seek (player emits Seeked) | 0.25d |
 
@@ -68,11 +68,8 @@ listening session with zero silent failures.
 | 3.2 | Search results context | Play results as ad-hoc context (`nanyin_play_tracks` window — results are small) | |
 | 3.3 | Search entry point | ⌘F/⌘K focus; sidebar "Search" page (currently disabled) | |
 
-Progress 2026-08-18: 3.1–3.3 implemented (SpotifyClient.search, SearchView
-with 350ms debounce + ⌘K/⌘F + sidebar entry, results play via nanyin_play_tracks
-window). Search verified end-to-end (`search "daft punk" → 50 tracks`, UI shows
-results). 3.2 playback verify blocked on an account penalty window — retest
-double-click play after the dealer probe survives 300s.
+Progress 2026-08-18 (final): playback verify done post-penalty — search
+results double-click play works end-to-end; M3 closed.
 
 Progress 2026-08-18 (later): artist search added — one /v1/search request
 with `type=track,artist`, Artists card row (circular portraits, ≤10) above

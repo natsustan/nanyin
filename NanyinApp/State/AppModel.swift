@@ -109,6 +109,7 @@ final class AppModel {
     enum Page: Hashable {
         case home
         case search
+        case queue
         case liked
         case playlist(id: String, name: String)
         case artist(id: String, name: String, artworkURL: URL?)
@@ -116,7 +117,7 @@ final class AppModel {
 
         var contextKey: String? {
             switch self {
-            case .home: nil
+            case .home, .queue: nil
             case .search: "search"
             case .liked: "liked"
             case let .playlist(id, _): id
@@ -365,6 +366,63 @@ final class AppModel {
         }
     }
 
+    // MARK: - Queue (M2.3)
+
+    struct QueueItem: Identifiable {
+        let track: SpotifyClient.Track
+        var id: String { track.id }
+    }
+
+    /// Context continuation after the current track (Web API order —
+    /// user-added entries first, then the context tail).
+    private(set) var queueUpcoming: [QueueItem] = []
+    /// Recently played, appended locally on each track change.
+    private(set) var queueRecent: [QueueItem] = []
+    private(set) var isLoadingQueue = false
+
+    /// Refreshes the queue from GET /v1/me/player/queue (the active device's
+    /// queue — reflects adds from any client, including ours). Dealer cluster
+    /// pushes are not available to third-party clients (verified: the dealer
+    /// websocket rejects SUBSCRIBE frames), so this polls on the events that
+    /// change the queue instead.
+    func refreshQueue() {
+        guard !isLoadingQueue else { return }
+        isLoadingQueue = true
+        Task {
+            defer { isLoadingQueue = false }
+            do {
+                await refreshAPIClient()
+                let result = try await api!.playerQueue()
+                queueUpcoming = result.upcoming.map { QueueItem(track: $0) }
+            } catch {
+                dlog("queue refresh failed: \(error)")
+            }
+        }
+    }
+
+    /// Delayed refresh after an add-to-queue (server needs a moment to settle).
+    func refreshQueueSoon() {
+        Task {
+            try? await Task.sleep(for: .seconds(1.5))
+            refreshQueue()
+        }
+    }
+
+    /// Tracks local recently-played history for the queue view.
+    private func trackQueueHistory(_ uri: String) {
+        guard let np = nowPlaying, np.uri == uri else { return }
+        let item = QueueItem(track: SpotifyClient.Track(
+            id: np.uri, uri: np.uri, name: np.title,
+            durationMs: Int(durationMs), artists: np.artists,
+            albumName: np.album, albumId: np.albumId, artworkURL: np.artworkURL
+        ))
+        queueRecent.removeAll { $0.track.uri == uri }
+        queueRecent.insert(item, at: 0)
+        if queueRecent.count > 30 {
+            queueRecent.removeLast(queueRecent.count - 30)
+        }
+    }
+
     // MARK: - Navigation
 
     /// Navigate forward to a new page (sidebar click, artist/album link…).
@@ -395,6 +453,9 @@ final class AppModel {
     /// (back/forward into an already-visited page is instant).
     private func navigate(to newPage: Page) {
         page = newPage
+        if case .queue = newPage {
+            refreshQueue()
+        }
         if case let .artist(id, _, artworkURL) = newPage, artworkURL == nil {
             // Start the portrait request at the same time as the page data,
             // instead of waiting for ArtistDetailView's first render.
@@ -439,7 +500,8 @@ final class AppModel {
                     // Results are fetched by search(), not by page-open.
                     loadingTracks = false
                     return
-                case .home:
+                case .queue, .home:
+                    // Live views — nothing to prefetch.
                     loadingTracks = false
                     return
                 }
@@ -562,7 +624,7 @@ final class AppModel {
             contextURI = "spotify:playlist:\(id)"
         case let .album(id, _, _, _):
             contextURI = "spotify:album:\(id)"
-        case .search, .artist, .home:
+        case .search, .artist, .queue, .home:
             // Ad-hoc context: results are small — play the window directly.
             contextURI = nil
         }
@@ -648,6 +710,7 @@ final class AppModel {
             dlog("trackChanged coverURL=\(coverURL ?? "nil") title=\(title ?? "nil")")
             // TrackChanged carries full metadata — no Web API round trip needed.
             if let title, !title.isEmpty {
+                trackQueueHistory(uri)
                 let known = nowPlaying?.uri == uri && nowPlaying?.title == title
                 if !known {
                     nowPlaying = NowPlaying(
@@ -676,6 +739,14 @@ final class AppModel {
             }
         case .endOfTrack:
             break // Spirc auto-advances within the context
+        }
+        // Queue refresh on the two events that shift it (a new track also
+        // fires on skip/prev, covering those without extra triggers).
+        switch event {
+        case .trackChanged, .endOfTrack:
+            refreshQueueSoon()
+        default:
+            break
         }
     }
 
@@ -821,7 +892,10 @@ final class AppModel {
 
     /// Appends to the active queue (right-click → Add to queue).
     func addToQueue(_ track: SpotifyClient.Track) {
-        _ = Core.addToQueue(track.uri)
+        let rc = Core.addToQueue(track.uri)
+        if rc == 0 {
+            refreshQueueSoon()
+        }
     }
 
     func seek(to fraction: Double) {

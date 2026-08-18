@@ -262,6 +262,20 @@ struct SpotifyClient {
         let tracks: [TrackDTO]?
     }
 
+    private struct TracksBatchDTO: Codable {
+        let tracks: [TrackDTO]?
+    }
+
+    private struct PlayerQueueDTO: Codable {
+        let currentlyPlaying: TrackDTO?
+        let queue: [TrackDTO]?
+
+        enum CodingKeys: String, CodingKey {
+            case currentlyPlaying = "currently_playing"
+            case queue
+        }
+    }
+
     // MARK: - Endpoints
 
     func currentUser() async throws -> UserProfile {
@@ -272,6 +286,24 @@ struct SpotifyClient {
         let dto = try await get("/v1/tracks/\(id)") as TrackDTO
         guard let t = dto.toTrack else { throw APIError.http(0, "unplayable track") }
         return t
+    }
+
+    /// Batch track lookup, ≤50 ids per request (queue metadata resolution).
+    func tracks(ids: [String]) async throws -> [Track] {
+        try await ids.isEmpty ? [] : ids.chunked(into: 50).mapAsync { chunk in
+            let dto: TracksBatchDTO = try await self.get(
+                "/v1/tracks", query: ["ids": chunk.joined(separator: ",")]
+            )
+            return (dto.tracks ?? []).compactMap(\ .toTrack)
+        }.flatMap { $0 }
+    }
+
+    /// The active device's queue: current track + upcoming, in play order
+    /// (user-added entries first, then the context continuation). Full track
+    /// objects — no extra metadata resolution needed.
+    func playerQueue() async throws -> (current: Track?, upcoming: [Track]) {
+        let dto: PlayerQueueDTO? = try await get("/v1/me/player/queue")
+        return (dto?.currentlyPlaying?.toTrack, (dto?.queue ?? []).compactMap(\.toTrack))
     }
 
     /// All playlists in the user's library (owned + followed), paginated.
@@ -425,5 +457,20 @@ struct SpotifyClient {
             s = String(s.dropFirst("spotify:track:".count))
         }
         return s.count == 22 ? s : nil
+    }
+}
+
+private extension Array {
+    func chunked(into size: Int) -> [[Element]] {
+        stride(from: 0, to: count, by: size).map { Array(dropFirst($0).prefix(size)) }
+    }
+
+    func mapAsync<T>(_ transform: (Element) async throws -> T) async rethrows -> [T] {
+        var result: [T] = []
+        result.reserveCapacity(count)
+        for element in self {
+            result.append(try await transform(element))
+        }
+        return result
     }
 }
