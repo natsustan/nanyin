@@ -258,8 +258,10 @@ private struct AlbumCard: View {
     private var placeholderCover: some View {
         ZStack {
             Color(white: 0.14)
-            Image(systemName: "music.note")
-                .font(.system(size: 36))
+            Image("MusicIcon")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 36, height: 36)
                 .foregroundStyle(Theme.textSecondary)
         }
     }

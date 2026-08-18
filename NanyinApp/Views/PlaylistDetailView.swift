@@ -125,8 +125,10 @@ struct PlaylistDetailView: View {
     private var placeholderCover: some View {
         ZStack {
             Color(white: 0.14)
-            Image(systemName: "music.note")
-                .font(.system(size: 44))
+            Image("MusicIcon")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 44, height: 44)
                 .foregroundStyle(Theme.textSecondary)
         }
     }

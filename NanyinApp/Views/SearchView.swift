@@ -96,10 +96,10 @@ struct SearchView: View {
     @ViewBuilder
     private var content: some View {
         if let error = app.tracksError["search"] {
-            messageState(icon: "exclamationmark.triangle", text: error, tint: .orange)
+            messageState(icon: Image(systemName: "exclamationmark.triangle"), text: error, tint: .orange)
         } else if trimmedQuery.isEmpty {
             messageState(
-                icon: "magnifyingglass",
+                icon: Image(systemName: "magnifyingglass"),
                 text: "Search Spotify",
                 subtext: "Find songs and artists — press ⌘K from anywhere"
             )
@@ -112,7 +112,7 @@ struct SearchView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                messageState(icon: "music.quarternote.3", text: "No results for “\(trimmedQuery)”")
+                messageState(icon: Image("MusicIcon"), text: "No results for “\(trimmedQuery)”")
             }
         } else {
             // Single scroll region: fixed headers + the List inside
@@ -142,14 +142,16 @@ struct SearchView: View {
     }
 
     private func messageState(
-        icon: String,
+        icon: Image,
         text: String,
         subtext: String? = nil,
         tint: Color = Theme.textSecondary
     ) -> some View {
         VStack(spacing: 10) {
-            Image(systemName: icon)
-                .font(.system(size: 34, weight: .light))
+            icon
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 34, height: 34)
                 .foregroundStyle(tint)
             Text(text)
                 .font(.system(size: 16, weight: .medium))

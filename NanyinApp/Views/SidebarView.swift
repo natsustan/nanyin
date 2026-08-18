@@ -23,8 +23,8 @@ struct SidebarView: View {
             .padding(.top, 20)
             .padding(.bottom, 18)
 
-            entry(.home, icon: "house", title: "Home")
-            entry(.search, icon: "magnifyingglass", title: "Search")
+            entry(.home, icon: Image(systemName: "house"), title: "Home")
+            entry(.search, icon: Image(systemName: "magnifyingglass"), title: "Search")
 
             Divider()
                 .overlay(Theme.playerBar)
@@ -38,7 +38,7 @@ struct SidebarView: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 8)
 
-            entry(.liked, icon: "heart.fill", title: "Liked Songs", count: app.likedCount)
+            entry(.liked, icon: Image(systemName: "heart.fill"), title: "Liked Songs", count: app.likedCount)
 
             if !app.playlists.isEmpty {
                 Text("PLAYLISTS")
@@ -61,7 +61,7 @@ struct SidebarView: View {
                     ForEach(app.playlists) { playlist in
                         entry(
                             .playlist(id: playlist.id, name: playlist.name),
-                            icon: "music.quarternote.3",
+                            icon: Image("MusicIcon"),
                             title: playlist.name,
                             count: playlist.trackCount
                         )
@@ -83,7 +83,7 @@ struct SidebarView: View {
 
     private func entry(
         _ page: AppModel.Page?,
-        icon: String,
+        icon: Image,
         title: String,
         count: Int? = nil,
         disabled: Bool = false
@@ -91,9 +91,10 @@ struct SidebarView: View {
         let isSelected = page != nil && app.page == page
 
         return HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 13))
-                .frame(width: 20)
+            icon
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 20, height: 13)
             Text(title)
                 .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
                 .lineLimit(1)

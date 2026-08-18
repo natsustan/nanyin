@@ -163,8 +163,10 @@ struct PlayerBar: View {
     private var placeholderArtwork: some View {
         ZStack {
             Color(white: 0.14)
-            Image(systemName: "music.note")
-                .font(.system(size: 20))
+            Image("MusicIcon")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 20, height: 20)
                 .foregroundStyle(Theme.textSecondary)
         }
     }
