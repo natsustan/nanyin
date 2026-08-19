@@ -253,12 +253,18 @@ final class AppModel {
                 if !ids.contains(id) {
                     list.insert(override.track, at: 0)
                     ids.insert(id)
+                }
+                if !confirmedServerIDs.contains(id) {
                     count += 1
                 }
-            } else if ids.contains(id) {
-                list.removeAll { $0.id == id }
-                ids.remove(id)
-                count -= 1
+            } else {
+                if ids.contains(id) {
+                    list.removeAll { $0.id == id }
+                    ids.remove(id)
+                }
+                if confirmedServerIDs.contains(id) {
+                    count -= 1
+                }
             }
         }
         tracksByContext["liked"] = list
