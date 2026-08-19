@@ -669,6 +669,7 @@ final class AppModel {
         api = nil
         nowPlaying = nil
         queueEpoch += 1
+        queueCurrent = nil
         queueUpcoming = []
         queueRecent = []
         pendingQueueHistory = nil
@@ -790,6 +791,8 @@ final class AppModel {
         let track: SpotifyClient.Track
     }
 
+    /// The active device's current track from the queue endpoint.
+    private(set) var queueCurrent: SpotifyClient.Track?
     /// Context continuation after the current track (Web API order —
     /// user-added entries first, then the context tail).
     private(set) var queueUpcoming: [QueueItem] = []
@@ -825,6 +828,7 @@ final class AppModel {
                 guard account == accountEpoch,
                       epoch == queueEpoch,
                       authState == .loggedIn else { return }
+                queueCurrent = result.current
                 queueUpcoming = result.upcoming.map { QueueItem(track: $0) }
             } catch {
                 dlog("queue refresh failed: \(error)")

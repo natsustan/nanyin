@@ -14,7 +14,8 @@ struct QueueView: View {
     @Environment(AppModel.self) private var app
 
     private var hasContent: Bool {
-        app.nowPlaying != nil || !app.queueUpcoming.isEmpty || !app.queueRecent.isEmpty
+        app.queueCurrent != nil || app.nowPlaying != nil
+            || !app.queueUpcoming.isEmpty || !app.queueRecent.isEmpty
     }
 
     var body: some View {
@@ -100,7 +101,17 @@ struct QueueView: View {
     @ViewBuilder
     private var nowPlayingSection: some View {
         Section {
-            if let np = app.nowPlaying {
+            if let track = app.queueCurrent {
+                NowPlayingRow(
+                    title: track.name,
+                    artist: track.artists.map(\.name).joined(separator: ", "),
+                    artworkURL: track.artworkURL,
+                    isPlaying: app.nowPlaying?.uri == track.uri && app.isPlaying
+                )
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            } else if let np = app.nowPlaying {
                 NowPlayingRow(
                     title: np.title,
                     artist: np.artist,
