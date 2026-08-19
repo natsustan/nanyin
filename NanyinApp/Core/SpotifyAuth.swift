@@ -99,6 +99,17 @@ enum SpotifyAuth {
         }
     }
 
+    /// Waits for any in-flight playback refresh before deleting its credential,
+    /// so a rotated token cannot be persisted after sign-out.
+    static func clearRefreshToken(for kind: TokenKind) async throws {
+        if kind == .playback {
+            return try await withPlaybackRefreshLock {
+                try setRefreshToken(nil, for: kind)
+            }
+        }
+        try setRefreshToken(nil, for: kind)
+    }
+
     /// Refreshes the access token of the given kind (no browser).
     static func refreshAccessToken(for kind: TokenKind) async throws -> Token {
         if kind == .playback {

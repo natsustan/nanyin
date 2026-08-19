@@ -714,12 +714,12 @@ final class AppModel {
         authState = .loggedOut
     }
 
-    func signOut() {
+    func signOut() async {
         invalidateAccountSession()
         var keychainErrors: [String] = []
         for kind in [SpotifyAuth.TokenKind.web, .playback] {
             do {
-                try SpotifyAuth.setRefreshToken(nil, for: kind)
+                try await SpotifyAuth.clearRefreshToken(for: kind)
             } catch {
                 keychainErrors.append(error.localizedDescription)
                 dlog("sign-out credential cleanup failed: \(error)")
