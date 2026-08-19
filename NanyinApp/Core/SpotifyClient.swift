@@ -83,6 +83,18 @@ struct SpotifyClient {
         self.accessToken = accessToken
     }
 
+    private func request(path: String, method: String, body: Data? = nil) -> URLRequest {
+        var req = URLRequest(url: URL(string: "https://api.spotify.com\(path)")!)
+        req.httpMethod = method
+        req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let body {
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.httpBody = body
+        }
+        return req
+    }
+
     private func get<T: Decodable>(_ path: String, query: [String: String] = [:], retries: Int = 2) async throws -> T {
         var components = URLComponents(string: "https://api.spotify.com\(path)")!
         if !query.isEmpty {
@@ -276,6 +288,10 @@ struct SpotifyClient {
         }
     }
 
+    private struct SaveTracksBody: Codable {
+        let ids: [String]
+    }
+
     // MARK: - Endpoints
 
     func currentUser() async throws -> UserProfile {
@@ -370,6 +386,37 @@ struct SpotifyClient {
     func likedTotal() async throws -> Int {
         let page: PagedTracksDTO = try await get("/v1/me/tracks", query: ["limit": "1"])
         return page.total
+    }
+
+    // MARK: - Likes round-trip (M4.2)
+
+    /// Which of the given track ids are in the user's Liked Songs (≤50 ids).
+    /// NOTE: the server lags behind its own PUT/DELETE by a moment — never
+    /// use this to confirm a save the app just made; keep the optimistic UI.
+    func likedContains(ids: [String]) async throws -> [Bool] {
+        try await get("/v1/me/tracks/contains", query: ["ids": ids.joined(separator: ",")])
+    }
+
+    /// Saves tracks to Liked Songs (PUT /v1/me/tracks).
+    func saveTracks(ids: [String]) async throws {
+        let body = try JSONEncoder().encode(SaveTracksBody(ids: ids))
+        let (_, response) = try await URLSession.shared.data(for: request(path: "/v1/me/tracks", method: "PUT", body: body))
+        try throwIfNotOK(response)
+    }
+
+    /// Removes tracks from Liked Songs (DELETE /v1/me/tracks).
+    func removeTracks(ids: [String]) async throws {
+        let body = try JSONEncoder().encode(SaveTracksBody(ids: ids))
+        let (_, response) = try await URLSession.shared.data(for: request(path: "/v1/me/tracks", method: "DELETE", body: body))
+        try throwIfNotOK(response)
+    }
+
+    private func throwIfNotOK(_ response: URLResponse) throws {
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(status) else {
+            if status == 401 { throw APIError.needsAuth }
+            throw APIError.http(status, "")
+        }
     }
 
     /// Track + artist search in one request (ncspot client id keeps

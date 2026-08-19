@@ -140,6 +140,118 @@ final class AppModel {
     var canGoForward: Bool { !forwardStack.isEmpty }
     private(set) var playlists: [SpotifyClient.PlaylistInfo] = []
     private(set) var likedCount = 0
+
+    // MARK: - Likes (M4.2)
+
+    /// Liked state per track id, seeded when contexts load and kept fresh by
+    /// toggleLikes(). Tracks absent from the set are simply unliked.
+    private(set) var likedIDs: Set<String> = []
+    /// In-flight liked fetches per context key (dedup).
+    private var likedFetches: Set<String> = []
+
+    /// Seeds liked state for a freshly loaded context (the liked page itself
+    /// IS the seed — everything it lists is liked).
+    private func seedLikedState(for tracks: [SpotifyClient.Track], contextKey: String) {
+        if contextKey == "liked" {
+            likedIDs.formUnion(tracks.map(\.id))
+        } else if !tracks.isEmpty, !likedFetches.contains(contextKey) {
+            likedFetches.insert(contextKey)
+            Task {
+                defer { likedFetches.remove(contextKey) }
+                do {
+                    // /v1/me/tracks/contains caps at 50 ids per call.
+                    let ids = Array(tracks.map(\.id).prefix(50))
+                    let flags = try await api!.likedContains(ids: ids)
+                    // Only fill what we didn't already know — a concurrent
+                    // toggle wins over the (delayed) server read.
+                    zip(ids, flags).forEach { id, liked in
+                        if liked { likedIDs.insert(id) } else if contextKey != "liked" { likedIDs.remove(id) }
+                    }
+                } catch {
+                    dlog("likedContains failed for \(contextKey): \(error)")
+                }
+            }
+        }
+    }
+
+    /// Toggles like state for one track. Optimistic UI; server PUT/DELETE
+    /// runs in the background, reverts on failure. Also keeps the liked
+    /// page cache and sidebar count coherent.
+    func toggleLike(_ track: SpotifyClient.Track) {
+        let wasLiked = likedIDs.contains(track.id)
+        if wasLiked {
+            likedIDs.remove(track.id)
+        } else {
+            likedIDs.insert(track.id)
+        }
+        likedCount += wasLiked ? -1 : 1
+
+        // Liked page cache maintenance: unliking removes the row, a like
+        // inserts at top (matches Spotify's newest-first ordering).
+        if var liked = tracksByContext["liked"] {
+            if wasLiked {
+                liked.removeAll { $0.id == track.id }
+                tracksByContext["liked"] = liked
+            } else {
+                liked.insert(track, at: 0)
+                tracksByContext["liked"] = liked
+            }
+        }
+
+        Task {
+            do {
+                if wasLiked {
+                    try await api!.removeTracks(ids: [track.id])
+                } else {
+                    try await api!.saveTracks(ids: [track.id])
+                }
+            } catch SpotifyClient.APIError.needsAuth {
+                await refreshAPIClient()
+                // One retry with the fresh client; revert on second failure.
+                do {
+                    if wasLiked {
+                        try await api!.removeTracks(ids: [track.id])
+                    } else {
+                        try await api!.saveTracks(ids: [track.id])
+                    }
+                } catch {
+                    revertLike(track, wasLiked: wasLiked)
+                }
+            } catch {
+                revertLike(track, wasLiked: wasLiked)
+            }
+        }
+    }
+
+    /// Player-bar like: the playing track may not be in any loaded context —
+    /// build a minimal Track so the same toggle path applies.
+    func toggleLikePlaying() {
+        guard let np = nowPlaying, let id = SpotifyClient.trackId(from: np.uri) else { return }
+        let track = SpotifyClient.Track(
+            id: id, uri: np.uri, name: np.title,
+            durationMs: Int(durationMs), artists: np.artists,
+            albumName: np.album, albumId: np.albumId, artworkURL: np.artworkURL
+        )
+        toggleLike(track)
+    }
+
+    private func revertLike(_ track: SpotifyClient.Track, wasLiked: Bool) {
+        dlog("like toggle FAILED for \(track.id), reverting")
+        if wasLiked {
+            likedIDs.insert(track.id)
+        } else {
+            likedIDs.remove(track.id)
+        }
+        likedCount += wasLiked ? 1 : -1
+        if var liked = tracksByContext["liked"] {
+            if wasLiked {
+                liked.insert(track, at: 0)
+            } else {
+                liked.removeAll { $0.id == track.id }
+            }
+            tracksByContext["liked"] = liked
+        }
+    }
     private(set) var tracksByContext: [String: [SpotifyClient.Track]] = [:]
 
     /// Artist discography (albums + singles + compilations), keyed by artist
@@ -295,8 +407,10 @@ final class AppModel {
                 playlists = lists
                 likedCount = try await api!.likedTotal()
                 // Warm the liked-songs cache; it powers the most common entry point.
-                if tracksByContext["liked"] == nil {
-                    tracksByContext["liked"] = try? await api!.likedTracks()
+                if tracksByContext["liked"] == nil, let liked = try? await api!.likedTracks() {
+                    tracksByContext["liked"] = liked
+                    // Seed here too — navigate() skips loading on cache hits.
+                    likedIDs.formUnion(liked.map(\.id))
                 }
             } catch {
                 dlog("library load failed: \(error)")
@@ -508,6 +622,7 @@ final class AppModel {
                 // Discard if the user navigated elsewhere mid-flight (P0-3).
                 guard epoch == loadEpoch else { return }
                 tracksByContext[key] = tracks
+                seedLikedState(for: tracks, contextKey: key)
                 if let discography {
                     albumsByArtist[key] = discography
                     dlog("discography \(key) → \(discography.count) releases")

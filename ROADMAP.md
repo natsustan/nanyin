@@ -1,7 +1,7 @@
 # nanyin — Roadmap
 
-> Status: M0 ✅ · M1 ✅ · hardening ✅ · M3 ✅ · M2 2.1/2.2/2.3/2.4/2.5 ✅ (2.6 seek left) · M4.1 ✅
-> Last updated: 2026-08-18
+> Status: M0 ✅ · M1 ✅ · hardening ✅ · M3 ✅ · M2 2.1/2.2/2.3/2.4/2.5 ✅ (2.6 paused in watch window) · M4.1 ✅ · M4.2 ✅
+> Last updated: 2026-08-19
 
 ## Completed
 
@@ -100,7 +100,7 @@ Note: ncspot client id keeps /v1/search working (production-approved app).
 | # | Item | Notes |
 |---|------|-------|
 | 4.1 | Album / artist pages | ✅ done 2026-08-18. Clickable artist/album names in track rows (per-artist buttons, multi-artist tracks each clickable) and player bar (artist → artist page, album → album page; id-less external starts fall back to /v1/tracks fetch). Also fixed pre-existing `withAlbum` bug: album name was overwriting the track title on album pages | 1d |
-| 4.2 | Likes round-trip | Heart toggle in rows + player bar; `/v1/me/tracks` PUT/DELETE; liked cache invalidation | 0.5d |
+| 4.2 | Likes round-trip | ✅ done 2026-08-19. Heart toggle in track rows (hover-ghost, liked-solid green; context-menu entry) + player bar; `likedContains` seeds per-context (50-id cap), `toggleLike` optimistic with revert-on-failure (incl. one needsAuth retry); liked page cache + sidebar count maintained. Verified live both directions (unlike from liked page → server `[false]`, save from search → `[true]`). Note: server `contains` lags its own PUT/DELETE — never read-back-validate a just-toggled id. | 0.5d |
 | 4.3 | Playlist create/add | `+` in sidebar, context menu "Add to playlist"; `/v1/users/{id}/playlists` + `/v1/playlists/{id}/tracks` (scopes already granted) | 0.5d |
 | 4.4 | Playlist search/filter | Client-side filter row in detail view | 0.25d |
 | 4.5 | Keyboard navigation | ↑↓ already free via List; Enter = play; Space = play/pause (global) | 0.25d |

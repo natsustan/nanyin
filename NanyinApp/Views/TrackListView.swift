@@ -82,6 +82,7 @@ struct TrackRow: View {
     @State private var hovering = false
 
     private var isCurrent: Bool { app.nowPlaying?.uri == track.uri }
+    private var isLiked: Bool { app.likedIDs.contains(track.id) }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -119,6 +120,19 @@ struct TrackRow: View {
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(Theme.textSecondary)
                 .frame(width: TrackTableLayout.durationColumnWidth, alignment: .trailing)
+
+            // Like toggle (M4.2): always visible when liked, ghost on hover.
+            Button {
+                app.toggleLike(track)
+            } label: {
+                Image(systemName: isLiked ? "heart.fill" : "heart")
+                    .font(.system(size: 11))
+                    .foregroundStyle(isLiked ? Theme.accent : Theme.textSecondary)
+            }
+            .buttonStyle(.plain)
+            .opacity(isLiked ? 1 : (hovering ? 1 : 0))
+            .frame(width: 32, alignment: .center)
+            .help(isLiked ? "Remove from Liked Songs" : "Save to Liked Songs")
         }
         .padding(.horizontal, TrackTableLayout.rowHorizontalInset)
         .padding(.vertical, 7)
@@ -134,6 +148,14 @@ struct TrackRow: View {
                 app.addToQueue(track)
             } label: {
                 Label("Add to Queue", systemImage: "text.badge.plus")
+            }
+            Button {
+                app.toggleLike(track)
+            } label: {
+                Label(
+                    app.likedIDs.contains(track.id) ? "Remove from Liked Songs" : "Save to Liked Songs",
+                    systemImage: app.likedIDs.contains(track.id) ? "heart.slash" : "heart"
+                )
             }
             Divider()
             Button {

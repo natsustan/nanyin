@@ -51,6 +51,21 @@ struct PlayerBar: View {
                             .lineLimit(1)
                     }
                 }
+
+                // Like the playing track (M4.2).
+                if let np = app.nowPlaying, let id = SpotifyClient.trackId(from: np.uri) {
+                    let liked = app.likedIDs.contains(id)
+                    Button {
+                        app.toggleLikePlaying()
+                    } label: {
+                        Image(systemName: liked ? "heart.fill" : "heart")
+                            .font(.system(size: 12))
+                            .foregroundStyle(liked ? Theme.accent : Theme.textSecondary)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.leading, 4)
+                    .help(liked ? "Remove from Liked Songs" : "Save to Liked Songs")
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.leading, 16)
