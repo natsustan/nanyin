@@ -296,6 +296,7 @@ final class AppModel {
         likedServerTotal = total
         likedCount = max(0, count)
         for (id, override) in likeOverrides {
+            guard !activeLikeMutations.contains(id) else { continue }
             if override.liked && confirmedServerIDs.contains(id) {
                 likeOverrides.removeValue(forKey: id)
             } else if serverSnapshotIsComplete,
