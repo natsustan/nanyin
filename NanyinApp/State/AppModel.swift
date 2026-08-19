@@ -43,31 +43,39 @@ final class AppModel {
     private var webAccessToken: String = ""
     private var webTokenExpiry: Date = .distantPast
     private var api: SpotifyClient?
-    private var webRefreshInFlight: Task<SpotifyAuth.Token, Error>?
+    private var accountEpoch = 0
+    private var webRefreshInFlight: (epoch: Int, task: Task<SpotifyAuth.Token, Error>)?
 
     /// Returns a valid Web API access token, refreshing when near expiry.
     /// Concurrent callers share one in-flight refresh.
-    private func ensureWebToken() async throws -> String {
+    private func ensureWebToken(for expectedEpoch: Int? = nil) async throws -> String {
+        let epoch = expectedEpoch ?? accountEpoch
+        guard epoch == accountEpoch else { throw CancellationError() }
         if Date() < webTokenExpiry.addingTimeInterval(-60), !webAccessToken.isEmpty {
             return webAccessToken
         }
-        if let existing = webRefreshInFlight {
-            let token = try await existing.value
+        if let existing = webRefreshInFlight, existing.epoch == epoch {
+            let token = try await existing.task.value
+            guard epoch == accountEpoch else { throw CancellationError() }
             return token.accessToken
         }
         let task = Task<SpotifyAuth.Token, Error> {
             try await SpotifyAuth.refreshAccessToken(for: .web)
         }
-        webRefreshInFlight = task
-        defer { webRefreshInFlight = nil }
+        webRefreshInFlight = (epoch, task)
+        defer {
+            if webRefreshInFlight?.epoch == epoch { webRefreshInFlight = nil }
+        }
         let token = try await task.value
+        guard epoch == accountEpoch else { throw CancellationError() }
         apply(webToken: token)
         return token.accessToken
     }
 
     /// Same as ensureWebToken but rebuilds the API client with a fresh token.
-    private func refreshAPIClient() async {
-        guard let token = try? await ensureWebToken() else { return }
+    private func refreshAPIClient(for expectedEpoch: Int? = nil) async {
+        let epoch = expectedEpoch ?? accountEpoch
+        guard let token = try? await ensureWebToken(for: epoch), epoch == accountEpoch else { return }
         api = SpotifyClient(accessToken: token)
     }
 
@@ -143,11 +151,13 @@ final class AppModel {
 
     // MARK: - Likes (M4.2)
 
-    /// Liked state per track id. Source of truth is the last full /v1/me/tracks
-    /// snapshot, overlaid by in-app toggles. Tracks absent from the set are unliked.
+    /// Liked state per track id, overlaid by in-app toggles.
     private(set) var likedIDs: Set<String> = []
-    /// In-flight likedContains fetches per context key (dedup).
-    private var likedFetches: Set<String> = []
+    /// IDs resolved by contains() before the full library snapshot arrives.
+    private var knownLikeIDs: Set<String> = []
+    private var likedSnapshotComplete = false
+    private var pendingLikeProbeIDs: Set<String> = []
+    private var likedProbeTask: Task<Void, Never>?
     /// Desired like state that must win over a lagged server snapshot.
     /// Cleared once a later GET agrees with the write.
     private var likeOverrides: [String: (liked: Bool, track: SpotifyClient.Track)] = [:]
@@ -160,40 +170,69 @@ final class AppModel {
     /// Minimum gap between opportunistic probes (app-active). Page opens force.
     private let likedRefreshMinInterval: TimeInterval = 15
 
-    /// Seeds liked state for a freshly loaded context (the liked page itself
-    /// IS the seed — everything it lists is liked).
-    private func seedLikedState(for tracks: [SpotifyClient.Track], contextKey: String) {
-        if contextKey == "liked" {
-            applyLikedSnapshot(tracks, total: tracks.count)
-        } else if !tracks.isEmpty, !likedFetches.contains(contextKey) {
-            likedFetches.insert(contextKey)
-            Task {
-                defer { likedFetches.remove(contextKey) }
-                do {
-                    // /v1/me/tracks/contains caps at 50 ids per call.
-                    let ids = Array(tracks.map(\.id).prefix(50))
-                    let flags = try await api!.likedContains(ids: ids)
-                    // A concurrent toggle wins over the (delayed) server read.
-                    zip(ids, flags).forEach { id, liked in
-                        if likeOverrides[id] != nil { return }
-                        if liked {
-                            likedIDs.insert(id)
-                        } else if tracksByContext["liked"]?.contains(where: { $0.id == id }) != true {
-                            // Don't let a lagged contains() unpin a track the
-                            // liked-page snapshot still lists.
-                            likedIDs.remove(id)
-                        }
+    func isLikeKnown(_ id: String) -> Bool {
+        likedSnapshotComplete || knownLikeIDs.contains(id) || likeOverrides[id] != nil
+    }
+
+    /// Rows request state as they become visible. Requests are deduplicated,
+    /// debounced, and drained serially in Spotify's 50-id maximum batches.
+    func requestLikedState(_ id: String) {
+        guard authState == .loggedIn, !isLikeKnown(id) else { return }
+        pendingLikeProbeIDs.insert(id)
+        guard likedProbeTask == nil else { return }
+        let epoch = accountEpoch
+        likedProbeTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(75))
+            guard !Task.isCancelled else { return }
+            await self?.flushLikeProbes(for: epoch)
+        }
+    }
+
+    private func flushLikeProbes(for epoch: Int) async {
+        defer {
+            if epoch == accountEpoch { likedProbeTask = nil }
+        }
+        await refreshAPIClient(for: epoch)
+        guard epoch == accountEpoch,
+              authState == .loggedIn,
+              !likedSnapshotComplete,
+              let api else { return }
+
+        while epoch == accountEpoch, !likedSnapshotComplete, !pendingLikeProbeIDs.isEmpty {
+            let ids = Array(pendingLikeProbeIDs.prefix(50))
+            pendingLikeProbeIDs.subtract(ids)
+            do {
+                let flags = try await api.likedContains(ids: ids)
+                guard epoch == accountEpoch,
+                      authState == .loggedIn,
+                      !likedSnapshotComplete else { return }
+                zip(ids, flags).forEach { id, liked in
+                    knownLikeIDs.insert(id)
+                    if likeOverrides[id] != nil { return }
+                    if liked {
+                        likedIDs.insert(id)
+                    } else if tracksByContext["liked"]?.contains(where: { $0.id == id }) != true {
+                        likedIDs.remove(id)
                     }
-                } catch {
-                    dlog("likedContains failed for \(contextKey): \(error)")
                 }
+            } catch {
+                guard epoch == accountEpoch,
+                      !likedSnapshotComplete,
+                      !Task.isCancelled else { return }
+                pendingLikeProbeIDs.formUnion(ids)
+                dlog("likedContains failed: \(error)")
+                return
             }
         }
     }
 
     /// Applies a full Liked Songs snapshot, then re-applies in-flight toggles
     /// so a lagged GET cannot undo a PUT/DELETE we just made.
-    private func applyLikedSnapshot(_ serverTracks: [SpotifyClient.Track], total: Int) {
+    private func applyLikedSnapshot(
+        _ serverTracks: [SpotifyClient.Track],
+        total: Int,
+        isComplete: Bool = true
+    ) {
         let serverIDs = Set(serverTracks.map(\.id))
         var list = serverTracks
         var ids = serverIDs
@@ -212,11 +251,23 @@ final class AppModel {
             }
         }
         tracksByContext["liked"] = list
+        if !isComplete {
+            ids.formUnion(likedIDs.filter { knownLikeIDs.contains($0) })
+        }
         likedIDs = ids
+        likedSnapshotComplete = likedSnapshotComplete || isComplete
+        if isComplete {
+            pendingLikeProbeIDs.removeAll()
+            likedProbeTask?.cancel()
+        }
         likedServerTotal = total
         likedCount = max(0, count)
-        for (id, override) in likeOverrides where override.liked == serverIDs.contains(id) {
-            likeOverrides.removeValue(forKey: id)
+        for (id, override) in likeOverrides {
+            if override.liked && serverIDs.contains(id) {
+                likeOverrides.removeValue(forKey: id)
+            } else if isComplete && !override.liked && !serverIDs.contains(id) {
+                likeOverrides.removeValue(forKey: id)
+            }
         }
     }
 
@@ -248,6 +299,7 @@ final class AppModel {
         }
         isRefreshingLiked = true
         lastLikedRefresh = Date()
+        let epoch = accountEpoch
         let loadingToken = tracksByContext["liked"] == nil
             ? beginTrackLoading(contextKey: "liked")
             : nil
@@ -256,20 +308,26 @@ final class AppModel {
         }
         Task {
             defer {
-                isRefreshingLiked = false
-                if let loadingToken {
-                    endTrackLoading(contextKey: "liked", token: loadingToken)
+                if epoch == accountEpoch {
+                    isRefreshingLiked = false
+                    if let loadingToken {
+                        endTrackLoading(contextKey: "liked", token: loadingToken)
+                    }
                 }
             }
             do {
-                await refreshAPIClient()
-                guard let api else { return }
+                await refreshAPIClient(for: epoch)
+                guard epoch == accountEpoch, let api else { return }
                 let prefix = try await api.likedTracksPrefix()
+                guard epoch == accountEpoch else { return }
                 let cached = tracksByContext["liked"] ?? []
                 let prefixMatches = Array(cached.prefix(prefix.tracks.count)).map(\.id) == prefix.tracks.map(\.id)
                 let previousTotal = likedServerTotal ?? likedCount
                 // Skip a full re-page when the newest 50 and the total agree.
-                if likeOverrides.isEmpty, prefixMatches, previousTotal == prefix.total {
+                if likedSnapshotComplete,
+                   likeOverrides.isEmpty,
+                   prefixMatches,
+                   previousTotal == prefix.total {
                     if tracksByContext["liked"] == nil {
                         tracksByContext["liked"] = []
                     }
@@ -287,8 +345,12 @@ final class AppModel {
                 // not wait for the rest of the library.
                 if !cached.isEmpty {
                     let merged = mergeLikedPrefix(cached: cached, prefix: prefix.tracks)
-                    applyLikedSnapshot(merged, total: prefix.total)
-                    let reconciled = likeOverrides.isEmpty
+                    applyLikedSnapshot(
+                        merged,
+                        total: prefix.total,
+                        isComplete: likedSnapshotComplete
+                    )
+                    let reconciled = likedSnapshotComplete && likeOverrides.isEmpty
                         && (merged.count - cached.count) == (prefix.total - previousTotal)
                     if reconciled { return }
                 } else {
@@ -297,13 +359,16 @@ final class AppModel {
                     // prefix-only snapshot would unpin hearts on other pages.
                     tracksByContext["liked"] = prefix.tracks
                     likedIDs.formUnion(prefix.tracks.map(\.id))
+                    knownLikeIDs.formUnion(prefix.tracks.map(\.id))
                     likedServerTotal = prefix.total
                     likedCount = prefix.total
                 }
 
                 let tracks = try await api.likedTracks(after: prefix)
+                guard epoch == accountEpoch else { return }
                 applyLikedSnapshot(tracks, total: prefix.total)
             } catch {
+                guard epoch == accountEpoch else { return }
                 if loadingToken != nil { tracksError["liked"] = error.localizedDescription }
                 dlog("liked refresh failed: \(error)")
             }
@@ -318,8 +383,14 @@ final class AppModel {
     /// runs in the background, reverts on failure. Also keeps the liked
     /// page cache and sidebar count coherent.
     func toggleLike(_ track: SpotifyClient.Track) {
+        guard authState == .loggedIn else { return }
+        guard isLikeKnown(track.id) else {
+            requestLikedState(track.id)
+            return
+        }
         let wasLiked = likedIDs.contains(track.id)
         rememberLikeOverride(track, liked: !wasLiked)
+        knownLikeIDs.insert(track.id)
         if wasLiked {
             likedIDs.remove(track.id)
         } else {
@@ -340,20 +411,24 @@ final class AppModel {
         }
 
         if activeLikeMutations.insert(track.id).inserted {
+            let epoch = accountEpoch
             Task { [weak self] in
-                await self?.flushLikeMutations(for: track.id)
+                await self?.flushLikeMutations(for: track.id, epoch: epoch)
             }
         }
     }
 
     /// Persists toggles for one track in order. If the user toggles again while
     /// a request is in flight, only the latest desired state is sent next.
-    private func flushLikeMutations(for id: String) async {
-        defer { activeLikeMutations.remove(id) }
-        while let attempted = likeOverrides[id] {
+    private func flushLikeMutations(for id: String, epoch: Int) async {
+        defer {
+            if epoch == accountEpoch { activeLikeMutations.remove(id) }
+        }
+        while epoch == accountEpoch, let attempted = likeOverrides[id] {
             do {
-                try await persistLike(id: id, liked: attempted.liked)
+                try await persistLike(id: id, liked: attempted.liked, epoch: epoch)
             } catch {
+                guard epoch == accountEpoch else { return }
                 // An older failed request must not undo a newer click.
                 guard likeOverrides[id]?.liked == attempted.liked else { continue }
                 revertLike(attempted.track, failedDesired: attempted.liked)
@@ -366,19 +441,23 @@ final class AppModel {
         }
     }
 
-    private func persistLike(id: String, liked: Bool) async throws {
-        let mutate: () async throws -> Void = {
+    private func persistLike(id: String, liked: Bool, epoch: Int) async throws {
+        func mutate(using api: SpotifyClient) async throws {
             if liked {
-                try await self.api!.saveTracks(ids: [id])
+                try await api.saveTracks(ids: [id])
             } else {
-                try await self.api!.removeTracks(ids: [id])
+                try await api.removeTracks(ids: [id])
             }
         }
+
+        guard epoch == accountEpoch, let api = self.api else { throw CancellationError() }
         do {
-            try await mutate()
+            try await mutate(using: api)
         } catch SpotifyClient.APIError.needsAuth {
-            await refreshAPIClient()
-            try await mutate()
+            guard epoch == accountEpoch else { throw CancellationError() }
+            await refreshAPIClient(for: epoch)
+            guard epoch == accountEpoch, let refreshedAPI = self.api else { throw CancellationError() }
+            try await mutate(using: refreshedAPI)
         }
     }
 
@@ -528,6 +607,23 @@ final class AppModel {
     func signOut() {
         _ = Core.stop()
         AudioRenderer.shared.stop()
+        accountEpoch += 1
+        webRefreshInFlight = nil
+        likedProbeTask?.cancel()
+        likedProbeTask = nil
+        pendingLikeProbeIDs.removeAll()
+        likedIDs.removeAll()
+        knownLikeIDs.removeAll()
+        likedSnapshotComplete = false
+        likeOverrides.removeAll()
+        activeLikeMutations.removeAll()
+        isRefreshingLiked = false
+        lastLikedRefresh = .distantPast
+        likedServerTotal = nil
+        likedCount = 0
+        tracksByContext["liked"] = nil
+        trackLoadingTokens["liked"] = nil
+        tracksError["liked"] = nil
         var keychainErrors: [String] = []
         for kind in [SpotifyAuth.TokenKind.web, .playback] {
             do {
@@ -813,7 +909,6 @@ final class AppModel {
                 // Discard if the user navigated elsewhere mid-flight (P0-3).
                 guard epoch == loadEpoch else { return }
                 tracksByContext[key] = tracks
-                seedLikedState(for: tracks, contextKey: key)
                 if let discography {
                     albumsByArtist[key] = discography
                     dlog("discography \(key) → \(discography.count) releases")

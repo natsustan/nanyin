@@ -54,6 +54,7 @@ struct PlayerBar: View {
 
                 // Like the playing track (M4.2).
                 if let np = app.nowPlaying, let id = SpotifyClient.trackId(from: np.uri) {
+                    let known = app.isLikeKnown(id)
                     let liked = app.likedIDs.contains(id)
                     Button {
                         app.toggleLikePlaying()
@@ -63,8 +64,13 @@ struct PlayerBar: View {
                             .foregroundStyle(liked ? Theme.accent : Theme.textSecondary)
                     }
                     .buttonStyle(.plain)
+                    .disabled(!known)
+                    .opacity(known ? 1 : 0.35)
                     .padding(.leading, 4)
-                    .help(liked ? "Remove from Liked Songs" : "Save to Liked Songs")
+                    .help(known ? (liked ? "Remove from Liked Songs" : "Save to Liked Songs") : "Checking Liked Songs…")
+                    .task(id: id) {
+                        app.requestLikedState(id)
+                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

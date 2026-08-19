@@ -82,6 +82,7 @@ struct TrackRow: View {
     @State private var hovering = false
 
     private var isCurrent: Bool { app.nowPlaying?.uri == track.uri }
+    private var isLikeKnown: Bool { app.isLikeKnown(track.id) }
     private var isLiked: Bool { app.likedIDs.contains(track.id) }
 
     var body: some View {
@@ -130,9 +131,10 @@ struct TrackRow: View {
                     .foregroundStyle(isLiked ? Theme.accent : Theme.textSecondary)
             }
             .buttonStyle(.plain)
-            .opacity(isLiked ? 1 : (hovering ? 1 : 0))
+            .disabled(!isLikeKnown)
+            .opacity(isLikeKnown ? (isLiked ? 1 : (hovering ? 1 : 0)) : 0)
             .frame(width: 32, alignment: .center)
-            .help(isLiked ? "Remove from Liked Songs" : "Save to Liked Songs")
+            .help(isLikeKnown ? (isLiked ? "Remove from Liked Songs" : "Save to Liked Songs") : "Checking Liked Songs…")
         }
         .padding(.horizontal, TrackTableLayout.rowHorizontalInset)
         .padding(.vertical, 7)
@@ -149,13 +151,15 @@ struct TrackRow: View {
             } label: {
                 Label("Add to Queue", systemImage: "text.badge.plus")
             }
-            Button {
-                app.toggleLike(track)
-            } label: {
-                Label(
-                    app.likedIDs.contains(track.id) ? "Remove from Liked Songs" : "Save to Liked Songs",
-                    systemImage: app.likedIDs.contains(track.id) ? "heart.slash" : "heart"
-                )
+            if isLikeKnown {
+                Button {
+                    app.toggleLike(track)
+                } label: {
+                    Label(
+                        isLiked ? "Remove from Liked Songs" : "Save to Liked Songs",
+                        systemImage: isLiked ? "heart.slash" : "heart"
+                    )
+                }
             }
             Divider()
             Button {
@@ -177,6 +181,9 @@ struct TrackRow: View {
         }
         .onHover { h in
             hovering = h
+        }
+        .onAppear {
+            app.requestLikedState(track.id)
         }
     }
 
