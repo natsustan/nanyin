@@ -56,6 +56,8 @@ static RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
 static SESSION: Mutex<Option<Session>> = Mutex::new(None);
 static SPIRC: Mutex<Option<Arc<Spirc>>> = Mutex::new(None);
 static PLAYER: Mutex<Option<Arc<Player>>> = Mutex::new(None);
+/// Serializes generation changes with publishing or clearing player slots.
+static PLAYER_LIFECYCLE: Mutex<()> = Mutex::new(());
 static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
 /// Invalidates completion monitors from sessions replaced by a rebuild.
 static PLAYER_GENERATION: AtomicU64 = AtomicU64::new(0);
@@ -182,6 +184,11 @@ impl PlaybackPosition {
             .min(u32::MAX as u128) as u32;
         interpolated_position_ms(self.stored_ms, elapsed_ms, is_playing, duration_ms)
     }
+
+    fn freeze(&mut self, now: Instant, duration_ms: u32) {
+        let position_ms = self.get_at(now, true, duration_ms);
+        self.update(position_ms, now);
+    }
 }
 
 fn update_position(position_ms: u32) {
@@ -189,6 +196,14 @@ fn update_position(position_ms: u32) {
         .lock()
         .unwrap()
         .update(position_ms, Instant::now());
+}
+
+/// Stops interpolation without losing elapsed time since the last player event.
+fn stop_position_clock() {
+    let mut position = POSITION.lock().unwrap();
+    if IS_PLAYING.swap(false, Ordering::SeqCst) {
+        position.freeze(Instant::now(), DURATION_MS.load(Ordering::SeqCst));
+    }
 }
 
 /// Audio cache: 1 GiB LRU under ~/Library/Caches/nanyin/audio.
@@ -249,30 +264,34 @@ pub extern "C" fn nanyin_init_player(access_token: *const c_char, device_id: *co
     // still be dead — every command would hit a closed connection while
     // init_player keeps answering "already initialized" (observed
     // 2026-08-19: reconnect loop no-oped against a ghost session).
-    let needs_init = {
-        let session = SESSION.lock().unwrap();
-        let spirc = SPIRC.lock().unwrap();
-        session.is_none()
-            || spirc.is_none()
-            || session.as_ref().is_some_and(|s| s.is_invalid())
-    };
-    if !needs_init {
-        eprintln!("nanyin_core: init_player: already initialized");
-        return 0;
-    }
-    let generation = PLAYER_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
-    // Tear down stale state before rebuilding (spirc died or fresh start).
-    {
+    let (generation, stale_spirc, stale_session) = {
+        let _lifecycle = PLAYER_LIFECYCLE.lock().unwrap();
+        let needs_init = {
+            let session = SESSION.lock().unwrap();
+            let spirc = SPIRC.lock().unwrap();
+            session.is_none()
+                || spirc.is_none()
+                || session.as_ref().is_some_and(|s| s.is_invalid())
+        };
+        if !needs_init {
+            eprintln!("nanyin_core: init_player: already initialized");
+            return 0;
+        }
+
+        let generation = PLAYER_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+        SHUTTING_DOWN.store(false, Ordering::SeqCst);
         let spirc = SPIRC.lock().unwrap().take();
         let session = SESSION.lock().unwrap().take();
         PLAYER.lock().unwrap().take();
-        if let (Some(spirc), Some(session)) = (spirc, session) {
-            let _ = spirc.shutdown();
-            session.shutdown();
-        }
+        (generation, spirc, session)
+    };
+    // Tear down stale state before rebuilding (spirc died or fresh start).
+    if let Some(spirc) = stale_spirc {
+        let _ = spirc.shutdown();
     }
-
-    SHUTTING_DOWN.store(false, Ordering::SeqCst);
+    if let Some(session) = stale_session {
+        session.shutdown();
+    }
 
     let result = RUNTIME.block_on(init_player_async(&token, &device, generation));
 
@@ -343,6 +362,9 @@ async fn init_player_async(
     let mut events: librespot_playback::player::PlayerEventChannel = player.get_player_event_channel();
     RUNTIME.spawn(async move {
         while let Some(event) = events.recv().await {
+            if PLAYER_GENERATION.load(Ordering::SeqCst) != generation {
+                return;
+            }
             handle_player_event(event);
         }
     });
@@ -372,7 +394,27 @@ async fn init_player_async(
     .map_err(|e| format!("spirc init: {e:?}"))?;
 
     let spirc = Arc::new(spirc);
+    let published = {
+        let _lifecycle = PLAYER_LIFECYCLE.lock().unwrap();
+        if PLAYER_GENERATION.load(Ordering::SeqCst) != generation
+            || SHUTTING_DOWN.load(Ordering::SeqCst)
+        {
+            false
+        } else {
+            *SESSION.lock().unwrap() = Some(session.clone());
+            *SPIRC.lock().unwrap() = Some(spirc.clone());
+            *PLAYER.lock().unwrap() = Some(player.clone());
+            true
+        }
+    };
+    if !published {
+        let _ = spirc.shutdown();
+        session.shutdown();
+        return Err("player initialization cancelled".to_string());
+    }
+
     let spirc_handle = RUNTIME.spawn(spirc_task);
+    let monitor_spirc = spirc.clone();
     // When the spirc task exits (dealer loss, fatal error), mark the session
     // unusable and tell Swift to re-init — otherwise every command hits a
     // closed channel forever (the "channel closed" failure mode).
@@ -380,12 +422,28 @@ async fn init_player_async(
         if let Err(join_err) = spirc_handle.await {
             eprintln!("nanyin_core: spirc task panicked: {join_err}");
         }
-        if PLAYER_GENERATION.load(Ordering::SeqCst) != generation {
+        let owns_slot = {
+            let _lifecycle = PLAYER_LIFECYCLE.lock().unwrap();
+            if PLAYER_GENERATION.load(Ordering::SeqCst) != generation {
+                false
+            } else {
+                let mut slot = SPIRC.lock().unwrap();
+                if slot
+                    .as_ref()
+                    .is_some_and(|current| Arc::ptr_eq(current, &monitor_spirc))
+                {
+                    slot.take();
+                    stop_position_clock();
+                    true
+                } else {
+                    false
+                }
+            }
+        };
+        if !owns_slot {
             return;
         }
         eprintln!("nanyin_core: spirc task ended — session unusable, notifying");
-        *SPIRC.lock().unwrap() = None;
-        IS_PLAYING.store(false, Ordering::SeqCst);
         notify_disconnected();
     });
 
@@ -405,19 +463,23 @@ async fn init_player_async(
             }
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
-        if PLAYER_GENERATION.load(Ordering::SeqCst) != generation
-            || SHUTTING_DOWN.load(Ordering::SeqCst)
-        {
+        let should_notify = {
+            let _lifecycle = PLAYER_LIFECYCLE.lock().unwrap();
+            if PLAYER_GENERATION.load(Ordering::SeqCst) != generation
+                || SHUTTING_DOWN.load(Ordering::SeqCst)
+            {
+                false
+            } else {
+                stop_position_clock();
+                true
+            }
+        };
+        if !should_notify {
             return;
         }
         log::debug!("session disconnected");
-        IS_PLAYING.store(false, Ordering::SeqCst);
         notify_disconnected();
     });
-
-    *SESSION.lock().unwrap() = Some(session);
-    *SPIRC.lock().unwrap() = Some(spirc);
-    *PLAYER.lock().unwrap() = Some(player);
 
     log::debug!("nanyin: session + spirc ready (device {device_id})");
     notify_connected();
@@ -427,13 +489,16 @@ async fn init_player_async(
 /// Shuts down Spirc and the session (app quit).
 #[no_mangle]
 pub extern "C" fn nanyin_shutdown() -> i32 {
-    SHUTTING_DOWN.store(true, Ordering::SeqCst);
-    PLAYER_GENERATION.fetch_add(1, Ordering::SeqCst);
+    let (spirc, session) = {
+        let _lifecycle = PLAYER_LIFECYCLE.lock().unwrap();
+        SHUTTING_DOWN.store(true, Ordering::SeqCst);
+        PLAYER_GENERATION.fetch_add(1, Ordering::SeqCst);
+        let spirc = SPIRC.lock().unwrap().take();
+        let session = SESSION.lock().unwrap().take();
+        PLAYER.lock().unwrap().take();
+        (spirc, session)
+    };
     IS_PLAYING.store(false, Ordering::SeqCst);
-
-    let spirc = { SPIRC.lock().unwrap().take() };
-    let session = { SESSION.lock().unwrap().take() };
-    PLAYER.lock().unwrap().take();
     *CURRENT_URI.lock().unwrap() = None;
     DURATION_MS.store(0, Ordering::SeqCst);
     update_position(0);
@@ -508,7 +573,7 @@ fn handle_player_event(event: librespot_playback::player::PlayerEvent) {
             }));
         }
         PlayerEvent::Stopped { track_id, .. } => {
-            IS_PLAYING.store(false, Ordering::SeqCst);
+            stop_position_clock();
             emit_state(json!({
                 "event": "stopped",
                 "track_uri": track_id.to_string(),
@@ -556,7 +621,7 @@ fn handle_player_event(event: librespot_playback::player::PlayerEvent) {
             }));
         }
         PlayerEvent::EndOfTrack { .. } => {
-            IS_PLAYING.store(false, Ordering::SeqCst);
+            stop_position_clock();
             emit_state(json!({ "event": "end_of_track" }));
         }
         PlayerEvent::ShuffleChanged { shuffle } => {
@@ -728,7 +793,7 @@ pub extern "C" fn nanyin_stop() -> i32 {
     };
     match spirc.disconnect(true) {
         Ok(()) => {
-            IS_PLAYING.store(false, Ordering::SeqCst);
+            stop_position_clock();
             0
         }
         Err(_) => -1,
@@ -880,6 +945,20 @@ mod tests {
         assert_eq!(
             interpolated_position_ms(179_000, 10_000, true, 180_000),
             180_000
+        );
+    }
+
+    #[test]
+    fn freezing_position_preserves_accrued_playback_time() {
+        let started_at = Instant::now();
+        let mut position = PlaybackPosition::new(5_000, started_at);
+        let stopped_at = started_at + Duration::from_secs(10);
+
+        position.freeze(stopped_at, 180_000);
+
+        assert_eq!(
+            position.get_at(stopped_at + Duration::from_secs(5), false, 180_000),
+            15_000
         );
     }
 }
