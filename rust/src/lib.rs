@@ -242,11 +242,17 @@ pub extern "C" fn nanyin_init_player(access_token: *const c_char, device_id: *co
         }
     };
 
-    // Full rebuild when spirc died (session may exist but be unusable).
+    // Full rebuild when spirc died or the session went invalid (network
+    // loss, idle timeout, server drop). A session that merely exists can
+    // still be dead — every command would hit a closed connection while
+    // init_player keeps answering "already initialized" (observed
+    // 2026-08-19: reconnect loop no-oped against a ghost session).
     let needs_init = {
         let session = SESSION.lock().unwrap();
         let spirc = SPIRC.lock().unwrap();
-        session.is_none() || spirc.is_none()
+        session.is_none()
+            || spirc.is_none()
+            || session.as_ref().is_some_and(|s| s.is_invalid())
     };
     if !needs_init {
         eprintln!("nanyin_core: init_player: already initialized");
