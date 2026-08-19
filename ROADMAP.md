@@ -36,10 +36,12 @@ Key lessons (do not regress):
 - Compact one-line Rust event logs
 
 Perf notes:
-- Track list = `List` (NSTableView recycling), single scroll region,
-  row-local hover state, position tick local to PlayerBar — 60Hz verified
-- Do NOT reintroduce: nested ScrollViews, parent-scope hover state,
-  AppModel-scope position polling
+- Potentially large track lists use `List` (NSTableView recycling) with one
+  vertical scroll region; row-local hover state and a PlayerBar-local position
+  tick keep scrolling at 60Hz
+- Do NOT reintroduce: same-axis nested ScrollViews, parent-scope hover state,
+  or AppModel-scope position polling. Bounded, lazy cross-axis carousels are
+  allowed inside the vertical page container
 
 ---
 

@@ -82,7 +82,10 @@ In the observed incident, the suspected restriction decayed within hours to abou
 
 ## UI performance rules (60Hz, do not regress)
 
-- Track lists: `List` (NSTableView recycling) + **single scroll region** (never nest ScrollViews).
+- Potentially large track lists use `List` (NSTableView recycling) and one
+  vertical scroll region. Never nest same-axis scroll views. Bounded
+  cross-axis carousels may use a lazy horizontal `ScrollView` inside the
+  page's vertical container.
 - Hover state is row-local (`@State` in the row view) — never in the list parent.
 - Playback position is NOT stored in AppModel — PlayerBar ticks `Core.positionMs` locally; a 2Hz app-wide observable update re-renders every track row.
 - eq indicator: fixed phases, no `randomElement()` per render.
