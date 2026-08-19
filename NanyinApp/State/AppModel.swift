@@ -674,6 +674,7 @@ final class AppModel {
         queueRecent = []
         pendingQueueHistory = nil
         isLoadingQueue = false
+        queueRefreshPending = false
         authState = .loggedOut
         authError = keychainErrors.isEmpty
             ? nil
@@ -800,6 +801,7 @@ final class AppModel {
     private(set) var queueRecent: [QueueItem] = []
     private(set) var isLoadingQueue = false
     private var queueEpoch = 0
+    private var queueRefreshPending = false
     private var pendingQueueHistory: (nowPlaying: NowPlaying, durationMs: UInt32)?
 
     /// Refreshes the queue from GET /v1/me/player/queue (the active device's
@@ -809,14 +811,23 @@ final class AppModel {
     /// change the queue instead.
     func refreshQueue() {
         guard authState == .loggedIn else { return }
-        guard !isLoadingQueue else { return }
+        guard !isLoadingQueue else {
+            queueRefreshPending = true
+            return
+        }
         isLoadingQueue = true
         queueEpoch += 1
         let epoch = queueEpoch
         let account = accountEpoch
         Task {
             defer {
-                if epoch == queueEpoch { isLoadingQueue = false }
+                if epoch == queueEpoch {
+                    isLoadingQueue = false
+                    if queueRefreshPending {
+                        queueRefreshPending = false
+                        refreshQueue()
+                    }
+                }
             }
             do {
                 await refreshAPIClient(for: account)
