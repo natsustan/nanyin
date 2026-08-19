@@ -91,7 +91,8 @@ album name/artwork filled in via `Track.withAlbum`), playback via
 `spotify:album:<id>` server context (same as playlist path). Verified live:
 harness (36 releases: 16 albums + 20 singles; RAM Drumless 13 tracks) + OCR on
 real UI (artist page rows, album page header + track list). Remaining M4.1:
-clickable artist/album names in track rows and player bar.
+clickable artist/album names in track rows, plus the artist link in the player
+bar. The compact player bar intentionally omits the album name.
 
 Note: ncspot client id keeps /v1/search working (production-approved app).
 
@@ -99,7 +100,7 @@ Note: ncspot client id keeps /v1/search working (production-approved app).
 
 | # | Item | Notes |
 |---|------|-------|
-| 4.1 | Album / artist pages | ✅ done 2026-08-18. Clickable artist/album names in track rows (per-artist buttons, multi-artist tracks each clickable) and player bar (artist → artist page, album → album page; id-less external starts fall back to /v1/tracks fetch). Also fixed pre-existing `withAlbum` bug: album name was overwriting the track title on album pages | 1d |
+| 4.1 | Album / artist pages | ✅ done 2026-08-18. Clickable artist/album names in track rows (per-artist buttons, multi-artist tracks each clickable). The compact player bar intentionally shows only the title and artist, with the artist linking to the artist page; it does not display the album name. Id-less external starts fall back to `/v1/tracks` metadata fetch for artist navigation. Also fixed pre-existing `withAlbum` bug: album name was overwriting the track title on album pages | 1d |
 | 4.2 | Likes round-trip | ✅ done 2026-08-19. Heart toggle in track rows (hover-ghost, liked-solid green; context-menu entry) + player bar; `likedContains` seeds per-context (50-id cap), `toggleLike` optimistic with revert-on-failure (incl. one needsAuth retry); liked page cache + sidebar count maintained. Verified live both directions (unlike from liked page → server `[false]`, save from search → `[true]`). Note: server `contains` lags its own PUT/DELETE — never read-back-validate a just-toggled id. | 0.5d |
 | 4.3 | Playlist create/add | `+` in sidebar, context menu "Add to playlist"; `/v1/users/{id}/playlists` + `/v1/playlists/{id}/tracks` (scopes already granted) | 0.5d |
 | 4.4 | Playlist search/filter | Client-side filter row in detail view | 0.25d |
