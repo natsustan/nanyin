@@ -561,14 +561,8 @@ final class AppModel {
             }
         }
 
-        guard epoch == accountEpoch, let api = self.api else { throw CancellationError() }
-        do {
+        try await withAPIAuthRetry(for: epoch) { api in
             try await mutate(using: api)
-        } catch SpotifyClient.APIError.needsAuth {
-            guard epoch == accountEpoch else { throw CancellationError() }
-            await refreshAPIClient(for: epoch, forceRefresh: true)
-            guard epoch == accountEpoch, let refreshedAPI = self.api else { throw CancellationError() }
-            try await mutate(using: refreshedAPI)
         }
     }
 
