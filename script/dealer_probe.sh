@@ -25,10 +25,14 @@ CLIENT_ID="65b708073fc0480ea92a077233ca87bd" # keymaster (playback flow)
 DEVICE_ID="${1:-nanyin_probe_check}"
 KEYCHAIN_ITEM_NOT_FOUND=44
 
-if pgrep -f '[N]anyin.app' >/dev/null; then
-    echo "ERROR: Nanyin is already running; stop it before starting the dealer probe." >&2
-    exit 6
-fi
+ensure_nanyin_not_running() {
+    if pgrep -f '[N]anyin.app' >/dev/null; then
+        echo "ERROR: Nanyin is already running; stop it before starting the dealer probe." >&2
+        exit 6
+    fi
+}
+
+ensure_nanyin_not_running
 
 cd "$(dirname "$0")/../rust"
 BIN=target/release/examples/dealer_test
@@ -92,6 +96,9 @@ else
     echo "[probe] no replacement refresh token returned; keeping the existing token"
 fi
 
+# Build, Keychain access, and token refresh can take long enough for the app to
+# launch after the initial check. Refuse again at the actual dealer boundary.
+ensure_nanyin_not_running
 echo "[probe] starting dealer_test device_id=$DEVICE_ID (idles 300s, no audio)"
 set +e
 OUT=$("$BIN" "$TOKEN" "$DEVICE_ID" 2>&1)

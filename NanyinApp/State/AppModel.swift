@@ -175,6 +175,9 @@ final class AppModel {
     private var likedServerTotal: Int?
     /// Minimum gap between opportunistic probes (app-active). Page opens force.
     private let likedRefreshMinInterval: TimeInterval = 15
+    /// Keep transient contains failures from leaving visible rows unresolved,
+    /// while bounding the extra Web API traffic after the client's own retries.
+    private let likedProbeRetryLimit = 2
     /// Covers Spotify's normal write-to-read lag without masking later changes
     /// made by another client indefinitely.
     private let likeOverrideLagWindow: TimeInterval = 30
@@ -207,6 +210,7 @@ final class AppModel {
               !likedSnapshotComplete,
               let api else { return }
 
+        var retryAttempt = 0
         while epoch == accountEpoch, !likedSnapshotComplete, !pendingLikeProbeIDs.isEmpty {
             let ids = Array(pendingLikeProbeIDs.prefix(50))
             pendingLikeProbeIDs.subtract(ids)
@@ -224,13 +228,24 @@ final class AppModel {
                         likedIDs.remove(id)
                     }
                 }
+                retryAttempt = 0
             } catch {
                 guard epoch == accountEpoch,
                       !likedSnapshotComplete,
                       !Task.isCancelled else { return }
                 pendingLikeProbeIDs.formUnion(ids)
-                dlog("likedContains failed: \(error)")
-                return
+                guard retryAttempt < likedProbeRetryLimit else {
+                    dlog("likedContains failed after bounded retries: \(error)")
+                    return
+                }
+                retryAttempt += 1
+                let delay = min(pow(2.0, Double(retryAttempt)), 8.0)
+                dlog("likedContains failed: \(error); retrying in \(delay)s")
+                do {
+                    try await Task.sleep(for: .seconds(delay))
+                } catch {
+                    return
+                }
             }
         }
     }
@@ -658,10 +673,13 @@ final class AppModel {
         NowPlayingManager.shared.clear()
     }
 
-    func signOut() {
+    /// Invalidates every task carrying the current account epoch before any
+    /// replacement credentials can be installed.
+    private func invalidateAccountSession() {
         accountEpoch += 1
         _ = Core.shutdown()
         AudioRenderer.shared.stop()
+        webRefreshInFlight?.task.cancel()
         webRefreshInFlight = nil
         likedProbeTask?.cancel()
         likedProbeTask = nil
@@ -678,6 +696,26 @@ final class AppModel {
         tracksByContext["liked"] = nil
         trackLoadingTokens["liked"] = nil
         tracksError["liked"] = nil
+        playbackAccessToken = ""
+        webAccessToken = ""
+        webTokenExpiry = .distantPast
+        api = nil
+        userDisplayName = ""
+        userId = ""
+        nowPlaying = nil
+        connectionNote = nil
+        queueEpoch += 1
+        queueCurrent = nil
+        queueUpcoming = []
+        queueRecent = []
+        pendingQueueHistory = nil
+        isLoadingQueue = false
+        queueRefreshPending = false
+        authState = .loggedOut
+    }
+
+    func signOut() {
+        invalidateAccountSession()
         var keychainErrors: [String] = []
         for kind in [SpotifyAuth.TokenKind.web, .playback] {
             do {
@@ -687,18 +725,6 @@ final class AppModel {
                 dlog("sign-out credential cleanup failed: \(error)")
             }
         }
-        playbackAccessToken = ""
-        webAccessToken = ""
-        api = nil
-        nowPlaying = nil
-        queueEpoch += 1
-        queueCurrent = nil
-        queueUpcoming = []
-        queueRecent = []
-        pendingQueueHistory = nil
-        isLoadingQueue = false
-        queueRefreshPending = false
-        authState = .loggedOut
         authError = keychainErrors.isEmpty
             ? nil
             : "Signed out, but stored credentials could not be removed: \(keychainErrors.joined(separator: "; "))"
@@ -1322,11 +1348,8 @@ final class AppModel {
                     // Dead credential: surface re-auth instead of a footnote.
                     // Retrying against a revoked token only feeds risk control.
                     dlog("playback refresh token revoked — forcing re-auth")
-                    _ = Core.shutdown()
-                    AudioRenderer.shared.stop()
-                    nowPlaying = nil
+                    invalidateAccountSession()
                     authError = error.localizedDescription
-                    authState = .loggedOut
                 } else {
                     connectionNote = "Connection lost — sign in again"
                 }
