@@ -640,6 +640,7 @@ final class AppModel {
         queueEpoch += 1
         queueUpcoming = []
         queueRecent = []
+        pendingQueueHistory = nil
         isLoadingQueue = false
         authState = .loggedOut
         authError = keychainErrors.isEmpty
@@ -765,6 +766,7 @@ final class AppModel {
     private(set) var queueRecent: [QueueItem] = []
     private(set) var isLoadingQueue = false
     private var queueEpoch = 0
+    private var pendingQueueHistory: (nowPlaying: NowPlaying, durationMs: UInt32)?
 
     /// Refreshes the queue from GET /v1/me/player/queue (the active device's
     /// queue — reflects adds from any client, including ours). Dealer cluster
@@ -1017,6 +1019,9 @@ final class AppModel {
     /// Connect state gets 429-rejected. Falls back to a bounded track window
     /// if the context path doesn't start audio in time.
     func play(track: SpotifyClient.Track, contextKey: String) {
+        if pendingQueueHistory == nil, let nowPlaying, nowPlaying.uri != track.uri {
+            pendingQueueHistory = (nowPlaying, durationMs)
+        }
         applyNowPlaying(track)
         isBuffering = true
 
@@ -1115,8 +1120,11 @@ final class AppModel {
             let previousDurationMs = self.durationMs
             self.durationMs = UInt32(durationMs)
             dlog("trackChanged coverURL=\(coverURL ?? "nil") title=\(title ?? "nil")")
-            if let previous, previous.uri != uri {
-                trackQueueHistory(previous, durationMs: previousDurationMs)
+            let outgoing = pendingQueueHistory
+                ?? previous.map { (nowPlaying: $0, durationMs: previousDurationMs) }
+            pendingQueueHistory = nil
+            if let outgoing, outgoing.nowPlaying.uri != uri {
+                trackQueueHistory(outgoing.nowPlaying, durationMs: outgoing.durationMs)
             }
             // TrackChanged carries full metadata — no Web API round trip needed.
             if let title, !title.isEmpty {
