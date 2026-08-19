@@ -1076,7 +1076,7 @@ final class AppModel {
                 }
             } catch SpotifyClient.APIError.needsAuth {
                 // Refresh only when the current client is actually rejected.
-                await refreshAPIClient()
+                await refreshAPIClient(forceRefresh: true)
                 artist = try? await api?.artist(id)
             } catch {
                 return
