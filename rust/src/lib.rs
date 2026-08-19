@@ -61,6 +61,8 @@ static PLAYER_LIFECYCLE: Mutex<()> = Mutex::new(());
 static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
 /// Invalidates completion monitors from sessions replaced by a rebuild.
 static PLAYER_GENERATION: AtomicU64 = AtomicU64::new(0);
+/// Coalesces Spirc and session failure signals for the active generation.
+static DISCONNECT_NOTIFIED: AtomicBool = AtomicBool::new(false);
 
 static IS_PLAYING: AtomicBool = AtomicBool::new(false);
 static POSITION: Mutex<PlaybackPosition> = Mutex::new(PlaybackPosition::empty());
@@ -280,6 +282,7 @@ pub extern "C" fn nanyin_init_player(access_token: *const c_char, device_id: *co
 
         let generation = PLAYER_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
         SHUTTING_DOWN.store(false, Ordering::SeqCst);
+        DISCONNECT_NOTIFIED.store(false, Ordering::SeqCst);
         let spirc = SPIRC.lock().unwrap().take();
         let session = SESSION.lock().unwrap().take();
         PLAYER.lock().unwrap().take();
@@ -422,7 +425,7 @@ async fn init_player_async(
         if let Err(join_err) = spirc_handle.await {
             eprintln!("nanyin_core: spirc task panicked: {join_err}");
         }
-        let owns_slot = {
+        let should_notify = {
             let _lifecycle = PLAYER_LIFECYCLE.lock().unwrap();
             if PLAYER_GENERATION.load(Ordering::SeqCst) != generation {
                 false
@@ -434,13 +437,15 @@ async fn init_player_async(
                 {
                     slot.take();
                     stop_position_clock();
-                    true
+                    DISCONNECT_NOTIFIED
+                        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                        .is_ok()
                 } else {
                     false
                 }
             }
         };
-        if !owns_slot {
+        if !should_notify {
             return;
         }
         eprintln!("nanyin_core: spirc task ended — session unusable, notifying");
@@ -471,7 +476,9 @@ async fn init_player_async(
                 false
             } else {
                 stop_position_clock();
-                true
+                DISCONNECT_NOTIFIED
+                    .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                    .is_ok()
             }
         };
         if !should_notify {
