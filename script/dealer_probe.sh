@@ -24,6 +24,7 @@ SERVICE="com.nanyin.app.spotify"
 CLIENT_ID="65b708073fc0480ea92a077233ca87bd" # keymaster (playback flow)
 DEVICE_ID="${1:-nanyin_probe_check}"
 KEYCHAIN_ITEM_NOT_FOUND=44
+PLAYBACK_REFRESH_LOCK="${TMPDIR:-/tmp}/nanyin-playback-refresh.lock"
 
 ensure_nanyin_not_running() {
     if pgrep -f '[N]anyin.app' >/dev/null; then
@@ -41,6 +42,16 @@ cargo build --release --example dealer_test
 
 keychain_get() { security find-generic-password -s "$SERVICE" -a "$1" -w 2>/dev/null; }
 keychain_set() { security add-generic-password -s "$SERVICE" -a "$1" -w "$2" -U; }
+
+# Serialize the rotating playback credential with SpotifyAuth. Acquiring the
+# lock before the final process check closes the build-to-refresh race: a newly
+# launched app must wait before it can read or rotate the same Keychain item.
+exec 9>"$PLAYBACK_REFRESH_LOCK"
+if ! /usr/bin/lockf -k -t 0 9; then
+    echo "ERROR: another playback-token refresh is already in progress; retry the probe later." >&2
+    exit 6
+fi
+ensure_nanyin_not_running
 
 if RT=$(keychain_get playback_refresh_token); then
     :
@@ -95,6 +106,10 @@ if [ -n "$NEW_RT" ]; then
 else
     echo "[probe] no replacement refresh token returned; keeping the existing token"
 fi
+
+# The dealer session does not need the credential lock once rotation has been
+# persisted. Release it before the final app-process check.
+exec 9>&-
 
 # Build, Keychain access, and token refresh can take long enough for the app to
 # launch after the initial check. Refuse again at the actual dealer boundary.

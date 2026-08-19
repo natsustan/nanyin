@@ -5,6 +5,7 @@
 
 import AppKit
 import CryptoKit
+import Darwin
 import Foundation
 import Network
 
@@ -100,6 +101,15 @@ enum SpotifyAuth {
 
     /// Refreshes the access token of the given kind (no browser).
     static func refreshAccessToken(for kind: TokenKind) async throws -> Token {
+        if kind == .playback {
+            return try await withPlaybackRefreshLock {
+                try await refreshAccessTokenUnlocked(for: kind)
+            }
+        }
+        return try await refreshAccessTokenUnlocked(for: kind)
+    }
+
+    private static func refreshAccessTokenUnlocked(for kind: TokenKind) async throws -> Token {
         guard let refreshToken = try storedRefreshToken(for: kind) else {
             throw AuthError.refreshFailed("no stored refresh token")
         }
@@ -248,6 +258,25 @@ enum SpotifyAuth {
 
     private static func escape(_ s: String) -> String {
         s.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? s
+    }
+
+    /// Shares a BSD file lock with dealer_probe.sh so only one process can
+    /// read, refresh, and persist the rotating playback credential at a time.
+    private static func withPlaybackRefreshLock<T>(
+        _ operation: () async throws -> T
+    ) async throws -> T {
+        let lockURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("nanyin-playback-refresh.lock")
+        let fd = open(lockURL.path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+        guard fd >= 0 else {
+            throw AuthError.refreshFailed("could not open playback refresh lock")
+        }
+        defer { close(fd) }
+        guard flock(fd, LOCK_EX) == 0 else {
+            throw AuthError.refreshFailed("could not acquire playback refresh lock")
+        }
+        defer { flock(fd, LOCK_UN) }
+        return try await operation()
     }
 }
 

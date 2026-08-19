@@ -334,9 +334,9 @@ final class AppModel {
         }
     }
 
-    private func hasPendingLikeOverride(_ id: String) -> Bool {
+    private func hasPendingLikeOverrides() -> Bool {
         pruneExpiredLikeOverrides()
-        return likeOverrides[id] != nil
+        return !likeOverrides.isEmpty
     }
 
     /// Reconcile Liked Songs with the server. Forced on page open / re-click;
@@ -1126,7 +1126,7 @@ final class AppModel {
         case .liked:
             // A newly inserted/removed local row may not have reached Spotify's
             // server-resolved collection yet, so its local index is unsafe.
-            contextURI = userId.isEmpty || hasPendingLikeOverride(track.id)
+            contextURI = userId.isEmpty || hasPendingLikeOverrides()
                 ? nil
                 : "spotify:user:\(userId):collection"
         case let .playlist(id, _):
