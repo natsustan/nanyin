@@ -104,6 +104,9 @@ echo "[probe] exit=$STATUS"
 if printf '%s' "$OUT" | grep -q "survived 300s"; then
     echo "RESULT: idle dealer session remained stable for 300s; investigate the application path next"
     exit 0
+elif printf '%s' "$OUT" | grep -q "SPIRC TASK ENDED"; then
+    echo "RESULT: Spirc task ended after connecting; the dealer probe failed."
+    exit 3
 elif printf '%s' "$OUT" | grep -q "SESSION DIED"; then
     echo "RESULT: dealer session died after connecting; this matches the suspected restriction incident but is not unique to it."
     exit 3

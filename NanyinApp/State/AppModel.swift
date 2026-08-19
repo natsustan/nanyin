@@ -777,14 +777,21 @@ final class AppModel {
         isLoadingQueue = true
         queueEpoch += 1
         let epoch = queueEpoch
+        let account = accountEpoch
         Task {
             defer {
                 if epoch == queueEpoch { isLoadingQueue = false }
             }
             do {
-                await refreshAPIClient()
-                let result = try await api!.playerQueue()
-                guard epoch == queueEpoch, authState == .loggedIn else { return }
+                await refreshAPIClient(for: account)
+                guard account == accountEpoch,
+                      epoch == queueEpoch,
+                      authState == .loggedIn,
+                      let api else { return }
+                let result = try await api.playerQueue()
+                guard account == accountEpoch,
+                      epoch == queueEpoch,
+                      authState == .loggedIn else { return }
                 queueUpcoming = result.upcoming.map { QueueItem(track: $0) }
             } catch {
                 dlog("queue refresh failed: \(error)")

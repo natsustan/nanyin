@@ -62,11 +62,17 @@ async fn main() {
     .await
     .expect("spirc");
     println!("[probe] spirc up — idling 300s, watching dealer");
-    tokio::spawn(task);
+    let mut task = tokio::spawn(task);
     let _spirc = spirc; // keep alive
 
     for i in 1..=30 {
-        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+        tokio::select! {
+            result = &mut task => {
+                eprintln!("[probe] SPIRC TASK ENDED — {result:?}");
+                std::process::exit(1);
+            }
+            _ = tokio::time::sleep(std::time::Duration::from_secs(10)) => {}
+        }
         println!("[probe] t+{}0s session_invalid={}", i, session.is_invalid());
         if session.is_invalid() {
             println!("[probe] SESSION DIED — server ghosting confirmed");
