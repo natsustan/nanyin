@@ -151,6 +151,8 @@ final class AppModel {
     /// Desired like state that must win over a lagged server snapshot.
     /// Cleared once a later GET agrees with the write.
     private var likeOverrides: [String: (liked: Bool, track: SpotifyClient.Track)] = [:]
+    /// One writer per track; rapid toggles are folded into the latest override.
+    private var activeLikeMutations: Set<String> = []
     private var isRefreshingLiked = false
     private var lastLikedRefresh = Date.distantPast
     /// Last server-reported library size (not adjusted by local overrides).
@@ -337,28 +339,46 @@ final class AppModel {
             }
         }
 
-        Task {
-            do {
-                if wasLiked {
-                    try await api!.removeTracks(ids: [track.id])
-                } else {
-                    try await api!.saveTracks(ids: [track.id])
-                }
-            } catch SpotifyClient.APIError.needsAuth {
-                await refreshAPIClient()
-                // One retry with the fresh client; revert on second failure.
-                do {
-                    if wasLiked {
-                        try await api!.removeTracks(ids: [track.id])
-                    } else {
-                        try await api!.saveTracks(ids: [track.id])
-                    }
-                } catch {
-                    revertLike(track, wasLiked: wasLiked)
-                }
-            } catch {
-                revertLike(track, wasLiked: wasLiked)
+        if activeLikeMutations.insert(track.id).inserted {
+            Task { [weak self] in
+                await self?.flushLikeMutations(for: track.id)
             }
+        }
+    }
+
+    /// Persists toggles for one track in order. If the user toggles again while
+    /// a request is in flight, only the latest desired state is sent next.
+    private func flushLikeMutations(for id: String) async {
+        defer { activeLikeMutations.remove(id) }
+        while let attempted = likeOverrides[id] {
+            do {
+                try await persistLike(id: id, liked: attempted.liked)
+            } catch {
+                // An older failed request must not undo a newer click.
+                guard likeOverrides[id]?.liked == attempted.liked else { continue }
+                revertLike(attempted.track, failedDesired: attempted.liked)
+                return
+            }
+
+            guard let latest = likeOverrides[id], latest.liked != attempted.liked else {
+                return
+            }
+        }
+    }
+
+    private func persistLike(id: String, liked: Bool) async throws {
+        let mutate: () async throws -> Void = {
+            if liked {
+                try await self.api!.saveTracks(ids: [id])
+            } else {
+                try await self.api!.removeTracks(ids: [id])
+            }
+        }
+        do {
+            try await mutate()
+        } catch SpotifyClient.APIError.needsAuth {
+            await refreshAPIClient()
+            try await mutate()
         }
     }
 
@@ -374,20 +394,22 @@ final class AppModel {
         toggleLike(track)
     }
 
-    private func revertLike(_ track: SpotifyClient.Track, wasLiked: Bool) {
+    private func revertLike(_ track: SpotifyClient.Track, failedDesired: Bool) {
         dlog("like toggle FAILED for \(track.id), reverting")
+        guard likeOverrides[track.id]?.liked == failedDesired else { return }
         forgetLikeOverride(track.id)
-        if wasLiked {
-            likedIDs.insert(track.id)
+        if failedDesired {
+            if likedIDs.remove(track.id) != nil { likedCount -= 1 }
         } else {
-            likedIDs.remove(track.id)
+            if likedIDs.insert(track.id).inserted { likedCount += 1 }
         }
-        likedCount += wasLiked ? 1 : -1
         if var liked = tracksByContext["liked"] {
-            if wasLiked {
-                liked.insert(track, at: 0)
-            } else {
+            if failedDesired {
                 liked.removeAll { $0.id == track.id }
+            } else {
+                if !liked.contains(where: { $0.id == track.id }) {
+                    liked.insert(track, at: 0)
+                }
             }
             tracksByContext["liked"] = liked
         }
@@ -632,8 +654,8 @@ final class AppModel {
     // MARK: - Queue (M2.3)
 
     struct QueueItem: Identifiable {
+        let id = UUID()
         let track: SpotifyClient.Track
-        var id: String { track.id }
     }
 
     /// Context continuation after the current track (Web API order —
@@ -672,14 +694,14 @@ final class AppModel {
     }
 
     /// Tracks local recently-played history for the queue view.
-    private func trackQueueHistory(_ uri: String) {
-        guard let np = nowPlaying, np.uri == uri else { return }
+    private func trackQueueHistory(_ np: NowPlaying, durationMs: UInt32) {
         let item = QueueItem(track: SpotifyClient.Track(
-            id: np.uri, uri: np.uri, name: np.title,
+            id: SpotifyClient.trackId(from: np.uri) ?? np.uri,
+            uri: np.uri, name: np.title,
             durationMs: Int(durationMs), artists: np.artists,
             albumName: np.album, albumId: np.albumId, artworkURL: np.artworkURL
         ))
-        queueRecent.removeAll { $0.track.uri == uri }
+        queueRecent.removeAll { $0.track.uri == np.uri }
         queueRecent.insert(item, at: 0)
         if queueRecent.count > 30 {
             queueRecent.removeLast(queueRecent.count - 30)
@@ -976,11 +998,15 @@ final class AppModel {
             isBuffering = true
             fetchMetadata(uri: uri)
         case let .trackChanged(uri, durationMs, title, artists, album, coverURL):
+            let previous = nowPlaying
+            let previousDurationMs = self.durationMs
             self.durationMs = UInt32(durationMs)
             dlog("trackChanged coverURL=\(coverURL ?? "nil") title=\(title ?? "nil")")
+            if let previous, previous.uri != uri {
+                trackQueueHistory(previous, durationMs: previousDurationMs)
+            }
             // TrackChanged carries full metadata — no Web API round trip needed.
             if let title, !title.isEmpty {
-                trackQueueHistory(uri)
                 let known = nowPlaying?.uri == uri && nowPlaying?.title == title
                 if !known {
                     nowPlaying = NowPlaying(
