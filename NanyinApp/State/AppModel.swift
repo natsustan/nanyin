@@ -235,17 +235,18 @@ final class AppModel {
         }
     }
 
-    /// Applies a full Liked Songs snapshot, then re-applies in-flight toggles
-    /// so a lagged GET cannot undo a PUT/DELETE we just made.
+    /// Applies display data, then reconciles overrides only against IDs that
+    /// came from the server. Cached tracks are never confirmation of a write.
     private func applyLikedSnapshot(
-        _ serverTracks: [SpotifyClient.Track],
+        displayTracks: [SpotifyClient.Track],
+        confirmedServerIDs: Set<String>,
         total: Int,
-        isComplete: Bool = true
+        displayIsComplete: Bool,
+        serverSnapshotIsComplete: Bool
     ) {
         pruneExpiredLikeOverrides()
-        let serverIDs = Set(serverTracks.map(\.id))
-        var list = serverTracks
-        var ids = serverIDs
+        var list = displayTracks
+        var ids = Set(displayTracks.map(\.id))
         var count = total
         for (id, override) in likeOverrides {
             if override.liked {
@@ -261,21 +262,23 @@ final class AppModel {
             }
         }
         tracksByContext["liked"] = list
-        if !isComplete {
+        if !displayIsComplete {
             ids.formUnion(likedIDs.filter { knownLikeIDs.contains($0) })
         }
         likedIDs = ids
-        likedSnapshotComplete = likedSnapshotComplete || isComplete
-        if isComplete {
+        likedSnapshotComplete = likedSnapshotComplete || displayIsComplete
+        if displayIsComplete {
             pendingLikeProbeIDs.removeAll()
             likedProbeTask?.cancel()
         }
         likedServerTotal = total
         likedCount = max(0, count)
         for (id, override) in likeOverrides {
-            if override.liked && serverIDs.contains(id) {
+            if override.liked && confirmedServerIDs.contains(id) {
                 likeOverrides.removeValue(forKey: id)
-            } else if isComplete && !override.liked && !serverIDs.contains(id) {
+            } else if serverSnapshotIsComplete,
+                      !override.liked,
+                      !confirmedServerIDs.contains(id) {
                 likeOverrides.removeValue(forKey: id)
             }
         }
@@ -364,7 +367,13 @@ final class AppModel {
                 }
 
                 if prefix.total <= prefix.tracks.count {
-                    applyLikedSnapshot(prefix.tracks, total: prefix.total)
+                    applyLikedSnapshot(
+                        displayTracks: prefix.tracks,
+                        confirmedServerIDs: Set(prefix.tracks.map(\.id)),
+                        total: prefix.total,
+                        displayIsComplete: true,
+                        serverSnapshotIsComplete: true
+                    )
                     return
                 }
 
@@ -374,9 +383,11 @@ final class AppModel {
                 if !cached.isEmpty {
                     let merged = mergeLikedPrefix(cached: cached, prefix: prefix.tracks)
                     applyLikedSnapshot(
-                        merged,
+                        displayTracks: merged,
+                        confirmedServerIDs: Set(prefix.tracks.map(\.id)),
                         total: prefix.total,
-                        isComplete: likedSnapshotComplete
+                        displayIsComplete: likedSnapshotComplete,
+                        serverSnapshotIsComplete: false
                     )
                     let reconciled = likedSnapshotComplete && likeOverrides.isEmpty
                         && (merged.count - cached.count) == (prefix.total - previousTotal)
@@ -394,7 +405,13 @@ final class AppModel {
 
                 let tracks = try await api.likedTracks(after: prefix)
                 guard epoch == accountEpoch else { return }
-                applyLikedSnapshot(tracks, total: prefix.total)
+                applyLikedSnapshot(
+                    displayTracks: tracks,
+                    confirmedServerIDs: Set(tracks.map(\.id)),
+                    total: prefix.total,
+                    displayIsComplete: true,
+                    serverSnapshotIsComplete: true
+                )
             } catch {
                 guard epoch == accountEpoch else { return }
                 if loadingToken != nil { tracksError["liked"] = error.localizedDescription }
