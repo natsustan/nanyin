@@ -35,7 +35,7 @@ struct PlaylistDetailView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if tracks.isEmpty {
                 VStack(spacing: 12) {
-                    if app.loadingTracks {
+                    if app.isLoadingTracks(contextKey: contextKey) {
                         ProgressView()
                         Text("Loading tracks…")
                             .foregroundStyle(Theme.textSecondary)

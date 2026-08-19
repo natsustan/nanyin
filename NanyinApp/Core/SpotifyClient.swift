@@ -365,27 +365,38 @@ struct SpotifyClient {
         return result
     }
 
-    /// Liked songs, paginated.
-    func likedTracks() async throws -> [Track] {
-        var result: [Track] = []
-        var offset = 0
-        let limit = 50
-        while true {
-            let page: PagedTracksDTO = try await get(
-                "/v1/me/tracks",
-                query: ["limit": "\(limit)", "offset": "\(offset)"]
-            )
-            result += page.items.compactMap(\.track?.toTrack)
-            offset += limit
-            if offset >= page.total { break }
-        }
-        return result
+    /// First page of Liked Songs plus the library total. Used as a cheap
+    /// change probe so a revisit does not re-page the whole collection.
+    func likedTracksPrefix(limit: Int = 50) async throws -> (tracks: [Track], total: Int) {
+        let page: PagedTracksDTO = try await get(
+            "/v1/me/tracks",
+            query: ["limit": "\(limit)", "offset": "0"]
+        )
+        return (page.items.compactMap(\.track?.toTrack), page.total)
     }
 
-    /// Total liked-songs count (single tiny request).
-    func likedTotal() async throws -> Int {
-        let page: PagedTracksDTO = try await get("/v1/me/tracks", query: ["limit": "1"])
-        return page.total
+    /// Liked songs, paginated. Pass a prefix to skip repeating the first page.
+    func likedTracks(
+        after prefix: (tracks: [Track], total: Int)? = nil,
+        pageSize: Int = 50
+    ) async throws -> [Track] {
+        let first: (tracks: [Track], total: Int)
+        if let prefix {
+            first = prefix
+        } else {
+            first = try await likedTracksPrefix(limit: pageSize)
+        }
+        var result = first.tracks
+        var offset = pageSize
+        while offset < first.total {
+            let page: PagedTracksDTO = try await get(
+                "/v1/me/tracks",
+                query: ["limit": "\(pageSize)", "offset": "\(offset)"]
+            )
+            result += page.items.compactMap(\.track?.toTrack)
+            offset += pageSize
+        }
+        return result
     }
 
     // MARK: - Likes round-trip (M4.2)

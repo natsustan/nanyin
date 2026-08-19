@@ -71,7 +71,7 @@ struct ArtistDetailView: View {
             .padding(.vertical, 28)
         } else if tracks.isEmpty {
             VStack(spacing: 12) {
-                if app.loadingTracks {
+                if app.isLoadingTracks(contextKey: contextKey) {
                     ProgressView()
                     Text("Loading top tracks…")
                         .foregroundStyle(Theme.textSecondary)

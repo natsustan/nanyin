@@ -143,17 +143,26 @@ final class AppModel {
 
     // MARK: - Likes (M4.2)
 
-    /// Liked state per track id, seeded when contexts load and kept fresh by
-    /// toggleLikes(). Tracks absent from the set are simply unliked.
+    /// Liked state per track id. Source of truth is the last full /v1/me/tracks
+    /// snapshot, overlaid by in-app toggles. Tracks absent from the set are unliked.
     private(set) var likedIDs: Set<String> = []
-    /// In-flight liked fetches per context key (dedup).
+    /// In-flight likedContains fetches per context key (dedup).
     private var likedFetches: Set<String> = []
+    /// Desired like state that must win over a lagged server snapshot.
+    /// Cleared once a later GET agrees with the write.
+    private var likeOverrides: [String: (liked: Bool, track: SpotifyClient.Track)] = [:]
+    private var isRefreshingLiked = false
+    private var lastLikedRefresh = Date.distantPast
+    /// Last server-reported library size (not adjusted by local overrides).
+    private var likedServerTotal: Int?
+    /// Minimum gap between opportunistic probes (app-active). Page opens force.
+    private let likedRefreshMinInterval: TimeInterval = 15
 
     /// Seeds liked state for a freshly loaded context (the liked page itself
     /// IS the seed — everything it lists is liked).
     private func seedLikedState(for tracks: [SpotifyClient.Track], contextKey: String) {
         if contextKey == "liked" {
-            likedIDs.formUnion(tracks.map(\.id))
+            applyLikedSnapshot(tracks, total: tracks.count)
         } else if !tracks.isEmpty, !likedFetches.contains(contextKey) {
             likedFetches.insert(contextKey)
             Task {
@@ -162,10 +171,16 @@ final class AppModel {
                     // /v1/me/tracks/contains caps at 50 ids per call.
                     let ids = Array(tracks.map(\.id).prefix(50))
                     let flags = try await api!.likedContains(ids: ids)
-                    // Only fill what we didn't already know — a concurrent
-                    // toggle wins over the (delayed) server read.
+                    // A concurrent toggle wins over the (delayed) server read.
                     zip(ids, flags).forEach { id, liked in
-                        if liked { likedIDs.insert(id) } else if contextKey != "liked" { likedIDs.remove(id) }
+                        if likeOverrides[id] != nil { return }
+                        if liked {
+                            likedIDs.insert(id)
+                        } else if tracksByContext["liked"]?.contains(where: { $0.id == id }) != true {
+                            // Don't let a lagged contains() unpin a track the
+                            // liked-page snapshot still lists.
+                            likedIDs.remove(id)
+                        }
                     }
                 } catch {
                     dlog("likedContains failed for \(contextKey): \(error)")
@@ -174,11 +189,135 @@ final class AppModel {
         }
     }
 
+    /// Applies a full Liked Songs snapshot, then re-applies in-flight toggles
+    /// so a lagged GET cannot undo a PUT/DELETE we just made.
+    private func applyLikedSnapshot(_ serverTracks: [SpotifyClient.Track], total: Int) {
+        let serverIDs = Set(serverTracks.map(\.id))
+        var list = serverTracks
+        var ids = serverIDs
+        var count = total
+        for (id, override) in likeOverrides {
+            if override.liked {
+                if !ids.contains(id) {
+                    list.insert(override.track, at: 0)
+                    ids.insert(id)
+                    count += 1
+                }
+            } else if ids.contains(id) {
+                list.removeAll { $0.id == id }
+                ids.remove(id)
+                count -= 1
+            }
+        }
+        tracksByContext["liked"] = list
+        likedIDs = ids
+        likedServerTotal = total
+        likedCount = max(0, count)
+        for (id, override) in likeOverrides where override.liked == serverIDs.contains(id) {
+            likeOverrides.removeValue(forKey: id)
+        }
+    }
+
+    /// Newest page on top; keep cached tail entries that were only pushed down.
+    private func mergeLikedPrefix(
+        cached: [SpotifyClient.Track],
+        prefix: [SpotifyClient.Track]
+    ) -> [SpotifyClient.Track] {
+        let prefixIDs = Set(prefix.map(\.id))
+        return prefix + cached.filter { !prefixIDs.contains($0.id) }
+    }
+
+    private func rememberLikeOverride(_ track: SpotifyClient.Track, liked: Bool) {
+        likeOverrides[track.id] = (liked, track)
+    }
+
+    private func forgetLikeOverride(_ id: String) {
+        likeOverrides.removeValue(forKey: id)
+    }
+
+    /// Reconcile Liked Songs with the server. Forced on page open / re-click;
+    /// opportunistic (throttled) when the app becomes active. Third-party
+    /// clients do not receive library-change pushes.
+    func refreshLiked(force: Bool = false) {
+        guard authState == .loggedIn else { return }
+        guard !isRefreshingLiked else { return }
+        if !force, Date().timeIntervalSince(lastLikedRefresh) < likedRefreshMinInterval {
+            return
+        }
+        isRefreshingLiked = true
+        lastLikedRefresh = Date()
+        let loadingToken = tracksByContext["liked"] == nil
+            ? beginTrackLoading(contextKey: "liked")
+            : nil
+        if loadingToken != nil {
+            tracksError["liked"] = nil
+        }
+        Task {
+            defer {
+                isRefreshingLiked = false
+                if let loadingToken {
+                    endTrackLoading(contextKey: "liked", token: loadingToken)
+                }
+            }
+            do {
+                await refreshAPIClient()
+                guard let api else { return }
+                let prefix = try await api.likedTracksPrefix()
+                let cached = tracksByContext["liked"] ?? []
+                let prefixMatches = Array(cached.prefix(prefix.tracks.count)).map(\.id) == prefix.tracks.map(\.id)
+                let previousTotal = likedServerTotal ?? likedCount
+                // Skip a full re-page when the newest 50 and the total agree.
+                if likeOverrides.isEmpty, prefixMatches, previousTotal == prefix.total {
+                    if tracksByContext["liked"] == nil {
+                        tracksByContext["liked"] = []
+                    }
+                    likedServerTotal = prefix.total
+                    return
+                }
+
+                if prefix.total <= prefix.tracks.count {
+                    applyLikedSnapshot(prefix.tracks, total: prefix.total)
+                    return
+                }
+
+                // Phone like/unlike almost always lands in the first page.
+                // Merge that page onto the cache and paint immediately — do
+                // not wait for the rest of the library.
+                if !cached.isEmpty {
+                    let merged = mergeLikedPrefix(cached: cached, prefix: prefix.tracks)
+                    applyLikedSnapshot(merged, total: prefix.total)
+                    let reconciled = likeOverrides.isEmpty
+                        && (merged.count - cached.count) == (prefix.total - previousTotal)
+                    if reconciled { return }
+                } else {
+                    // First visit: show the newest 50 so the page is not blank
+                    // while the tail pages in. Do not replace likedIDs — a
+                    // prefix-only snapshot would unpin hearts on other pages.
+                    tracksByContext["liked"] = prefix.tracks
+                    likedIDs.formUnion(prefix.tracks.map(\.id))
+                    likedServerTotal = prefix.total
+                    likedCount = prefix.total
+                }
+
+                let tracks = try await api.likedTracks(after: prefix)
+                applyLikedSnapshot(tracks, total: prefix.total)
+            } catch {
+                if loadingToken != nil { tracksError["liked"] = error.localizedDescription }
+                dlog("liked refresh failed: \(error)")
+            }
+        }
+    }
+
+    func handleAppDidBecomeActive() {
+        refreshLiked(force: false)
+    }
+
     /// Toggles like state for one track. Optimistic UI; server PUT/DELETE
     /// runs in the background, reverts on failure. Also keeps the liked
     /// page cache and sidebar count coherent.
     func toggleLike(_ track: SpotifyClient.Track) {
         let wasLiked = likedIDs.contains(track.id)
+        rememberLikeOverride(track, liked: !wasLiked)
         if wasLiked {
             likedIDs.remove(track.id)
         } else {
@@ -237,6 +376,7 @@ final class AppModel {
 
     private func revertLike(_ track: SpotifyClient.Track, wasLiked: Bool) {
         dlog("like toggle FAILED for \(track.id), reverting")
+        forgetLikeOverride(track.id)
         if wasLiked {
             likedIDs.insert(track.id)
         } else {
@@ -261,10 +401,26 @@ final class AppModel {
     /// carry simplified artists and usually omit their images.
     private(set) var artistsByID: [String: SpotifyClient.Artist] = [:]
     private var artistProfileFetches: Set<String> = []
-    private(set) var loadingTracks = false
+    /// Request ownership for track loaders, isolated by page context.
+    private var trackLoadingTokens: [String: UUID] = [:]
     private(set) var tracksError: [String: String] = [:]
     /// Increments on every open() — stale load tasks compare and discard.
     private var loadEpoch = 0
+
+    func isLoadingTracks(contextKey: String) -> Bool {
+        trackLoadingTokens[contextKey] != nil
+    }
+
+    private func beginTrackLoading(contextKey: String) -> UUID {
+        let token = UUID()
+        trackLoadingTokens[contextKey] = token
+        return token
+    }
+
+    private func endTrackLoading(contextKey: String, token: UUID) {
+        guard trackLoadingTokens[contextKey] == token else { return }
+        trackLoadingTokens.removeValue(forKey: contextKey)
+    }
 
 
     // MARK: - Lifecycle
@@ -403,18 +559,11 @@ final class AppModel {
     private func loadLibrary() {
         Task {
             do {
-                let lists = try await api!.playlists()
-                playlists = lists
-                likedCount = try await api!.likedTotal()
-                // Warm the liked-songs cache; it powers the most common entry point.
-                if tracksByContext["liked"] == nil, let liked = try? await api!.likedTracks() {
-                    tracksByContext["liked"] = liked
-                    // Seed here too — navigate() skips loading on cache hits.
-                    likedIDs.formUnion(liked.map(\.id))
-                }
+                playlists = try await api!.playlists()
             } catch {
                 dlog("library load failed: \(error)")
             }
+            refreshLiked(force: true)
         }
     }
 
@@ -543,7 +692,12 @@ final class AppModel {
     /// Pushes the current page onto the history stack and clears the forward
     /// stack — a fresh branch of navigation.
     func open(_ newPage: Page) {
-        guard newPage != page else { return }
+        guard newPage != page else {
+            // Re-clicking the current live page is a manual refresh.
+            if case .liked = newPage { refreshLiked(force: true) }
+            if case .queue = newPage { refreshQueue() }
+            return
+        }
         history.append(page)
         forwardStack.removeAll()
         navigate(to: newPage)
@@ -570,17 +724,23 @@ final class AppModel {
         if case .queue = newPage {
             refreshQueue()
         }
+        if case .liked = newPage {
+            // refreshLiked owns the fetch (and the first-visit loader).
+            refreshLiked(force: true)
+            return
+        }
         if case let .artist(id, _, artworkURL) = newPage, artworkURL == nil {
             // Start the portrait request at the same time as the page data,
             // instead of waiting for ArtistDetailView's first render.
             loadArtistProfileIfNeeded(id: id)
         }
         guard let key = newPage.contextKey, tracksByContext[key] == nil else { return }
-        loadingTracks = true
+        let loadingToken = beginTrackLoading(contextKey: key)
         tracksError[key] = nil
         loadEpoch += 1
         let epoch = loadEpoch
         Task {
+            defer { endTrackLoading(contextKey: key, token: loadingToken) }
             do {
                 // Token may have expired while the app sat idle — revalidate.
                 await refreshAPIClient()
@@ -612,11 +772,9 @@ final class AppModel {
                     tracks = try await api!.albumTracks(id)
                 case .search:
                     // Results are fetched by search(), not by page-open.
-                    loadingTracks = false
                     return
                 case .queue, .home:
                     // Live views — nothing to prefetch.
-                    loadingTracks = false
                     return
                 }
                 // Discard if the user navigated elsewhere mid-flight (P0-3).
@@ -631,9 +789,6 @@ final class AppModel {
                 guard epoch == loadEpoch else { return }
                 tracksError[key] = error.localizedDescription
                 dlog("tracks load failed: \(error)")
-            }
-            if epoch == loadEpoch {
-                loadingTracks = false
             }
         }
     }

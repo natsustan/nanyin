@@ -54,7 +54,7 @@ struct RootView: View {
         case .liked:
             PlaylistDetailView(
                 title: "Liked Songs",
-                subtitle: "\(app.tracksByContext["liked"]?.count ?? app.likedCount) songs · \(app.userDisplayName)",
+                subtitle: "\(app.likedCount) songs · \(app.userDisplayName)",
                 coverURL: nil,
                 contextKey: "liked",
                 coverAssetName: "LikedSongsCover"
