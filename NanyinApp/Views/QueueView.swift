@@ -136,7 +136,7 @@ struct QueueView: View {
     private func queueSection(_ title: String, items: [AppModel.QueueItem]) -> some View {
         Section {
             ForEach(items) { item in
-                QueueRow(track: item.track)
+                QueueRow(track: item.track, artist: item.artist)
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
@@ -211,6 +211,7 @@ private struct NowPlayingRow: View {
 private struct QueueRow: View {
     @Environment(AppModel.self) private var app
     let track: SpotifyClient.Track
+    let artist: String
 
     /// Row-local hover — never in the list parent (UI perf rules).
     @State private var hovering = false
@@ -225,7 +226,7 @@ private struct QueueRow: View {
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(hovering ? .white : .white.opacity(0.92))
                     .lineLimit(1)
-                Text(track.artists.map(\.name).joined(separator: ", "))
+                Text(artist)
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.textSecondary)
                     .lineLimit(1)

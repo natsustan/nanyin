@@ -48,10 +48,15 @@ final class AppModel {
 
     /// Returns a valid Web API access token, refreshing when near expiry.
     /// Concurrent callers share one in-flight refresh.
-    private func ensureWebToken(for expectedEpoch: Int? = nil) async throws -> String {
+    private func ensureWebToken(
+        for expectedEpoch: Int? = nil,
+        forceRefresh: Bool = false
+    ) async throws -> String {
         let epoch = expectedEpoch ?? accountEpoch
         guard epoch == accountEpoch else { throw CancellationError() }
-        if Date() < webTokenExpiry.addingTimeInterval(-60), !webAccessToken.isEmpty {
+        if !forceRefresh,
+           Date() < webTokenExpiry.addingTimeInterval(-60),
+           !webAccessToken.isEmpty {
             return webAccessToken
         }
         if let existing = webRefreshInFlight, existing.epoch == epoch {
@@ -73,9 +78,13 @@ final class AppModel {
     }
 
     /// Same as ensureWebToken but rebuilds the API client with a fresh token.
-    private func refreshAPIClient(for expectedEpoch: Int? = nil) async {
+    private func refreshAPIClient(
+        for expectedEpoch: Int? = nil,
+        forceRefresh: Bool = false
+    ) async {
         let epoch = expectedEpoch ?? accountEpoch
-        guard let token = try? await ensureWebToken(for: epoch), epoch == accountEpoch else { return }
+        guard let token = try? await ensureWebToken(for: epoch, forceRefresh: forceRefresh),
+              epoch == accountEpoch else { return }
         api = SpotifyClient(accessToken: token)
     }
 
@@ -471,7 +480,9 @@ final class AppModel {
         } else {
             likedIDs.insert(track.id)
         }
-        likedCount += wasLiked ? -1 : 1
+        if likedServerTotal != nil {
+            likedCount += wasLiked ? -1 : 1
+        }
 
         // Liked page cache maintenance: unliking removes the row, a like
         // inserts at top (matches Spotify's newest-first ordering).
@@ -533,7 +544,7 @@ final class AppModel {
             try await mutate(using: api)
         } catch SpotifyClient.APIError.needsAuth {
             guard epoch == accountEpoch else { throw CancellationError() }
-            await refreshAPIClient(for: epoch)
+            await refreshAPIClient(for: epoch, forceRefresh: true)
             guard epoch == accountEpoch, let refreshedAPI = self.api else { throw CancellationError() }
             try await mutate(using: refreshedAPI)
         }
@@ -556,9 +567,11 @@ final class AppModel {
         guard likeOverrides[track.id]?.liked == failedDesired else { return }
         forgetLikeOverride(track.id)
         if failedDesired {
-            if likedIDs.remove(track.id) != nil { likedCount -= 1 }
+            let removed = likedIDs.remove(track.id) != nil
+            if removed, likedServerTotal != nil { likedCount -= 1 }
         } else {
-            if likedIDs.insert(track.id).inserted { likedCount += 1 }
+            let inserted = likedIDs.insert(track.id).inserted
+            if inserted, likedServerTotal != nil { likedCount += 1 }
         }
         if var liked = tracksByContext["liked"] {
             if failedDesired {
@@ -849,6 +862,12 @@ final class AppModel {
     struct QueueItem: Identifiable {
         let id = UUID()
         let track: SpotifyClient.Track
+        let artist: String
+
+        init(track: SpotifyClient.Track, artist: String? = nil) {
+            self.track = track
+            self.artist = artist ?? track.artists.map(\.name).joined(separator: ", ")
+        }
     }
 
     /// The active device's current track from the queue endpoint.
@@ -916,12 +935,15 @@ final class AppModel {
 
     /// Tracks local recently-played history for the queue view.
     private func trackQueueHistory(_ np: NowPlaying, durationMs: UInt32) {
-        let item = QueueItem(track: SpotifyClient.Track(
-            id: SpotifyClient.trackId(from: np.uri) ?? np.uri,
-            uri: np.uri, name: np.title,
-            durationMs: Int(durationMs), artists: np.artists,
-            albumName: np.album, albumId: np.albumId, artworkURL: np.artworkURL
-        ))
+        let item = QueueItem(
+            track: SpotifyClient.Track(
+                id: SpotifyClient.trackId(from: np.uri) ?? np.uri,
+                uri: np.uri, name: np.title,
+                durationMs: Int(durationMs), artists: np.artists,
+                albumName: np.album, albumId: np.albumId, artworkURL: np.artworkURL
+            ),
+            artist: np.artist
+        )
         queueRecent.removeAll { $0.track.uri == np.uri }
         queueRecent.insert(item, at: 0)
         if queueRecent.count > 30 {
