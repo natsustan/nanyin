@@ -541,6 +541,10 @@ final class AppModel {
         webAccessToken = ""
         api = nil
         nowPlaying = nil
+        queueEpoch += 1
+        queueUpcoming = []
+        queueRecent = []
+        isLoadingQueue = false
         authState = .loggedOut
         authError = keychainErrors.isEmpty
             ? nil
@@ -664,6 +668,7 @@ final class AppModel {
     /// Recently played, appended locally on each track change.
     private(set) var queueRecent: [QueueItem] = []
     private(set) var isLoadingQueue = false
+    private var queueEpoch = 0
 
     /// Refreshes the queue from GET /v1/me/player/queue (the active device's
     /// queue — reflects adds from any client, including ours). Dealer cluster
@@ -671,13 +676,19 @@ final class AppModel {
     /// websocket rejects SUBSCRIBE frames), so this polls on the events that
     /// change the queue instead.
     func refreshQueue() {
+        guard authState == .loggedIn else { return }
         guard !isLoadingQueue else { return }
         isLoadingQueue = true
+        queueEpoch += 1
+        let epoch = queueEpoch
         Task {
-            defer { isLoadingQueue = false }
+            defer {
+                if epoch == queueEpoch { isLoadingQueue = false }
+            }
             do {
                 await refreshAPIClient()
                 let result = try await api!.playerQueue()
+                guard epoch == queueEpoch, authState == .loggedIn else { return }
                 queueUpcoming = result.upcoming.map { QueueItem(track: $0) }
             } catch {
                 dlog("queue refresh failed: \(error)")

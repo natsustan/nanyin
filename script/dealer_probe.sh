@@ -14,6 +14,7 @@
 #   2  token is missing or the refresh request was rejected
 #   3  SESSION DIED after connecting
 #   5  Keychain read or write failed
+#   6  Nanyin is already running
 #
 # Usage: script/dealer_probe.sh [device_id]
 
@@ -23,6 +24,11 @@ SERVICE="com.nanyin.app.spotify"
 CLIENT_ID="65b708073fc0480ea92a077233ca87bd" # keymaster (playback flow)
 DEVICE_ID="${1:-nanyin_probe_check}"
 KEYCHAIN_ITEM_NOT_FOUND=44
+
+if pgrep -f '[N]anyin.app' >/dev/null; then
+    echo "ERROR: Nanyin is already running; stop it before starting the dealer probe." >&2
+    exit 6
+fi
 
 cd "$(dirname "$0")/../rust"
 BIN=target/release/examples/dealer_test

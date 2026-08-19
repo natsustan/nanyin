@@ -10,7 +10,7 @@
 mod proxy_sink;
 
 use std::ffi::{c_char, CStr, CString};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -57,6 +57,8 @@ static SESSION: Mutex<Option<Session>> = Mutex::new(None);
 static SPIRC: Mutex<Option<Arc<Spirc>>> = Mutex::new(None);
 static PLAYER: Mutex<Option<Arc<Player>>> = Mutex::new(None);
 static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
+/// Invalidates completion monitors from sessions replaced by a rebuild.
+static PLAYER_GENERATION: AtomicU64 = AtomicU64::new(0);
 
 static IS_PLAYING: AtomicBool = AtomicBool::new(false);
 static POSITION: Mutex<PlaybackPosition> = Mutex::new(PlaybackPosition::empty());
@@ -258,6 +260,7 @@ pub extern "C" fn nanyin_init_player(access_token: *const c_char, device_id: *co
         eprintln!("nanyin_core: init_player: already initialized");
         return 0;
     }
+    let generation = PLAYER_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
     // Tear down stale state before rebuilding (spirc died or fresh start).
     {
         let spirc = SPIRC.lock().unwrap().take();
@@ -271,7 +274,7 @@ pub extern "C" fn nanyin_init_player(access_token: *const c_char, device_id: *co
 
     SHUTTING_DOWN.store(false, Ordering::SeqCst);
 
-    let result = RUNTIME.block_on(init_player_async(&token, &device));
+    let result = RUNTIME.block_on(init_player_async(&token, &device, generation));
 
     match result {
         Ok(()) => {
@@ -286,7 +289,11 @@ pub extern "C" fn nanyin_init_player(access_token: *const c_char, device_id: *co
     }
 }
 
-async fn init_player_async(access_token: &str, device_id: &str) -> Result<(), String> {
+async fn init_player_async(
+    access_token: &str,
+    device_id: &str,
+    generation: u64,
+) -> Result<(), String> {
     eprintln!("nanyin_core: init_player_async starting (device {device_id})");
 
     let session_config = SessionConfig {
@@ -373,6 +380,9 @@ async fn init_player_async(access_token: &str, device_id: &str) -> Result<(), St
         if let Err(join_err) = spirc_handle.await {
             eprintln!("nanyin_core: spirc task panicked: {join_err}");
         }
+        if PLAYER_GENERATION.load(Ordering::SeqCst) != generation {
+            return;
+        }
         eprintln!("nanyin_core: spirc task ended — session unusable, notifying");
         *SPIRC.lock().unwrap() = None;
         IS_PLAYING.store(false, Ordering::SeqCst);
@@ -384,6 +394,9 @@ async fn init_player_async(access_token: &str, device_id: &str) -> Result<(), St
     let watcher_session = session.clone();
     RUNTIME.spawn(async move {
         loop {
+            if PLAYER_GENERATION.load(Ordering::SeqCst) != generation {
+                return;
+            }
             if watcher_session.is_invalid() {
                 break;
             }
@@ -391,6 +404,11 @@ async fn init_player_async(access_token: &str, device_id: &str) -> Result<(), St
                 return; // planned shutdown — no callback
             }
             tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+        if PLAYER_GENERATION.load(Ordering::SeqCst) != generation
+            || SHUTTING_DOWN.load(Ordering::SeqCst)
+        {
+            return;
         }
         log::debug!("session disconnected");
         IS_PLAYING.store(false, Ordering::SeqCst);
@@ -410,6 +428,7 @@ async fn init_player_async(access_token: &str, device_id: &str) -> Result<(), St
 #[no_mangle]
 pub extern "C" fn nanyin_shutdown() -> i32 {
     SHUTTING_DOWN.store(true, Ordering::SeqCst);
+    PLAYER_GENERATION.fetch_add(1, Ordering::SeqCst);
     IS_PLAYING.store(false, Ordering::SeqCst);
 
     let spirc = { SPIRC.lock().unwrap().take() };
