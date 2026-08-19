@@ -365,10 +365,9 @@ async fn init_player_async(
     let mut events: librespot_playback::player::PlayerEventChannel = player.get_player_event_channel();
     RUNTIME.spawn(async move {
         while let Some(event) = events.recv().await {
-            if PLAYER_GENERATION.load(Ordering::SeqCst) != generation {
+            if !with_current_player_generation(generation, || handle_player_event(event)) {
                 return;
             }
-            handle_player_event(event);
         }
     });
 
@@ -645,6 +644,15 @@ fn handle_player_event(event: librespot_playback::player::PlayerEvent) {
     }
 }
 
+fn with_current_player_generation(generation: u64, action: impl FnOnce()) -> bool {
+    let _lifecycle = PLAYER_LIFECYCLE.lock().unwrap();
+    if PLAYER_GENERATION.load(Ordering::SeqCst) != generation {
+        return false;
+    }
+    action();
+    true
+}
+
 // ============================================================================
 // Playback commands
 // ============================================================================
@@ -917,8 +925,56 @@ fn _unused(m: mpsc::UnboundedSender<()>) {}
 
 #[cfg(test)]
 mod tests {
-    use super::{interpolated_position_ms, PlaybackPosition};
+    use super::{
+        interpolated_position_ms, with_current_player_generation, PlaybackPosition,
+        PLAYER_GENERATION, PLAYER_LIFECYCLE,
+    };
+    use std::sync::atomic::Ordering;
+    use std::sync::mpsc;
+    use std::sync::TryLockError;
+    use std::thread;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn player_event_generation_check_is_atomic_with_rebuilds() {
+        let generation = {
+            let _lifecycle = PLAYER_LIFECYCLE.lock().unwrap();
+            PLAYER_GENERATION.fetch_add(1, Ordering::SeqCst) + 1
+        };
+        let (event_entered_tx, event_entered_rx) = mpsc::channel();
+        let (release_event_tx, release_event_rx) = mpsc::channel();
+        let event_thread = thread::spawn(move || {
+            assert!(with_current_player_generation(generation, || {
+                event_entered_tx.send(()).unwrap();
+                release_event_rx.recv().unwrap();
+            }));
+        });
+        event_entered_rx.recv().unwrap();
+
+        let rebuild_during_event = match PLAYER_LIFECYCLE.try_lock() {
+            Ok(_lifecycle) => {
+                PLAYER_GENERATION.fetch_add(1, Ordering::SeqCst);
+                true
+            }
+            Err(TryLockError::WouldBlock) => false,
+            Err(TryLockError::Poisoned(_)) => panic!("player lifecycle lock was poisoned"),
+        };
+
+        release_event_tx.send(()).unwrap();
+        event_thread.join().unwrap();
+        if !rebuild_during_event {
+            let _lifecycle = PLAYER_LIFECYCLE.lock().unwrap();
+            PLAYER_GENERATION.fetch_add(1, Ordering::SeqCst);
+        }
+
+        assert!(
+            !rebuild_during_event,
+            "generation changed while the old player event was being handled"
+        );
+        assert!(!with_current_player_generation(generation, || {
+            panic!("stale player event was handled after rebuild");
+        }));
+    }
 
     #[test]
     fn position_uses_only_monotonic_elapsed_time() {
