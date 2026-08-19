@@ -88,6 +88,26 @@ final class AppModel {
         api = SpotifyClient(accessToken: token)
     }
 
+    /// Retries one Web API operation with a fresh token after an actual 401.
+    private func withAPIAuthRetry<T>(
+        for epoch: Int,
+        operation: (SpotifyClient) async throws -> T
+    ) async throws -> T {
+        guard epoch == accountEpoch else { throw CancellationError() }
+        await refreshAPIClient(for: epoch)
+        guard epoch == accountEpoch, let api else { throw CancellationError() }
+        do {
+            return try await operation(api)
+        } catch SpotifyClient.APIError.needsAuth {
+            guard epoch == accountEpoch else { throw CancellationError() }
+            await refreshAPIClient(for: epoch, forceRefresh: true)
+            guard epoch == accountEpoch, let refreshedAPI = self.api else {
+                throw CancellationError()
+            }
+            return try await operation(refreshedAPI)
+        }
+    }
+
     // MARK: - Playback
 
     private(set) var isPlaying = false
@@ -386,9 +406,9 @@ final class AppModel {
                 }
             }
             do {
-                await refreshAPIClient(for: epoch)
-                guard epoch == accountEpoch, let api else { return }
-                let prefix = try await api.likedTracksPrefix()
+                let prefix = try await withAPIAuthRetry(for: epoch) { api in
+                    try await api.likedTracksPrefix()
+                }
                 guard epoch == accountEpoch else { return }
                 let cached = tracksByContext["liked"] ?? []
                 let prefixMatches = Array(cached.prefix(prefix.tracks.count)).map(\.id) == prefix.tracks.map(\.id)
@@ -442,7 +462,9 @@ final class AppModel {
                     likedCount = prefix.total
                 }
 
-                let tracks = try await api.likedTracks(after: prefix)
+                let tracks = try await withAPIAuthRetry(for: epoch) { api in
+                    try await api.likedTracks(after: prefix)
+                }
                 guard epoch == accountEpoch else { return }
                 applyLikedSnapshot(
                     displayTracks: tracks,
@@ -557,6 +579,7 @@ final class AppModel {
         let track = SpotifyClient.Track(
             id: id, uri: np.uri, name: np.title,
             durationMs: Int(durationMs), artists: np.artists,
+            artistDisplayText: np.artist,
             albumName: np.album, albumId: np.albumId, artworkURL: np.artworkURL
         )
         toggleLike(track)
@@ -866,7 +889,8 @@ final class AppModel {
 
         init(track: SpotifyClient.Track, artist: String? = nil) {
             self.track = track
-            self.artist = artist ?? track.artists.map(\.name).joined(separator: ", ")
+            self.artist = artist ?? track.artistDisplayText
+                ?? track.artists.map(\.name).joined(separator: ", ")
         }
     }
 

@@ -110,6 +110,11 @@ struct TrackRow: View {
                     .lineLimit(1)
                 if !track.artists.isEmpty {
                     artistLine
+                } else if let artist = track.artistDisplayText, !artist.isEmpty {
+                    Text(artist)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.textSecondary)
+                        .lineLimit(1)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

@@ -16,9 +16,33 @@ struct SpotifyClient {
         let durationMs: Int
         /// Artists with ids — clickable names (M4.1) without index alignment.
         let artists: [Artist]
+        /// Display-only fallback when playback metadata has names but no ids.
+        let artistDisplayText: String?
         let albumName: String
         let albumId: String?
         let artworkURL: URL?
+
+        init(
+            id: String,
+            uri: String,
+            name: String,
+            durationMs: Int,
+            artists: [Artist],
+            artistDisplayText: String? = nil,
+            albumName: String,
+            albumId: String?,
+            artworkURL: URL?
+        ) {
+            self.id = id
+            self.uri = uri
+            self.name = name
+            self.durationMs = durationMs
+            self.artists = artists
+            self.artistDisplayText = artistDisplayText
+            self.albumName = albumName
+            self.albumId = albumId
+            self.artworkURL = artworkURL
+        }
 
         /// Copy with album name/artwork/id filled in — album endpoints return
         /// simplified track objects without the album field.
@@ -29,6 +53,7 @@ struct SpotifyClient {
                 name: name,
                 durationMs: durationMs,
                 artists: artists,
+                artistDisplayText: artistDisplayText,
                 albumName: albumName.isEmpty ? album : albumName,
                 albumId: albumId ?? self.albumId,
                 artworkURL: artworkURL ?? artwork
