@@ -630,15 +630,15 @@ final class AppModel {
 
     /// Clean shutdown of the Rust core (Connect goodbye) — app quit path.
     func shutdown() {
-        _ = Core.stop()
+        _ = Core.shutdown()
         AudioRenderer.shared.stop()
         NowPlayingManager.shared.clear()
     }
 
     func signOut() {
-        _ = Core.stop()
-        AudioRenderer.shared.stop()
         accountEpoch += 1
+        _ = Core.shutdown()
+        AudioRenderer.shared.stop()
         webRefreshInFlight = nil
         likedProbeTask?.cancel()
         likedProbeTask = nil
@@ -1247,19 +1247,25 @@ final class AppModel {
     /// which Spotify's risk control treats as abuse and revokes everything
     /// (learned the hard way: refresh token got invalidated).
     private func reconnect() {
+        guard authState == .loggedIn else { return }
+        let epoch = accountEpoch
+        let accessToken = playbackAccessToken
         connectionNote = "Reconnecting…"
         Task {
             let deviceId: String
             do {
                 deviceId = try KeychainStore.spotifyDeviceId()
             } catch {
+                guard epoch == accountEpoch, authState == .loggedIn else { return }
                 dlog("device id persistence failed: \(error)")
                 connectionNote = "Connection lost — \(error.localizedDescription)"
                 return
             }
             // 1) Try re-init with the CURRENT access token — cheap and usually
             //    sufficient (librespot also refreshes internally via login5).
-            let rc = await Core.initializePlayer(accessToken: playbackAccessToken, deviceId: deviceId)
+            guard epoch == accountEpoch, authState == .loggedIn else { return }
+            let rc = await Core.initializePlayer(accessToken: accessToken, deviceId: deviceId)
+            guard epoch == accountEpoch, authState == .loggedIn else { return }
             if rc == 0 {
                 connectionNote = nil
                 return
@@ -1267,15 +1273,18 @@ final class AppModel {
             // 2) Only if that fails, mint a fresh token via refresh.
             do {
                 let token = try await SpotifyAuth.refreshAccessToken(for: .playback)
+                guard epoch == accountEpoch, authState == .loggedIn else { return }
                 apply(playbackToken: token)
                 let rc2 = await Core.initializePlayer(accessToken: playbackAccessToken, deviceId: deviceId)
+                guard epoch == accountEpoch, authState == .loggedIn else { return }
                 connectionNote = rc2 == 0 ? nil : "Connection lost"
             } catch {
+                guard epoch == accountEpoch, authState == .loggedIn else { return }
                 if case SpotifyAuth.AuthError.refreshTokenRevoked = error {
                     // Dead credential: surface re-auth instead of a footnote.
                     // Retrying against a revoked token only feeds risk control.
                     dlog("playback refresh token revoked — forcing re-auth")
-                    _ = Core.stop()
+                    _ = Core.shutdown()
                     AudioRenderer.shared.stop()
                     nowPlaying = nil
                     authError = error.localizedDescription

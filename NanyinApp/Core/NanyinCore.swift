@@ -118,15 +118,38 @@ enum Core {
     private static let initQueue = DispatchQueue(
         label: "com.nanyin.core.init", qos: .userInitiated
     )
+    private static let initStateLock = NSLock()
+    nonisolated(unsafe) private static var initGeneration: UInt64 = 0
+
+    nonisolated private static func currentInitGeneration() -> UInt64 {
+        initStateLock.lock()
+        defer { initStateLock.unlock() }
+        return initGeneration
+    }
+
+    nonisolated private static func invalidateInitialization() {
+        initStateLock.lock()
+        initGeneration &+= 1
+        initStateLock.unlock()
+    }
 
     nonisolated static func initializePlayer(accessToken: String, deviceId: String) async -> Int32 {
-        await withCheckedContinuation { cont in
+        let generation = currentInitGeneration()
+        return await withCheckedContinuation { cont in
             initQueue.async {
-                cont.resume(
-                    returning: initializePlayerBlocking(
-                        accessToken: accessToken, deviceId: deviceId
-                    )
+                guard generation == currentInitGeneration() else {
+                    cont.resume(returning: Int32(-1))
+                    return
+                }
+                let result = initializePlayerBlocking(
+                    accessToken: accessToken, deviceId: deviceId
                 )
+                guard generation == currentInitGeneration() else {
+                    _ = nanyin_shutdown()
+                    cont.resume(returning: Int32(-1))
+                    return
+                }
+                cont.resume(returning: result)
             }
         }
     }
@@ -154,6 +177,10 @@ enum Core {
     nonisolated static func pause() -> Int32 { nanyin_pause() }
     nonisolated static func resume() -> Int32 { nanyin_resume() }
     nonisolated static func stop() -> Int32 { nanyin_stop() }
+    nonisolated static func shutdown() -> Int32 {
+        invalidateInitialization()
+        return nanyin_shutdown()
+    }
     nonisolated static func next() -> Int32 { nanyin_next() }
     nonisolated static func prev() -> Int32 { nanyin_prev() }
     nonisolated static func seek(_ positionMs: UInt32) -> Int32 { nanyin_seek(positionMs) }
