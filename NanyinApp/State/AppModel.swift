@@ -170,6 +170,7 @@ final class AppModel {
     /// One writer per track; rapid toggles are folded into the latest override.
     private var activeLikeMutations: Set<String> = []
     private var isRefreshingLiked = false
+    private var likedRefreshPending = false
     private var lastLikedRefresh = Date.distantPast
     /// Last server-reported library size (not adjusted by local overrides).
     private var likedServerTotal: Int?
@@ -345,7 +346,10 @@ final class AppModel {
     func refreshLiked(force: Bool = false) {
         guard authState == .loggedIn else { return }
         pruneExpiredLikeOverrides()
-        guard !isRefreshingLiked else { return }
+        guard !isRefreshingLiked else {
+            likedRefreshPending = true
+            return
+        }
         if !force, Date().timeIntervalSince(lastLikedRefresh) < likedRefreshMinInterval {
             return
         }
@@ -364,6 +368,10 @@ final class AppModel {
                     isRefreshingLiked = false
                     if let loadingToken {
                         endTrackLoading(contextKey: "liked", token: loadingToken)
+                    }
+                    if likedRefreshPending {
+                        likedRefreshPending = false
+                        refreshLiked(force: true)
                     }
                 }
             }
@@ -690,6 +698,7 @@ final class AppModel {
         likeOverrides.removeAll()
         activeLikeMutations.removeAll()
         isRefreshingLiked = false
+        likedRefreshPending = false
         lastLikedRefresh = .distantPast
         likedServerTotal = nil
         likedCount = 0
