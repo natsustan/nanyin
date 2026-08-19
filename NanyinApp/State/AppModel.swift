@@ -159,8 +159,14 @@ final class AppModel {
     private var pendingLikeProbeIDs: Set<String> = []
     private var likedProbeTask: Task<Void, Never>?
     /// Desired like state that must win over a lagged server snapshot.
-    /// Cleared once a later GET agrees with the write.
-    private var likeOverrides: [String: (liked: Bool, track: SpotifyClient.Track)] = [:]
+    /// Successful writes expire after a bounded reconciliation window.
+    private struct LikeOverride {
+        let liked: Bool
+        let track: SpotifyClient.Track
+        let mutationID: UUID
+        var expiresAt: Date?
+    }
+    private var likeOverrides: [String: LikeOverride] = [:]
     /// One writer per track; rapid toggles are folded into the latest override.
     private var activeLikeMutations: Set<String> = []
     private var isRefreshingLiked = false
@@ -169,6 +175,9 @@ final class AppModel {
     private var likedServerTotal: Int?
     /// Minimum gap between opportunistic probes (app-active). Page opens force.
     private let likedRefreshMinInterval: TimeInterval = 15
+    /// Covers Spotify's normal write-to-read lag without masking later changes
+    /// made by another client indefinitely.
+    private let likeOverrideLagWindow: TimeInterval = 30
 
     func isLikeKnown(_ id: String) -> Bool {
         likedSnapshotComplete || knownLikeIDs.contains(id) || likeOverrides[id] != nil
@@ -233,6 +242,7 @@ final class AppModel {
         total: Int,
         isComplete: Bool = true
     ) {
+        pruneExpiredLikeOverrides()
         let serverIDs = Set(serverTracks.map(\.id))
         var list = serverTracks
         var ids = serverIDs
@@ -281,11 +291,28 @@ final class AppModel {
     }
 
     private func rememberLikeOverride(_ track: SpotifyClient.Track, liked: Bool) {
-        likeOverrides[track.id] = (liked, track)
+        likeOverrides[track.id] = LikeOverride(
+            liked: liked,
+            track: track,
+            mutationID: UUID(),
+            expiresAt: nil
+        )
     }
 
     private func forgetLikeOverride(_ id: String) {
         likeOverrides.removeValue(forKey: id)
+    }
+
+    private func pruneExpiredLikeOverrides(now: Date = Date()) {
+        likeOverrides = likeOverrides.filter { _, override in
+            guard let expiresAt = override.expiresAt else { return true }
+            return expiresAt > now
+        }
+    }
+
+    private func hasPendingLikeOverride(_ id: String) -> Bool {
+        pruneExpiredLikeOverrides()
+        return likeOverrides[id] != nil
     }
 
     /// Reconcile Liked Songs with the server. Forced on page open / re-click;
@@ -293,6 +320,7 @@ final class AppModel {
     /// clients do not receive library-change pushes.
     func refreshLiked(force: Bool = false) {
         guard authState == .loggedIn else { return }
+        pruneExpiredLikeOverrides()
         guard !isRefreshingLiked else { return }
         if !force, Date().timeIntervalSince(lastLikedRefresh) < likedRefreshMinInterval {
             return
@@ -430,12 +458,15 @@ final class AppModel {
             } catch {
                 guard epoch == accountEpoch else { return }
                 // An older failed request must not undo a newer click.
-                guard likeOverrides[id]?.liked == attempted.liked else { continue }
+                guard likeOverrides[id]?.mutationID == attempted.mutationID else { continue }
                 revertLike(attempted.track, failedDesired: attempted.liked)
                 return
             }
 
-            guard let latest = likeOverrides[id], latest.liked != attempted.liked else {
+            guard var latest = likeOverrides[id] else { return }
+            guard latest.liked != attempted.liked else {
+                latest.expiresAt = Date().addingTimeInterval(likeOverrideLagWindow)
+                likeOverrides[id] = latest
                 return
             }
         }
@@ -1029,7 +1060,11 @@ final class AppModel {
         let contextURI: String?
         switch page {
         case .liked:
-            contextURI = userId.isEmpty ? nil : "spotify:user:\(userId):collection"
+            // A newly inserted/removed local row may not have reached Spotify's
+            // server-resolved collection yet, so its local index is unsafe.
+            contextURI = userId.isEmpty || hasPendingLikeOverride(track.id)
+                ? nil
+                : "spotify:user:\(userId):collection"
         case let .playlist(id, _):
             contextURI = "spotify:playlist:\(id)"
         case let .album(id, _, _, _):
