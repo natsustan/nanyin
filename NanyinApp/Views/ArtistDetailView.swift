@@ -12,9 +12,14 @@ import SwiftUI
 struct ArtistDetailView: View {
     @Environment(AppModel.self) private var app
 
+    let artistID: String
     let title: String
     let artworkURL: URL?
     let contextKey: String
+
+    private var resolvedArtworkURL: URL? {
+        artworkURL ?? app.artistsByID[artistID]?.artworkURL
+    }
 
     private var tracks: [SpotifyClient.Track] {
         app.tracksByContext[contextKey] ?? []
@@ -33,47 +38,59 @@ struct ArtistDetailView: View {
     }
 
     var body: some View {
-        Group {
-            if let error = app.tracksError[contextKey] {
-                VStack(spacing: 10) {
-                    Image(systemName: "exclamationmark.triangle")
-                        .font(.title)
-                        .foregroundStyle(.orange)
-                    Text(error)
-                        .foregroundStyle(Theme.textSecondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if tracks.isEmpty {
-                VStack(spacing: 12) {
-                    if app.loadingTracks {
-                        ProgressView()
-                        Text("Loading top tracks…")
-                            .foregroundStyle(Theme.textSecondary)
-                    } else {
-                        Text("No top tracks")
-                            .foregroundStyle(Theme.textSecondary)
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                // Single vertical scroller for the whole page: top tracks are
-                // only ~10 rows, so plain rows (no NSTableView recycling) are
-                // fine — this lets Albums/Singles sit BELOW the track list.
-                // Horizontal card rows inside are perpendicular-axis scrollers.
-                ScrollView(.vertical) {
-                    VStack(spacing: 0) {
-                        header
-                        Divider().overlay(Color(white: 0.18))
-                        topTracksHeader
-                        ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
-                            TrackRow(track: track, index: index, contextKey: contextKey)
-                        }
-                        discography
-                    }
-                }
+        // Keep the artist header visible even when the artist has no top
+        // tracks yet (or the top-tracks request fails). The artist page is
+        // still useful for its identity and any available releases.
+        ScrollView(.vertical) {
+            VStack(spacing: 0) {
+                header
+                Divider().overlay(Color(white: 0.18))
+                trackContent
+                discography
             }
         }
         .background(Theme.background)
+        .task(id: artistID) {
+            if artworkURL == nil {
+                app.loadArtistProfileIfNeeded(id: artistID)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var trackContent: some View {
+        if let error = app.tracksError[contextKey] {
+            VStack(spacing: 10) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.title)
+                    .foregroundStyle(.orange)
+                Text(error)
+                    .foregroundStyle(Theme.textSecondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 28)
+        } else if tracks.isEmpty {
+            VStack(spacing: 12) {
+                if app.isLoadingTracks(contextKey: contextKey) {
+                    ProgressView()
+                    Text("Loading top tracks…")
+                        .foregroundStyle(Theme.textSecondary)
+                } else {
+                    Text("No top tracks")
+                        .foregroundStyle(Theme.textSecondary)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 28)
+        } else {
+            // Top tracks are only ~10 rows, so plain rows (no NSTableView
+            // recycling) are fine. Horizontal card rows below use the
+            // perpendicular axis and keep this as a single vertical scroller.
+            topTracksHeader
+            ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
+                TrackRow(track: track, index: index, contextKey: contextKey)
+            }
+        }
     }
 
     private var header: some View {
@@ -91,7 +108,7 @@ struct ArtistDetailView: View {
                     .font(.system(size: 32, weight: .bold))
                     .foregroundStyle(.white)
                     .lineLimit(2)
-                Text("\(tracks.count) top tracks · \(albums.count) albums · \(singles.count) singles")
+                Text(headerStats)
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.textSecondary)
 
@@ -114,6 +131,8 @@ struct ArtistDetailView: View {
                     .cornerRadius(20)
                 }
                 .buttonStyle(.plain)
+                .disabled(tracks.isEmpty)
+                .opacity(tracks.isEmpty ? 0.5 : 1)
                 .onHover { hovering in
                     if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
                 }
@@ -126,10 +145,21 @@ struct ArtistDetailView: View {
         .background(Theme.background)
     }
 
+    private var headerStats: String {
+        var stats = ["\(tracks.count) top tracks"]
+        if !albums.isEmpty {
+            stats.append("\(albums.count) albums")
+        }
+        if !singles.isEmpty {
+            stats.append("\(singles.count) singles")
+        }
+        return stats.joined(separator: " · ")
+    }
+
     @ViewBuilder
     private var portrait: some View {
         Group {
-            if let url = artworkURL {
+            if let url = resolvedArtworkURL {
                 AsyncImage(url: url) { image in
                     image.resizable().scaledToFill()
                 } placeholder: {

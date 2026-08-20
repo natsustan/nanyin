@@ -12,17 +12,19 @@ mod proxy_sink;
 use std::ffi::{c_char, CStr, CString};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use librespot_connect::{ConnectConfig, LoadRequest, LoadRequestOptions, Spirc};
 use librespot_core::authentication::Credentials;
 use librespot_core::cache::Cache;
 use librespot_core::config::{DeviceType, SessionConfig};
 use librespot_core::session::Session;
+use librespot_core::AccessPointAuthenticationError;
 use librespot_playback::config::{AudioFormat, Bitrate, PlayerConfig};
 use librespot_playback::mixer::softmixer::SoftMixer;
 use librespot_playback::mixer::{Mixer, MixerConfig};
 use librespot_playback::player::Player;
+use librespot_protocol::keyexchange::ErrorCode;
 
 use once_cell::sync::Lazy;
 use serde_json::json;
@@ -35,8 +37,57 @@ use proxy_sink::mk_proxy_sink;
 // ============================================================================
 //  0 = success
 // -1 = general error
-// -2 = session disconnected — Swift should refresh the token and re-init
+// -2 = session disconnected
 // -3 = session not ready yet — retry when the connected callback fires
+// -4 = credentials rejected — Swift may refresh the playback token once
+
+const PLAYER_INIT_FAILED: i32 = -1;
+const PLAYER_INIT_CREDENTIALS_REJECTED: i32 = -4;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PlayerInitFailureKind {
+    CredentialsRejected,
+    Other,
+}
+
+#[derive(Debug)]
+struct PlayerInitFailure {
+    kind: PlayerInitFailureKind,
+    message: String,
+}
+
+impl PlayerInitFailure {
+    fn other(message: impl Into<String>) -> Self {
+        Self {
+            kind: PlayerInitFailureKind::Other,
+            message: message.into(),
+        }
+    }
+
+    fn from_librespot(error: &librespot_core::Error) -> Self {
+        let kind = if matches!(
+            error.error.downcast_ref::<AccessPointAuthenticationError>(),
+            Some(AccessPointAuthenticationError::LoginFailed(
+                ErrorCode::BadCredentials | ErrorCode::CouldNotValidateCredentials
+            ))
+        ) {
+            PlayerInitFailureKind::CredentialsRejected
+        } else {
+            PlayerInitFailureKind::Other
+        };
+        Self {
+            kind,
+            message: format!("spirc init: {error:?}"),
+        }
+    }
+
+    fn code(&self) -> i32 {
+        match self.kind {
+            PlayerInitFailureKind::CredentialsRejected => PLAYER_INIT_CREDENTIALS_REJECTED,
+            PlayerInitFailureKind::Other => PLAYER_INIT_FAILED,
+        }
+    }
+}
 
 // ============================================================================
 // Global state
@@ -56,11 +107,16 @@ static RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
 static SESSION: Mutex<Option<Session>> = Mutex::new(None);
 static SPIRC: Mutex<Option<Arc<Spirc>>> = Mutex::new(None);
 static PLAYER: Mutex<Option<Arc<Player>>> = Mutex::new(None);
+/// Serializes generation changes with publishing or clearing player slots.
+static PLAYER_LIFECYCLE: Mutex<()> = Mutex::new(());
 static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
+/// Invalidates completion monitors from sessions replaced by a rebuild.
+static PLAYER_GENERATION: AtomicU64 = AtomicU64::new(0);
+/// Coalesces Spirc and session failure signals for the active generation.
+static DISCONNECT_NOTIFIED: AtomicBool = AtomicBool::new(false);
 
 static IS_PLAYING: AtomicBool = AtomicBool::new(false);
-static POSITION_MS: AtomicU32 = AtomicU32::new(0);
-static POSITION_TS_MS: AtomicU64 = AtomicU64::new(0);
+static POSITION: Mutex<PlaybackPosition> = Mutex::new(PlaybackPosition::empty());
 static DURATION_MS: AtomicU32 = AtomicU32::new(0);
 static CURRENT_URI: Mutex<Option<String>> = Mutex::new(None);
 
@@ -147,16 +203,60 @@ fn notify_disconnected() {
 // Session lifecycle
 // ============================================================================
 
-fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
+struct PlaybackPosition {
+    stored_ms: u32,
+    updated_at: Option<Instant>,
+}
+
+impl PlaybackPosition {
+    const fn empty() -> Self {
+        Self {
+            stored_ms: 0,
+            updated_at: None,
+        }
+    }
+
+    #[cfg(test)]
+    fn new(position_ms: u32, now: Instant) -> Self {
+        Self {
+            stored_ms: position_ms,
+            updated_at: Some(now),
+        }
+    }
+
+    fn update(&mut self, position_ms: u32, now: Instant) {
+        self.stored_ms = position_ms;
+        self.updated_at = Some(now);
+    }
+
+    fn get_at(&self, now: Instant, is_playing: bool, duration_ms: u32) -> u32 {
+        let elapsed_ms = self
+            .updated_at
+            .map(|updated_at| now.saturating_duration_since(updated_at).as_millis())
+            .unwrap_or(0)
+            .min(u32::MAX as u128) as u32;
+        interpolated_position_ms(self.stored_ms, elapsed_ms, is_playing, duration_ms)
+    }
+
+    fn freeze(&mut self, now: Instant, duration_ms: u32) {
+        let position_ms = self.get_at(now, true, duration_ms);
+        self.update(position_ms, now);
+    }
 }
 
 fn update_position(position_ms: u32) {
-    POSITION_MS.store(position_ms, Ordering::SeqCst);
-    POSITION_TS_MS.store(now_ms(), Ordering::SeqCst);
+    POSITION
+        .lock()
+        .unwrap()
+        .update(position_ms, Instant::now());
+}
+
+/// Stops interpolation without losing elapsed time since the last player event.
+fn stop_position_clock() {
+    let mut position = POSITION.lock().unwrap();
+    if IS_PLAYING.swap(false, Ordering::SeqCst) {
+        position.freeze(Instant::now(), DURATION_MS.load(Ordering::SeqCst));
+    }
 }
 
 /// Audio cache: 1 GiB LRU under ~/Library/Caches/nanyin/audio.
@@ -190,52 +290,77 @@ pub extern "C" fn nanyin_init_player(access_token: *const c_char, device_id: *co
 
     if access_token.is_null() {
         eprintln!("nanyin_core: init_player: token is null");
-        return -1;
+        set_last_error("access token is null");
+        return PLAYER_INIT_FAILED;
     }
     let token = unsafe {
         match CStr::from_ptr(access_token).to_str() {
             Ok(s) => s.to_string(),
             Err(_) => {
                 eprintln!("nanyin_core: init_player: invalid utf8 token");
-                return -1;
+                set_last_error("access token is invalid utf8");
+                return PLAYER_INIT_FAILED;
             }
         }
     };
     let device = unsafe {
         if device_id.is_null() {
-            format!("nanyin_{}", std::process::id())
+            eprintln!("nanyin_core: init_player: device id is null");
+            set_last_error("device id is null");
+            return PLAYER_INIT_FAILED;
         } else {
             match CStr::from_ptr(device_id).to_str() {
+                Ok("") => {
+                    eprintln!("nanyin_core: init_player: device id is empty");
+                    set_last_error("device id is empty");
+                    return PLAYER_INIT_FAILED;
+                }
                 Ok(s) => s.to_string(),
-                Err(_) => format!("nanyin_{}", std::process::id()),
+                Err(_) => {
+                    eprintln!("nanyin_core: init_player: invalid utf8 device id");
+                    set_last_error("device id is invalid utf8");
+                    return PLAYER_INIT_FAILED;
+                }
             }
         }
     };
 
-    // Full rebuild when spirc died (session may exist but be unusable).
-    let needs_init = {
-        let session = SESSION.lock().unwrap();
-        let spirc = SPIRC.lock().unwrap();
-        session.is_none() || spirc.is_none()
-    };
-    if !needs_init {
-        eprintln!("nanyin_core: init_player: already initialized");
-        return 0;
-    }
-    // Tear down stale state before rebuilding (spirc died or fresh start).
-    {
+    // Full rebuild when spirc died or the session went invalid (network
+    // loss, idle timeout, server drop). A session that merely exists can
+    // still be dead — every command would hit a closed connection while
+    // init_player keeps answering "already initialized" (observed
+    // 2026-08-19: reconnect loop no-oped against a ghost session).
+    let (generation, stale_spirc, stale_session) = {
+        let _lifecycle = PLAYER_LIFECYCLE.lock().unwrap();
+        let needs_init = {
+            let session = SESSION.lock().unwrap();
+            let spirc = SPIRC.lock().unwrap();
+            session.is_none()
+                || spirc.is_none()
+                || session.as_ref().is_some_and(|s| s.is_invalid())
+        };
+        if !needs_init {
+            eprintln!("nanyin_core: init_player: already initialized");
+            return 0;
+        }
+
+        let generation = PLAYER_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+        SHUTTING_DOWN.store(false, Ordering::SeqCst);
+        DISCONNECT_NOTIFIED.store(false, Ordering::SeqCst);
         let spirc = SPIRC.lock().unwrap().take();
         let session = SESSION.lock().unwrap().take();
         PLAYER.lock().unwrap().take();
-        if let (Some(spirc), Some(session)) = (spirc, session) {
-            let _ = spirc.shutdown();
-            session.shutdown();
-        }
+        (generation, spirc, session)
+    };
+    // Tear down stale state before rebuilding (spirc died or fresh start).
+    if let Some(spirc) = stale_spirc {
+        let _ = spirc.shutdown();
+    }
+    if let Some(session) = stale_session {
+        session.shutdown();
     }
 
-    SHUTTING_DOWN.store(false, Ordering::SeqCst);
-
-    let result = RUNTIME.block_on(init_player_async(&token, &device));
+    let result = RUNTIME.block_on(init_player_async(&token, &device, generation));
 
     match result {
         Ok(()) => {
@@ -243,14 +368,18 @@ pub extern "C" fn nanyin_init_player(access_token: *const c_char, device_id: *co
             0
         }
         Err(e) => {
-            eprintln!("nanyin_core: init_player FAILED: {e}");
-            set_last_error(&e);
-            -1
+            eprintln!("nanyin_core: init_player FAILED: {}", e.message);
+            set_last_error(&e.message);
+            e.code()
         }
     }
 }
 
-async fn init_player_async(access_token: &str, device_id: &str) -> Result<(), String> {
+async fn init_player_async(
+    access_token: &str,
+    device_id: &str,
+    generation: u64,
+) -> Result<(), PlayerInitFailure> {
     eprintln!("nanyin_core: init_player_async starting (device {device_id})");
 
     let session_config = SessionConfig {
@@ -278,7 +407,8 @@ async fn init_player_async(access_token: &str, device_id: &str) -> Result<(), St
     // and then connects the session itself. Connecting twice yields NotConnected.
 
     let mixer: Arc<SoftMixer> = Arc::new(
-        SoftMixer::open(MixerConfig::default()).map_err(|e| format!("mixer: {e}"))?,
+        SoftMixer::open(MixerConfig::default())
+            .map_err(|e| PlayerInitFailure::other(format!("mixer: {e}")))?,
     );
 
     let player_config = PlayerConfig {
@@ -300,7 +430,9 @@ async fn init_player_async(access_token: &str, device_id: &str) -> Result<(), St
     let mut events: librespot_playback::player::PlayerEventChannel = player.get_player_event_channel();
     RUNTIME.spawn(async move {
         while let Some(event) = events.recv().await {
-            handle_player_event(event);
+            if !with_current_player_generation(generation, || handle_player_event(event)) {
+                return;
+            }
         }
     });
 
@@ -323,13 +455,34 @@ async fn init_player_async(access_token: &str, device_id: &str) -> Result<(), St
     )
     .await
     .map_err(|_| {
-        "spirc init: timed out — Spotify accesspoints unreachable (risk-control throttling?)"
-            .to_string()
+        PlayerInitFailure::other(
+            "spirc init: timed out — Spotify accesspoints unreachable (risk-control throttling?)",
+        )
     })?
-    .map_err(|e| format!("spirc init: {e:?}"))?;
+    .map_err(|e| PlayerInitFailure::from_librespot(&e))?;
 
     let spirc = Arc::new(spirc);
+    let published = {
+        let _lifecycle = PLAYER_LIFECYCLE.lock().unwrap();
+        if PLAYER_GENERATION.load(Ordering::SeqCst) != generation
+            || SHUTTING_DOWN.load(Ordering::SeqCst)
+        {
+            false
+        } else {
+            *SESSION.lock().unwrap() = Some(session.clone());
+            *SPIRC.lock().unwrap() = Some(spirc.clone());
+            *PLAYER.lock().unwrap() = Some(player.clone());
+            true
+        }
+    };
+    if !published {
+        let _ = spirc.shutdown();
+        session.shutdown();
+        return Err(PlayerInitFailure::other("player initialization cancelled"));
+    }
+
     let spirc_handle = RUNTIME.spawn(spirc_task);
+    let monitor_spirc = spirc.clone();
     // When the spirc task exits (dealer loss, fatal error), mark the session
     // unusable and tell Swift to re-init — otherwise every command hits a
     // closed channel forever (the "channel closed" failure mode).
@@ -337,9 +490,30 @@ async fn init_player_async(access_token: &str, device_id: &str) -> Result<(), St
         if let Err(join_err) = spirc_handle.await {
             eprintln!("nanyin_core: spirc task panicked: {join_err}");
         }
+        let should_notify = {
+            let _lifecycle = PLAYER_LIFECYCLE.lock().unwrap();
+            if PLAYER_GENERATION.load(Ordering::SeqCst) != generation {
+                false
+            } else {
+                let mut slot = SPIRC.lock().unwrap();
+                if slot
+                    .as_ref()
+                    .is_some_and(|current| Arc::ptr_eq(current, &monitor_spirc))
+                {
+                    slot.take();
+                    stop_position_clock();
+                    DISCONNECT_NOTIFIED
+                        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                        .is_ok()
+                } else {
+                    false
+                }
+            }
+        };
+        if !should_notify {
+            return;
+        }
         eprintln!("nanyin_core: spirc task ended — session unusable, notifying");
-        *SPIRC.lock().unwrap() = None;
-        IS_PLAYING.store(false, Ordering::SeqCst);
         notify_disconnected();
     });
 
@@ -348,6 +522,9 @@ async fn init_player_async(access_token: &str, device_id: &str) -> Result<(), St
     let watcher_session = session.clone();
     RUNTIME.spawn(async move {
         loop {
+            if PLAYER_GENERATION.load(Ordering::SeqCst) != generation {
+                return;
+            }
             if watcher_session.is_invalid() {
                 break;
             }
@@ -356,14 +533,25 @@ async fn init_player_async(access_token: &str, device_id: &str) -> Result<(), St
             }
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
+        let should_notify = {
+            let _lifecycle = PLAYER_LIFECYCLE.lock().unwrap();
+            if PLAYER_GENERATION.load(Ordering::SeqCst) != generation
+                || SHUTTING_DOWN.load(Ordering::SeqCst)
+            {
+                false
+            } else {
+                stop_position_clock();
+                DISCONNECT_NOTIFIED
+                    .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                    .is_ok()
+            }
+        };
+        if !should_notify {
+            return;
+        }
         log::debug!("session disconnected");
-        IS_PLAYING.store(false, Ordering::SeqCst);
         notify_disconnected();
     });
-
-    *SESSION.lock().unwrap() = Some(session);
-    *SPIRC.lock().unwrap() = Some(spirc);
-    *PLAYER.lock().unwrap() = Some(player);
 
     log::debug!("nanyin: session + spirc ready (device {device_id})");
     notify_connected();
@@ -373,12 +561,16 @@ async fn init_player_async(access_token: &str, device_id: &str) -> Result<(), St
 /// Shuts down Spirc and the session (app quit).
 #[no_mangle]
 pub extern "C" fn nanyin_shutdown() -> i32 {
-    SHUTTING_DOWN.store(true, Ordering::SeqCst);
+    let (spirc, session) = {
+        let _lifecycle = PLAYER_LIFECYCLE.lock().unwrap();
+        SHUTTING_DOWN.store(true, Ordering::SeqCst);
+        PLAYER_GENERATION.fetch_add(1, Ordering::SeqCst);
+        let spirc = SPIRC.lock().unwrap().take();
+        let session = SESSION.lock().unwrap().take();
+        PLAYER.lock().unwrap().take();
+        (spirc, session)
+    };
     IS_PLAYING.store(false, Ordering::SeqCst);
-
-    let spirc = { SPIRC.lock().unwrap().take() };
-    let session = { SESSION.lock().unwrap().take() };
-    PLAYER.lock().unwrap().take();
     *CURRENT_URI.lock().unwrap() = None;
     DURATION_MS.store(0, Ordering::SeqCst);
     update_position(0);
@@ -453,7 +645,7 @@ fn handle_player_event(event: librespot_playback::player::PlayerEvent) {
             }));
         }
         PlayerEvent::Stopped { track_id, .. } => {
-            IS_PLAYING.store(false, Ordering::SeqCst);
+            stop_position_clock();
             emit_state(json!({
                 "event": "stopped",
                 "track_uri": track_id.to_string(),
@@ -501,7 +693,7 @@ fn handle_player_event(event: librespot_playback::player::PlayerEvent) {
             }));
         }
         PlayerEvent::EndOfTrack { .. } => {
-            IS_PLAYING.store(false, Ordering::SeqCst);
+            stop_position_clock();
             emit_state(json!({ "event": "end_of_track" }));
         }
         PlayerEvent::ShuffleChanged { shuffle } => {
@@ -516,6 +708,15 @@ fn handle_player_event(event: librespot_playback::player::PlayerEvent) {
         }
         _ => {}
     }
+}
+
+fn with_current_player_generation(generation: u64, action: impl FnOnce()) -> bool {
+    let _lifecycle = PLAYER_LIFECYCLE.lock().unwrap();
+    if PLAYER_GENERATION.load(Ordering::SeqCst) != generation {
+        return false;
+    }
+    action();
+    true
 }
 
 // ============================================================================
@@ -673,7 +874,7 @@ pub extern "C" fn nanyin_stop() -> i32 {
     };
     match spirc.disconnect(true) {
         Ok(()) => {
-            IS_PLAYING.store(false, Ordering::SeqCst);
+            stop_position_clock();
             0
         }
         Err(_) => -1,
@@ -741,21 +942,34 @@ pub extern "C" fn nanyin_is_playing() -> i32 {
     IS_PLAYING.load(Ordering::SeqCst) as i32
 }
 
-/// Current playback position in ms, interpolated while playing
-/// (capped at 5 s without a fresh event).
+fn interpolated_position_ms(
+    stored: u32,
+    elapsed_ms: u32,
+    is_playing: bool,
+    duration_ms: u32,
+) -> u32 {
+    if !is_playing {
+        return stored;
+    }
+
+    let position = stored.saturating_add(elapsed_ms);
+    if duration_ms > 0 {
+        position.min(duration_ms)
+    } else {
+        position
+    }
+}
+
+/// Current playback position in ms, interpolated while playing and capped at
+/// the current track duration. Playing/paused/disconnected events own the
+/// clock state; librespot does not emit periodic position events.
 #[no_mangle]
 pub extern "C" fn nanyin_get_position_ms() -> u32 {
-    let stored = POSITION_MS.load(Ordering::SeqCst);
-    let ts = POSITION_TS_MS.load(Ordering::SeqCst);
-    if ts == 0 {
-        return 0;
-    }
-    if IS_PLAYING.load(Ordering::SeqCst) {
-        let elapsed = (now_ms().saturating_sub(ts)).min(5000) as u32;
-        stored.saturating_add(elapsed)
-    } else {
-        stored
-    }
+    POSITION.lock().unwrap().get_at(
+        Instant::now(),
+        IS_PLAYING.load(Ordering::SeqCst),
+        DURATION_MS.load(Ordering::SeqCst),
+    )
 }
 
 #[no_mangle]
@@ -774,3 +988,154 @@ pub extern "C" fn nanyin_free_string(s: *mut c_char) {
 // Silence "unused" warnings for the mpsc import kept for parity.
 #[allow(unused)]
 fn _unused(m: mpsc::UnboundedSender<()>) {}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        interpolated_position_ms, nanyin_init_player, with_current_player_generation,
+        AccessPointAuthenticationError, ErrorCode, PlaybackPosition, PlayerInitFailure,
+        PlayerInitFailureKind, PLAYER_GENERATION, PLAYER_INIT_CREDENTIALS_REJECTED,
+        PLAYER_INIT_FAILED, PLAYER_LIFECYCLE,
+    };
+    use librespot_core::Error;
+    use std::ffi::CString;
+    use std::io;
+    use std::ptr;
+    use std::sync::atomic::Ordering;
+    use std::sync::mpsc;
+    use std::sync::TryLockError;
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn player_init_refreshes_only_after_typed_credential_rejection() {
+        for code in [ErrorCode::BadCredentials, ErrorCode::CouldNotValidateCredentials] {
+            let error = Error::permission_denied(AccessPointAuthenticationError::LoginFailed(code));
+            let failure = PlayerInitFailure::from_librespot(&error);
+            assert_eq!(failure.kind, PlayerInitFailureKind::CredentialsRejected);
+            assert_eq!(failure.code(), PLAYER_INIT_CREDENTIALS_REJECTED);
+        }
+
+        let generic_permission_denied = Error::permission_denied(io::Error::other("client token 403"));
+        let try_another_ap = Error::permission_denied(
+            AccessPointAuthenticationError::LoginFailed(ErrorCode::TryAnotherAP),
+        );
+        let unavailable = Error::unavailable(io::Error::other("TLS timeout"));
+        for error in [generic_permission_denied, try_another_ap, unavailable] {
+            let failure = PlayerInitFailure::from_librespot(&error);
+            assert_eq!(failure.kind, PlayerInitFailureKind::Other);
+            assert_eq!(failure.code(), PLAYER_INIT_FAILED);
+        }
+    }
+
+    #[test]
+    fn player_init_rejects_missing_or_invalid_device_ids() {
+        let token = CString::new("access-token").unwrap();
+        assert_eq!(
+            nanyin_init_player(token.as_ptr(), ptr::null()),
+            PLAYER_INIT_FAILED
+        );
+
+        let empty = CString::new("").unwrap();
+        assert_eq!(
+            nanyin_init_player(token.as_ptr(), empty.as_ptr()),
+            PLAYER_INIT_FAILED
+        );
+
+        let invalid_utf8 = [0xff_u8, 0];
+        assert_eq!(
+            nanyin_init_player(token.as_ptr(), invalid_utf8.as_ptr().cast()),
+            PLAYER_INIT_FAILED
+        );
+    }
+
+    #[test]
+    fn player_event_generation_check_is_atomic_with_rebuilds() {
+        let generation = {
+            let _lifecycle = PLAYER_LIFECYCLE.lock().unwrap();
+            PLAYER_GENERATION.fetch_add(1, Ordering::SeqCst) + 1
+        };
+        let (event_entered_tx, event_entered_rx) = mpsc::channel();
+        let (release_event_tx, release_event_rx) = mpsc::channel();
+        let event_thread = thread::spawn(move || {
+            assert!(with_current_player_generation(generation, || {
+                event_entered_tx.send(()).unwrap();
+                release_event_rx.recv().unwrap();
+            }));
+        });
+        event_entered_rx.recv().unwrap();
+
+        let rebuild_during_event = match PLAYER_LIFECYCLE.try_lock() {
+            Ok(_lifecycle) => {
+                PLAYER_GENERATION.fetch_add(1, Ordering::SeqCst);
+                true
+            }
+            Err(TryLockError::WouldBlock) => false,
+            Err(TryLockError::Poisoned(_)) => panic!("player lifecycle lock was poisoned"),
+        };
+
+        release_event_tx.send(()).unwrap();
+        event_thread.join().unwrap();
+        if !rebuild_during_event {
+            let _lifecycle = PLAYER_LIFECYCLE.lock().unwrap();
+            PLAYER_GENERATION.fetch_add(1, Ordering::SeqCst);
+        }
+
+        assert!(
+            !rebuild_during_event,
+            "generation changed while the old player event was being handled"
+        );
+        assert!(!with_current_player_generation(generation, || {
+            panic!("stale player event was handled after rebuild");
+        }));
+    }
+
+    #[test]
+    fn position_uses_only_monotonic_elapsed_time() {
+        let started_at = Instant::now();
+        let position = PlaybackPosition::new(0, started_at);
+
+        assert_eq!(
+            position.get_at(started_at + Duration::from_secs(10), true, 180_000),
+            10_000
+        );
+    }
+
+    #[test]
+    fn playing_position_keeps_advancing_without_periodic_player_events() {
+        assert_eq!(
+            interpolated_position_ms(0, 10_000, true, 180_000),
+            10_000
+        );
+    }
+
+    #[test]
+    fn paused_position_does_not_advance() {
+        assert_eq!(
+            interpolated_position_ms(7_500, 10_000, false, 180_000),
+            7_500
+        );
+    }
+
+    #[test]
+    fn playing_position_does_not_exceed_track_duration() {
+        assert_eq!(
+            interpolated_position_ms(179_000, 10_000, true, 180_000),
+            180_000
+        );
+    }
+
+    #[test]
+    fn freezing_position_preserves_accrued_playback_time() {
+        let started_at = Instant::now();
+        let mut position = PlaybackPosition::new(5_000, started_at);
+        let stopped_at = started_at + Duration::from_secs(10);
+
+        position.freeze(stopped_at, 180_000);
+
+        assert_eq!(
+            position.get_at(stopped_at + Duration::from_secs(5), false, 180_000),
+            15_000
+        );
+    }
+}

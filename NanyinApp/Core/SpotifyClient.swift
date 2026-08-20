@@ -16,9 +16,33 @@ struct SpotifyClient {
         let durationMs: Int
         /// Artists with ids — clickable names (M4.1) without index alignment.
         let artists: [Artist]
+        /// Display-only fallback when playback metadata has names but no ids.
+        let artistDisplayText: String?
         let albumName: String
         let albumId: String?
         let artworkURL: URL?
+
+        init(
+            id: String,
+            uri: String,
+            name: String,
+            durationMs: Int,
+            artists: [Artist],
+            artistDisplayText: String? = nil,
+            albumName: String,
+            albumId: String?,
+            artworkURL: URL?
+        ) {
+            self.id = id
+            self.uri = uri
+            self.name = name
+            self.durationMs = durationMs
+            self.artists = artists
+            self.artistDisplayText = artistDisplayText
+            self.albumName = albumName
+            self.albumId = albumId
+            self.artworkURL = artworkURL
+        }
 
         /// Copy with album name/artwork/id filled in — album endpoints return
         /// simplified track objects without the album field.
@@ -29,6 +53,7 @@ struct SpotifyClient {
                 name: name,
                 durationMs: durationMs,
                 artists: artists,
+                artistDisplayText: artistDisplayText,
                 albumName: albumName.isEmpty ? album : albumName,
                 albumId: albumId ?? self.albumId,
                 artworkURL: artworkURL ?? artwork
@@ -81,6 +106,18 @@ struct SpotifyClient {
 
     init(accessToken: String) {
         self.accessToken = accessToken
+    }
+
+    private func request(path: String, method: String, body: Data? = nil) -> URLRequest {
+        var req = URLRequest(url: URL(string: "https://api.spotify.com\(path)")!)
+        req.httpMethod = method
+        req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let body {
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.httpBody = body
+        }
+        return req
     }
 
     private func get<T: Decodable>(_ path: String, query: [String: String] = [:], retries: Int = 2) async throws -> T {
@@ -262,6 +299,24 @@ struct SpotifyClient {
         let tracks: [TrackDTO]?
     }
 
+    private struct TracksBatchDTO: Codable {
+        let tracks: [TrackDTO]?
+    }
+
+    private struct PlayerQueueDTO: Codable {
+        let currentlyPlaying: TrackDTO?
+        let queue: [TrackDTO]?
+
+        enum CodingKeys: String, CodingKey {
+            case currentlyPlaying = "currently_playing"
+            case queue
+        }
+    }
+
+    private struct SaveTracksBody: Codable {
+        let ids: [String]
+    }
+
     // MARK: - Endpoints
 
     func currentUser() async throws -> UserProfile {
@@ -272,6 +327,24 @@ struct SpotifyClient {
         let dto = try await get("/v1/tracks/\(id)") as TrackDTO
         guard let t = dto.toTrack else { throw APIError.http(0, "unplayable track") }
         return t
+    }
+
+    /// Batch track lookup, ≤50 ids per request (queue metadata resolution).
+    func tracks(ids: [String]) async throws -> [Track] {
+        try await ids.isEmpty ? [] : ids.chunked(into: 50).mapAsync { chunk in
+            let dto: TracksBatchDTO = try await self.get(
+                "/v1/tracks", query: ["ids": chunk.joined(separator: ",")]
+            )
+            return (dto.tracks ?? []).compactMap(\ .toTrack)
+        }.flatMap { $0 }
+    }
+
+    /// The active device's queue: current track + upcoming, in play order
+    /// (user-added entries first, then the context continuation). Full track
+    /// objects — no extra metadata resolution needed.
+    func playerQueue() async throws -> (current: Track?, upcoming: [Track]) {
+        let dto: PlayerQueueDTO? = try await get("/v1/me/player/queue")
+        return (dto?.currentlyPlaying?.toTrack, (dto?.queue ?? []).compactMap(\.toTrack))
     }
 
     /// All playlists in the user's library (owned + followed), paginated.
@@ -317,27 +390,80 @@ struct SpotifyClient {
         return result
     }
 
-    /// Liked songs, paginated.
-    func likedTracks() async throws -> [Track] {
-        var result: [Track] = []
-        var offset = 0
-        let limit = 50
-        while true {
+    /// First page of Liked Songs plus the library total. Used as a cheap
+    /// change probe so a revisit does not re-page the whole collection.
+    func likedTracksPrefix(limit: Int = 50) async throws -> (tracks: [Track], total: Int) {
+        let page: PagedTracksDTO = try await get(
+            "/v1/me/tracks",
+            query: ["limit": "\(limit)", "offset": "0"]
+        )
+        return (page.items.compactMap(\.track?.toTrack), page.total)
+    }
+
+    /// Liked songs, paginated. Pass a prefix to skip repeating the first page.
+    func likedTracks(
+        after prefix: (tracks: [Track], total: Int)? = nil,
+        pageSize: Int = 50
+    ) async throws -> [Track] {
+        let first: (tracks: [Track], total: Int)
+        if let prefix {
+            first = prefix
+        } else {
+            first = try await likedTracksPrefix(limit: pageSize)
+        }
+        var result = first.tracks
+        var offset = pageSize
+        while offset < first.total {
             let page: PagedTracksDTO = try await get(
                 "/v1/me/tracks",
-                query: ["limit": "\(limit)", "offset": "\(offset)"]
+                query: ["limit": "\(pageSize)", "offset": "\(offset)"]
             )
             result += page.items.compactMap(\.track?.toTrack)
-            offset += limit
-            if offset >= page.total { break }
+            offset += pageSize
         }
         return result
     }
 
-    /// Total liked-songs count (single tiny request).
-    func likedTotal() async throws -> Int {
-        let page: PagedTracksDTO = try await get("/v1/me/tracks", query: ["limit": "1"])
-        return page.total
+    // MARK: - Likes round-trip (M4.2)
+
+    /// Which of the given track ids are in the user's Liked Songs (≤50 ids).
+    /// NOTE: the server lags behind its own PUT/DELETE by a moment — never
+    /// use this to confirm a save the app just made; keep the optimistic UI.
+    func likedContains(ids: [String]) async throws -> [Bool] {
+        try await get("/v1/me/tracks/contains", query: ["ids": ids.joined(separator: ",")])
+    }
+
+    /// Saves tracks to Liked Songs (PUT /v1/me/tracks).
+    func saveTracks(ids: [String]) async throws {
+        try await mutateSavedTracks(ids: ids, method: "PUT")
+    }
+
+    /// Removes tracks from Liked Songs (DELETE /v1/me/tracks).
+    func removeTracks(ids: [String]) async throws {
+        try await mutateSavedTracks(ids: ids, method: "DELETE")
+    }
+
+    private func mutateSavedTracks(ids: [String], method: String, retries: Int = 2) async throws {
+        let body = try JSONEncoder().encode(SaveTracksBody(ids: ids))
+        let req = request(path: "/v1/me/tracks", method: method, body: body)
+        var attempt = 0
+
+        while true {
+            let (_, response) = try await URLSession.shared.data(for: req)
+            let httpResponse = response as? HTTPURLResponse
+            let status = httpResponse?.statusCode ?? 0
+            if (200..<300).contains(status) { return }
+            if status == 429, attempt < retries {
+                let retryAfter = Double(httpResponse?.value(forHTTPHeaderField: "Retry-After") ?? "") ?? 2.0
+                let wait = min(max(retryAfter, 1.0), 30.0)
+                dlog("web api 429 on \(method) /v1/me/tracks, retrying in \(wait)s")
+                try await Task.sleep(for: .seconds(wait))
+                attempt += 1
+                continue
+            }
+            if status == 401 { throw APIError.needsAuth }
+            throw APIError.http(status, "")
+        }
     }
 
     /// Track + artist search in one request (ncspot client id keeps
@@ -351,6 +477,16 @@ struct SpotifyClient {
         let tracks = (dto.tracks?.items ?? []).compactMap(\.toTrack)
         let artists = (dto.artists?.items ?? []).compactMap(\.toArtist)
         return (tracks, artists)
+    }
+
+    /// Full artist profile. Track responses contain simplified artist objects
+    /// without images, so artist pages use this endpoint when needed.
+    func artist(_ artistId: String) async throws -> Artist {
+        let dto: ArtistDTO = try await get("/v1/artists/\(artistId)")
+        guard let artist = dto.toArtist else {
+            throw APIError.http(0, "invalid artist")
+        }
+        return artist
     }
 
     /// An artist's top tracks (small — plays as a bounded ad-hoc context).
@@ -415,5 +551,20 @@ struct SpotifyClient {
             s = String(s.dropFirst("spotify:track:".count))
         }
         return s.count == 22 ? s : nil
+    }
+}
+
+private extension Array {
+    func chunked(into size: Int) -> [[Element]] {
+        stride(from: 0, to: count, by: size).map { Array(dropFirst($0).prefix(size)) }
+    }
+
+    func mapAsync<T>(_ transform: (Element) async throws -> T) async rethrows -> [T] {
+        var result: [T] = []
+        result.reserveCapacity(count)
+        for element in self {
+            result.append(try await transform(element))
+        }
+        return result
     }
 }

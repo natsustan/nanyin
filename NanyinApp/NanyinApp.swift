@@ -16,6 +16,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Self.shared = self
     }
 
+    /// Cheap Liked Songs probe when coming back from another app (phone like
+    /// → look at nanyin). No dealer library push exists for third-party clients.
+    func applicationDidBecomeActive(_ notification: Notification) {
+        appModel.handleAppDidBecomeActive()
+    }
+
     /// Send the Connect "goodbye" so this device disappears immediately
     /// instead of lingering as a zombie until the server times it out.
     func applicationWillTerminate(_ notification: Notification) {

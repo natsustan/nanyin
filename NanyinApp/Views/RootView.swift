@@ -49,12 +49,15 @@ struct RootView: View {
             HomeView()
         case .search:
             SearchView()
+        case .queue:
+            QueueView()
         case .liked:
             PlaylistDetailView(
                 title: "Liked Songs",
-                subtitle: "\(app.tracksByContext["liked"]?.count ?? app.likedCount) songs · \(app.userDisplayName)",
+                subtitle: "\(app.likedCount) songs · \(app.userDisplayName)",
                 coverURL: nil,
-                contextKey: "liked"
+                contextKey: "liked",
+                coverAssetName: "LikedSongsCover"
             )
         case let .playlist(id, name):
             let info = app.playlists.first { $0.id == id }
@@ -66,6 +69,7 @@ struct RootView: View {
             )
         case let .artist(id, name, artworkURL):
             ArtistDetailView(
+                artistID: id,
                 title: name,
                 artworkURL: artworkURL,
                 contextKey: AppModel.artistContextKey(id)

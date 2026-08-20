@@ -1,0 +1,62 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 8c9be87..5e0be28 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
+ - [core] Fix default permissions on credentials file and warn user if file is world readable
+ - [core] Try all resolved addresses for the dealer connection instead of failing after the first one.
+ - [audio] Try the next CDN URL when a fetch returns a non-206 status instead of only retrying on transport errors, fixing playback failures when the first CDN URL is reachable but does not stream audio.
++- [connect] Stop answering our own cluster update with another state update, which made the active device send state updates in a loop until the server responded with 429 Too Many Requests.
+ 
+ ## [0.8.0] - 2025-11-10
+ 
+diff --git a/connect/src/spirc.rs b/connect/src/spirc.rs
+index fec6057..2d90eec 100644
+--- a/connect/src/spirc.rs
++++ b/connect/src/spirc.rs
+@@ -17,7 +17,7 @@ use crate::{
+         player::{Player, PlayerEvent, PlayerEventChannel, QueueTrack},
+     },
+     protocol::{
+-        connect::{Cluster, ClusterUpdate, LogoutCommand, SetVolumeCommand},
++        connect::{Cluster, ClusterUpdate, ClusterUpdateReason, LogoutCommand, SetVolumeCommand},
+         context::Context,
+         explicit_content_pubsub::UserAttributesUpdate,
+         player::ProvidedTrack,
+@@ -1003,10 +1003,32 @@ impl SpircTask {
+                 self.handle_disconnect().await?;
+                 self.handle_stop();
+             } else if self.connect_state.is_active() {
+-                // fixme: workaround fix, because of missing information why it behaves like it does
+-                //  background: when another device sends a connect-state update, some player's position de-syncs
+-                //  tried: providing session_id, playback_id, track-metadata "track_player"
+-                self.update_state = true;
++                // Our own state update comes back to us as a cluster update naming this
++                // device, and the workaround below answers it with another state update:
++                // a loop, one round trip per iteration, sustained for as long as the
++                // server keeps accepting it. A device-state change that names only this
++                // device was caused by this device, so it carries nothing to react to.
++                //
++                // Deliberately narrow. Anything else still reaches the workaround,
++                // including an update that names this device alongside another, and any
++                // reason other than DEVICE_STATE_CHANGED — "named only us" only implies
++                // "caused by us" for a state change. Commands from other devices arrive
++                // on the connect-state request stream instead, and set update_state
++                // there, so nothing another device asks of us is lost here.
++                let is_own_echo = matches!(reason, Ok(ClusterUpdateReason::DEVICE_STATE_CHANGED))
++                    && matches!(
++                        cluster_update.devices_that_changed.as_slice(),
++                        [changed_device_id] if changed_device_id == self.session.device_id()
++                    );
++
++                if is_own_echo {
++                    debug!("ignoring cluster update caused by our own state update");
++                } else {
++                    // fixme: workaround fix, because of missing information why it behaves like it does
++                    //  background: when another device sends a connect-state update, some player's position de-syncs
++                    //  tried: providing session_id, playback_id, track-metadata "track_player"
++                    self.update_state = true;
++                }
+             }
+         } else if self.connect_state.is_active() {
+             self.connect_state.became_inactive(&self.session).await?;

@@ -26,6 +26,7 @@ struct SidebarView: View {
 
             entry(.home, icon: Image(systemName: "house"), title: "Home")
             entry(.search, icon: Image(systemName: "magnifyingglass"), title: "Search")
+            entry(.queue, icon: Image(systemName: "list.bullet"), title: "Queue")
 
             Divider()
                 .overlay(Theme.playerBar)

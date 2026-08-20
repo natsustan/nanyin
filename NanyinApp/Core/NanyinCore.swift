@@ -10,6 +10,12 @@ import NanyinCore
 /// Callback storage is nonisolated (Rust invokes us on background threads);
 /// events hop to the MainActor via Task.
 enum Core {
+    enum InitializationResult: Equatable {
+        case connected
+        case credentialsRejected(message: String)
+        case failed(code: Int32, message: String)
+    }
+
     /// Playback event delivered from Rust as JSON.
     enum Event {
         case loading(uri: String, positionMs: Int)
@@ -118,25 +124,66 @@ enum Core {
     private static let initQueue = DispatchQueue(
         label: "com.nanyin.core.init", qos: .userInitiated
     )
+    private static let initStateLock = NSLock()
+    nonisolated(unsafe) private static var initGeneration: UInt64 = 0
 
-    nonisolated static func initializePlayer(accessToken: String, deviceId: String) async -> Int32 {
-        await withCheckedContinuation { cont in
+    nonisolated private static func currentInitGeneration() -> UInt64 {
+        initStateLock.lock()
+        defer { initStateLock.unlock() }
+        return initGeneration
+    }
+
+    nonisolated private static func invalidateInitialization() {
+        initStateLock.lock()
+        initGeneration &+= 1
+        initStateLock.unlock()
+    }
+
+    nonisolated static func initializePlayer(
+        accessToken: String,
+        deviceId: String
+    ) async -> InitializationResult {
+        let generation = currentInitGeneration()
+        return await withCheckedContinuation { cont in
             initQueue.async {
-                cont.resume(
-                    returning: initializePlayerBlocking(
-                        accessToken: accessToken, deviceId: deviceId
-                    )
+                guard generation == currentInitGeneration() else {
+                    cont.resume(returning: .failed(
+                        code: -1,
+                        message: "Player initialization cancelled"
+                    ))
+                    return
+                }
+                let result = initializePlayerBlocking(
+                    accessToken: accessToken, deviceId: deviceId
                 )
+                guard generation == currentInitGeneration() else {
+                    _ = nanyin_shutdown()
+                    cont.resume(returning: .failed(
+                        code: -1,
+                        message: "Player initialization cancelled"
+                    ))
+                    return
+                }
+                cont.resume(returning: result)
             }
         }
     }
 
     nonisolated private static func initializePlayerBlocking(
         accessToken: String, deviceId: String
-    ) -> Int32 {
+    ) -> InitializationResult {
         installCallbacks()
-        return accessToken.withCString { token in
+        let code = accessToken.withCString { token in
             deviceId.withCString { nanyin_init_player(token, $0) }
+        }
+        let message = code == 0 ? "" : lastErrorMessage() ?? "unknown"
+        switch code {
+        case 0:
+            return .connected
+        case -4:
+            return .credentialsRejected(message: message)
+        default:
+            return .failed(code: code, message: message)
         }
     }
 
@@ -154,6 +201,10 @@ enum Core {
     nonisolated static func pause() -> Int32 { nanyin_pause() }
     nonisolated static func resume() -> Int32 { nanyin_resume() }
     nonisolated static func stop() -> Int32 { nanyin_stop() }
+    nonisolated static func shutdown() -> Int32 {
+        invalidateInitialization()
+        return nanyin_shutdown()
+    }
     nonisolated static func next() -> Int32 { nanyin_next() }
     nonisolated static func prev() -> Int32 { nanyin_prev() }
     nonisolated static func seek(_ positionMs: UInt32) -> Int32 { nanyin_seek(positionMs) }

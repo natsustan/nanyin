@@ -14,6 +14,7 @@ struct PlaylistDetailView: View {
     let subtitle: String
     let coverURL: URL?
     let contextKey: String
+    var coverAssetName: String? = nil
     /// Header eyebrow: PLAYLIST / ALBUM / …
     var label = "PLAYLIST"
 
@@ -34,7 +35,7 @@ struct PlaylistDetailView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if tracks.isEmpty {
                 VStack(spacing: 12) {
-                    if app.loadingTracks {
+                    if app.isLoadingTracks(contextKey: contextKey) {
                         ProgressView()
                         Text("Loading tracks…")
                             .foregroundStyle(Theme.textSecondary)
@@ -111,7 +112,11 @@ struct PlaylistDetailView: View {
 
     @ViewBuilder
     private var cover: some View {
-        if let url = coverURL {
+        if let coverAssetName {
+            Image(coverAssetName)
+                .resizable()
+                .scaledToFill()
+        } else if let url = coverURL {
             AsyncImage(url: url) { image in
                 image.resizable().scaledToFill()
             } placeholder: {

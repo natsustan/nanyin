@@ -8,7 +8,7 @@ import SwiftUI
 struct PlayerBar: View {
     @Environment(AppModel.self) private var app
     @State private var draggingProgress: Double?
-    /// Now-playing block hover — brightens the artist/album links (M4.1).
+    /// Now-playing block hover — brightens the artist link (M4.1).
     @State private var npHover = false
     /// Local playback-position tick — deliberately NOT in AppModel so the
     /// 2Hz update only invalidates this bar, never the track list.
@@ -44,23 +44,32 @@ struct PlayerBar: View {
                             .buttonStyle(.plain)
                             .linkCursor()
                         }
-                        if !np.album.isEmpty {
-                            Button {
-                                app.openNowPlayingAlbum()
-                            } label: {
-                                Text(np.album)
-                                    .font(.system(size: 10))
-                                    .foregroundStyle(npHover ? .white : Theme.textSecondary)
-                                    .lineLimit(1)
-                            }
-                            .buttonStyle(.plain)
-                            .linkCursor()
-                        }
                     } else {
                         Text("—")
                             .font(.system(size: 11))
                             .foregroundStyle(Theme.textSecondary)
                             .lineLimit(1)
+                    }
+                }
+
+                // Like the playing track (M4.2).
+                if let np = app.nowPlaying, let id = SpotifyClient.trackId(from: np.uri) {
+                    let known = app.isLikeKnown(id)
+                    let liked = app.likedIDs.contains(id)
+                    Button {
+                        app.toggleLikePlaying()
+                    } label: {
+                        Image(systemName: liked ? "heart.fill" : "heart")
+                            .font(.system(size: 12))
+                            .foregroundStyle(liked ? Theme.accent : Theme.textSecondary)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!known)
+                    .opacity(known ? 1 : 0.35)
+                    .padding(.leading, 4)
+                    .help(known ? (liked ? "Remove from Liked Songs" : "Save to Liked Songs") : "Checking Liked Songs…")
+                    .task(id: id) {
+                        app.requestLikedState(id)
                     }
                 }
             }
@@ -71,6 +80,15 @@ struct PlayerBar: View {
             // Transport (center)
             VStack(spacing: 6) {
                 HStack(spacing: 24) {
+                    Button {
+                        app.toggleShuffle()
+                    } label: {
+                        Image(systemName: "shuffle")
+                            .font(.system(size: 11))
+                            .foregroundStyle(app.shuffle ? Theme.accent : Theme.textSecondary)
+                    }
+                    .buttonStyle(.plain)
+
                     button("backward.fill") { app.prev() }
                     Button {
                         app.togglePlay()
@@ -81,6 +99,15 @@ struct PlayerBar: View {
                     }
                     .buttonStyle(.plain)
                     button("forward.fill") { app.next() }
+
+                    Button {
+                        app.cycleRepeat()
+                    } label: {
+                        Image(systemName: app.repeatMode == .one ? "repeat.1" : "repeat")
+                            .font(.system(size: 11))
+                            .foregroundStyle(app.repeatMode == .off ? Theme.textSecondary : Theme.accent)
+                    }
+                    .buttonStyle(.plain)
                 }
 
                 HStack(spacing: 8) {
@@ -99,25 +126,19 @@ struct PlayerBar: View {
             }
             .frame(maxWidth: .infinity)
 
-            // Shuffle/repeat/volume (right)
+            // Volume (right)
             HStack(spacing: 12) {
                 Button {
-                    app.toggleShuffle()
+                    app.open(.queue)
                 } label: {
-                    Image(systemName: "shuffle")
-                        .font(.system(size: 11))
-                        .foregroundStyle(app.shuffle ? Theme.accent : Theme.textSecondary)
+                    Image(systemName: "list.bullet")
+                        .font(.system(size: 12))
+                        .foregroundStyle(
+                            app.page == .queue ? Theme.accent : Theme.textSecondary
+                        )
                 }
                 .buttonStyle(.plain)
-
-                Button {
-                    app.cycleRepeat()
-                } label: {
-                    Image(systemName: app.repeatMode == .one ? "repeat.1" : "repeat")
-                        .font(.system(size: 11))
-                        .foregroundStyle(app.repeatMode == .off ? Theme.textSecondary : Theme.accent)
-                }
-                .buttonStyle(.plain)
+                .help("Queue")
 
                 Image(systemName: "speaker.fill")
                     .font(.system(size: 10))
@@ -127,6 +148,7 @@ struct PlayerBar: View {
                     set: { app.setVolume($0) }
                 ), in: 0 ... 1)
                 .controlSize(.mini)
+                .frame(width: 130)
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
             .padding(.trailing, 16)

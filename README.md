@@ -22,7 +22,9 @@ A native macOS Spotify client with the feel of the classic (pre-Electron-look) d
 └─────────────────────────────────────────────────────┘
 ```
 
-- **Auth**: single OAuth flow with the librespot keymaster client id — the token works for both the Web API and playback (strategy from [cliamp](https://github.com/bjarneo/cliamp)).
+- **Auth**: two chained OAuth flows in one browser journey. The Web API uses
+  ncspot's client id and playback uses the librespot keymaster client id; the
+  credentials and refresh lifecycles remain strictly separated.
 - **Audio**: 44.1 kHz stereo f32 interleaved PCM crosses the FFI boundary ~4096 samples at a time; backpressure paces the decoder to real time.
 - **Credits**: the FFI/core design is adapted from [NullSpot](https://github.com/michaelh03/NullSpot) (MIT) and cliamp (MIT). Both are vendored as reference under `research-repos/` (git-ignored).
 
@@ -34,10 +36,18 @@ Prerequisites (via [mise](https://mise.jdx.dev)):
 mise use -g rust@stable   # cargo
 ```
 
-Build & run:
+Agent-safe verification (builds and tests without launching Nanyin, reading
+Keychain, or contacting Spotify):
 
 ```sh
-./script/build_and_run.sh   # build + package to dist/ + launch (logs: build/nanyin-launch.log)
+./script/agent_check.sh
+```
+
+Build and run against a real Spotify account (live operation):
+
+```sh
+NANYIN_ALLOW_LIVE_SPOTIFY=1 ./script/build_and_run.sh
+# build + package to dist/ + launch (logs: build/nanyin-launch.log)
 xcodegen generate        # if Nanyin.xcodeproj doesn't exist
 open Nanyin.xcodeproj    # ⌘R — the Rust core builds as a pre-build phase
 ```

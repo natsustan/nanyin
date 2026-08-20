@@ -1,7 +1,7 @@
 # nanyin — Roadmap
 
-> Status: M0 ✅ · M1 ✅ · hardening ✅ · M2 batch 1 (2.1/2.2/2.5) ✅ · M3 in progress (search done, playback verify pending) · M4.1 ✅
-> Last updated: 2026-08-18
+> Status: M0 ✅ · M1 ✅ · hardening ✅ · M3 ✅ · M2 2.1/2.2/2.3/2.4/2.5 ✅ (2.6 paused in watch window) · M4.1 ✅ · M4.2 ✅
+> Last updated: 2026-08-19
 
 ## Completed
 
@@ -36,10 +36,12 @@ Key lessons (do not regress):
 - Compact one-line Rust event logs
 
 Perf notes:
-- Track list = `List` (NSTableView recycling), single scroll region,
-  row-local hover state, position tick local to PlayerBar — 60Hz verified
-- Do NOT reintroduce: nested ScrollViews, parent-scope hover state,
-  AppModel-scope position polling
+- Potentially large track lists use `List` (NSTableView recycling) with one
+  vertical scroll region; row-local hover state and a PlayerBar-local position
+  tick keep scrolling at 60Hz
+- Do NOT reintroduce: same-axis nested ScrollViews, parent-scope hover state,
+  or AppModel-scope position polling. Bounded, lazy cross-axis carousels are
+  allowed inside the vertical page container
 
 ---
 
@@ -51,8 +53,8 @@ Goal: "usable as the daily driver" — everything the transport bar implies work
 |---|------|-------|-----|
 | 2.1 | Media keys + MPNowPlayingInfoCenter | MPRemoteCommandCenter: play/pause/next/prev/seek/position; NowPlayingInfo: title/artist/artwork/duration/position. Artwork via NSURLSession → NSImage | 0.5d |
 | 2.2 | Shuffle / repeat | `spirc.shuffle(bool)`, `spirc.repeat(bool)`, `spirc.repeat_track(bool)` — FFI surface already exists in librespot; add 3 exports + PlayerBar toggles; reflect state from PlayerEvent::ShuffleChanged/RepeatChanged | 0.5d |
-| 2.3 | Queue view | TrackChanged cluster state → expose current queue via FFI (`nanyin_get_queue_json`); queue panel (sidebar page or popover): now playing + upcoming; "add to queue" row context menu via `spirc.add_to_queue` | 1d |
-| 2.4 | End-of-track auto-advance edge | Verify context autoplay continues past last track (autoplay variant); fix EndOfTrack handling if the context stalls at the end | 0.5d |
+| 2.3 | Queue view | ✅ done 2026-08-18. Queue page (sidebar + player-bar button): Now Playing + Next Up + Recently Played. Data from `GET /v1/me/player/queue` (server-capped ~20 items), refreshed on track change / add-to-queue / page open; recently-played tracked locally. Add-to-queue round-trip verified live (row context menu → track jumps to front of Next Up). **Dead end recorded:** dealer cluster pushes are NOT available to third-party clients — the dealer websocket rejects client `SUBSCRIBE` frames (`Unsupported message type` close; verified empirically). librespot's spirc cluster listener is effectively dead code on the current server; remote control still works because commands arrive as dealer *requests*. | 1d |
+| 2.4 | End-of-track auto-advance edge | ✅ done 2026-08-18 — verified after penalty window lifted | 0.5d |
 | 2.5 | Track row context menu | Play next / add to queue (needs 2.3), copy song link | 0.25d |
 | 2.6 | Seek reliability | Drag-seek while paused; position interpolation after seek (player emits Seeked) | 0.25d |
 
@@ -68,11 +70,8 @@ listening session with zero silent failures.
 | 3.2 | Search results context | Play results as ad-hoc context (`nanyin_play_tracks` window — results are small) | |
 | 3.3 | Search entry point | ⌘F/⌘K focus; sidebar "Search" page (currently disabled) | |
 
-Progress 2026-08-18: 3.1–3.3 implemented (SpotifyClient.search, SearchView
-with 350ms debounce + ⌘K/⌘F + sidebar entry, results play via nanyin_play_tracks
-window). Search verified end-to-end (`search "daft punk" → 50 tracks`, UI shows
-results). 3.2 playback verify blocked on an account penalty window — retest
-double-click play after the dealer probe survives 300s.
+Progress 2026-08-18 (final): playback verify done post-penalty — search
+results double-click play works end-to-end; M3 closed.
 
 Progress 2026-08-18 (later): artist search added — one /v1/search request
 with `type=track,artist`, Artists card row (circular portraits, ≤10) above
@@ -94,7 +93,8 @@ album name/artwork filled in via `Track.withAlbum`), playback via
 `spotify:album:<id>` server context (same as playlist path). Verified live:
 harness (36 releases: 16 albums + 20 singles; RAM Drumless 13 tracks) + OCR on
 real UI (artist page rows, album page header + track list). Remaining M4.1:
-clickable artist/album names in track rows and player bar.
+clickable artist/album names in track rows, plus the artist link in the player
+bar. The compact player bar intentionally omits the album name.
 
 Note: ncspot client id keeps /v1/search working (production-approved app).
 
@@ -102,8 +102,8 @@ Note: ncspot client id keeps /v1/search working (production-approved app).
 
 | # | Item | Notes |
 |---|------|-------|
-| 4.1 | Album / artist pages | ✅ done 2026-08-18. Clickable artist/album names in track rows (per-artist buttons, multi-artist tracks each clickable) and player bar (artist → artist page, album → album page; id-less external starts fall back to /v1/tracks fetch). Also fixed pre-existing `withAlbum` bug: album name was overwriting the track title on album pages | 1d |
-| 4.2 | Likes round-trip | Heart toggle in rows + player bar; `/v1/me/tracks` PUT/DELETE; liked cache invalidation | 0.5d |
+| 4.1 | Album / artist pages | ✅ done 2026-08-18. Clickable artist/album names in track rows (per-artist buttons, multi-artist tracks each clickable). The compact player bar intentionally shows only the title and artist, with the artist linking to the artist page; it does not display the album name. Id-less external starts fall back to `/v1/tracks` metadata fetch for artist navigation. Also fixed pre-existing `withAlbum` bug: album name was overwriting the track title on album pages | 1d |
+| 4.2 | Likes round-trip | ✅ done 2026-08-19. Heart toggle in track rows (hover-ghost, liked-solid green; context-menu entry) + player bar; `likedContains` seeds per-context (50-id cap), `toggleLike` optimistic with revert-on-failure (incl. one needsAuth retry); liked page cache + sidebar count maintained. Verified live both directions (unlike from liked page → server `[false]`, save from search → `[true]`). Note: server `contains` lags its own PUT/DELETE — never read-back-validate a just-toggled id. | 0.5d |
 | 4.3 | Playlist create/add | `+` in sidebar, context menu "Add to playlist"; `/v1/users/{id}/playlists` + `/v1/playlists/{id}/tracks` (scopes already granted) | 0.5d |
 | 4.4 | Playlist search/filter | Client-side filter row in detail view | 0.25d |
 | 4.5 | Keyboard navigation | ↑↓ already free via List; Enter = play; Space = play/pause (global) | 0.25d |
