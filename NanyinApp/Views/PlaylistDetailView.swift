@@ -175,8 +175,8 @@ struct PlaylistDetailView: View {
             .cornerRadius(20)
         }
         .buttonStyle(.plain)
-        .disabled(albumId == nil && tracks.isEmpty)
-        .opacity(albumId == nil && tracks.isEmpty ? 0.5 : 1)
+        .disabled(!app.isPlaybackReady || (albumId == nil && tracks.isEmpty))
+        .opacity(!app.isPlaybackReady || (albumId == nil && tracks.isEmpty) ? 0.5 : 1)
         .onHover { hovering in
             if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
         }

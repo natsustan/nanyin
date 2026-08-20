@@ -207,6 +207,13 @@ private enum StateReducerTests {
             state.beginRefresh() != nil,
             "an explicit new sign-in must receive a usable revision"
         )
+
+        let signInRevision = state.beginNewSession()
+        state.beginClear()
+        expect(
+            !state.acceptsRefresh(signInRevision),
+            "sign-out must reject a token exchange from an older interactive sign-in"
+        )
     }
 
     // MARK: - SavedAlbumCache (M4.3)

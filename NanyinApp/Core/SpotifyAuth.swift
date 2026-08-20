@@ -126,11 +126,17 @@ enum SpotifyAuth {
             }
         }
 
-        func install(_ token: String?) throws {
-            guard let token else { return }
-            persistenceState.installNewSession()
+        func beginInteractiveSession() -> UInt64 {
             inFlight?.task.cancel()
             inFlight = nil
+            return persistenceState.beginNewSession()
+        }
+
+        func install(_ token: String?, expectedRevision: UInt64) throws {
+            guard persistenceState.acceptsRefresh(expectedRevision) else {
+                throw CancellationError()
+            }
+            guard let token else { return }
             try SpotifyAuth.setRefreshTokenUncoordinated(token, for: kind)
         }
 
@@ -147,6 +153,16 @@ enum SpotifyAuth {
 
         func deleteCredential() throws {
             try SpotifyAuth.setRefreshTokenUncoordinated(nil, for: kind)
+            if kind == .playback {
+                try KeychainStore.delete(forKey: "refresh_token")
+            }
+        }
+
+        func deleteCredential(expectedRevision: UInt64) throws {
+            guard persistenceState.acceptsRefresh(expectedRevision) else {
+                throw CancellationError()
+            }
+            try deleteCredential()
         }
 
         private func persistReplacement(
@@ -188,6 +204,28 @@ enum SpotifyAuth {
 
     private static let webTokenCoordinator = TokenCoordinator(kind: .web)
     private static let playbackTokenCoordinator = TokenCoordinator(kind: .playback)
+    private static let interactiveSignInLock = NSLock()
+    nonisolated(unsafe) private static var interactiveSignInID: UUID?
+
+    private static func beginInteractiveSignIn() -> UUID {
+        interactiveSignInLock.lock()
+        defer { interactiveSignInLock.unlock() }
+        let id = UUID()
+        interactiveSignInID = id
+        return id
+    }
+
+    private static func acceptsInteractiveSignIn(_ id: UUID) -> Bool {
+        interactiveSignInLock.lock()
+        defer { interactiveSignInLock.unlock() }
+        return interactiveSignInID == id
+    }
+
+    static func invalidateInteractiveSignIn() {
+        interactiveSignInLock.lock()
+        interactiveSignInID = nil
+        interactiveSignInLock.unlock()
+    }
 
     // MARK: - Token persistence
 
@@ -278,24 +316,47 @@ enum SpotifyAuth {
 
     // MARK: - Interactive flow (two chained authorizations, one browser tab)
 
-    /// Runs both flows: opens the browser once; after the first callback the
-    /// page redirects to the second authorization; returns both tokens.
-    static func signIn() async throws -> (web: Token, playback: Token) {
+    /// Runs both flows in one browser journey. Publishes the Web token as soon
+    /// as it is safely persisted; playback authorization remains independent.
+    static func signIn(
+        onWebToken: @escaping @MainActor (Token) -> Void
+    ) async throws -> Token {
+        try Task.checkCancellation()
+        let signInID = beginInteractiveSignIn()
+        let webRevision = await webTokenCoordinator.beginInteractiveSession()
+        let playbackRevision = await playbackTokenCoordinator.beginInteractiveSession()
         let webFlow = Flow(kind: .web)
         let playbackFlow = Flow(kind: .playback)
 
         let waiter = try LoopbackWaiter(port: SpotifyConfig.loopbackPort, flows: [webFlow, playbackFlow])
+        return try await withTaskCancellationHandler {
+            defer { waiter.cancel() }
 
-        NSWorkspace.shared.open(URL(string: webFlow.authorizeURL)!)
+            NSWorkspace.shared.open(URL(string: webFlow.authorizeURL)!)
 
-        let callbacks = try await waiter.waitForCallbacks()
-        guard callbacks.count == 2 else {
-            throw AuthError.noAuthorizationCode
+            let webCallback = try await waiter.waitForCallback(at: 0)
+            let webToken = try await exchange(webCallback, flow: webFlow)
+            guard acceptsInteractiveSignIn(signInID) else { throw CancellationError() }
+            try await deletePlaybackRefreshToken(expectedRevision: playbackRevision)
+            try await installRefreshToken(
+                webToken.refreshToken,
+                for: .web,
+                expectedRevision: webRevision
+            )
+            await onWebToken(webToken)
+
+            let playbackCallback = try await waiter.waitForCallback(at: 1)
+            let playbackToken = try await exchange(playbackCallback, flow: playbackFlow)
+            guard acceptsInteractiveSignIn(signInID) else { throw CancellationError() }
+            try await installRefreshToken(
+                playbackToken.refreshToken,
+                for: .playback,
+                expectedRevision: playbackRevision
+            )
+            return playbackToken
+        } onCancel: {
+            waiter.cancel()
         }
-
-        let webToken = try await exchange(callbacks[0], flow: webFlow)
-        let playbackToken = try await exchange(callbacks[1], flow: playbackFlow)
-        return (webToken, playbackToken)
     }
 
     struct Flow {
@@ -366,9 +427,7 @@ enum SpotifyAuth {
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
             throw AuthError.tokenExchangeFailed(String(data: data, encoding: .utf8) ?? "unknown")
         }
-        let token = try decodeToken(data)
-        try await installRefreshToken(token.refreshToken, for: flow.kind)
-        return token
+        return try decodeToken(data)
     }
 
     // MARK: - Helpers
@@ -400,14 +459,31 @@ enum SpotifyAuth {
 
     private static func installRefreshToken(
         _ token: String?,
-        for kind: TokenKind
+        for kind: TokenKind,
+        expectedRevision: UInt64
     ) async throws {
         if kind == .playback {
             return try await withPlaybackRefreshLock {
-                try await coordinator(for: kind).install(token)
+                try await coordinator(for: kind).install(
+                    token,
+                    expectedRevision: expectedRevision
+                )
             }
         }
-        try await coordinator(for: kind).install(token)
+        try await coordinator(for: kind).install(
+            token,
+            expectedRevision: expectedRevision
+        )
+    }
+
+    private static func deletePlaybackRefreshToken(
+        expectedRevision: UInt64
+    ) async throws {
+        try await withPlaybackRefreshLock {
+            try await playbackTokenCoordinator.deleteCredential(
+                expectedRevision: expectedRevision
+            )
+        }
     }
 
     /// Shares a BSD file lock with dealer_probe.sh so only one process can
@@ -446,7 +522,10 @@ private final class LoopbackWaiter: @unchecked Sendable {
     private let listener: NWListener
     private let flows: [SpotifyAuth.Flow]
     private var received: [Callback] = []
-    private var continuation: CheckedContinuation<[Callback], Error>?
+    private var continuation: CheckedContinuation<Callback, Error>?
+    private var waitingIndex: Int?
+    private var terminalError: Error?
+    private var started = false
     private let queue = DispatchQueue(label: "com.nanyin.auth.loopback")
 
     init(port: UInt16, flows: [SpotifyAuth.Flow]) throws {
@@ -456,29 +535,63 @@ private final class LoopbackWaiter: @unchecked Sendable {
         listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: port)!)
     }
 
-    func waitForCallbacks() async throws -> [Callback] {
+    func waitForCallback(at index: Int) async throws -> Callback {
         try await withCheckedThrowingContinuation { cont in
-            continuation = cont
-            listener.newConnectionHandler = { [weak self] connection in
-                self?.handle(connection)
-            }
-            listener.stateUpdateHandler = { [weak self] state in
-                if case .failed(let error) = state {
-                    self?.fail(SpotifyAuth.AuthError.loopbackListenerFailed(error.localizedDescription))
+            queue.async { [self] in
+                if let terminalError {
+                    cont.resume(throwing: terminalError)
+                    return
+                }
+                if index < received.count {
+                    cont.resume(returning: received[index])
+                    return
+                }
+                guard index == received.count, continuation == nil else {
+                    cont.resume(throwing: SpotifyAuth.AuthError.loopbackListenerFailed(
+                        "unexpected callback order"
+                    ))
+                    return
+                }
+
+                continuation = cont
+                waitingIndex = index
+                guard !started else { return }
+                started = true
+                listener.newConnectionHandler = { [weak self] connection in
+                    self?.handle(connection)
+                }
+                listener.stateUpdateHandler = { [weak self] state in
+                    if case .failed(let error) = state {
+                        self?.fail(SpotifyAuth.AuthError.loopbackListenerFailed(error.localizedDescription))
+                    }
+                }
+                listener.start(queue: queue)
+                // Safety timeout: never hang forever if the browser journey stalls.
+                queue.asyncAfter(deadline: .now() + 300) { [weak self] in
+                    guard let self, self.terminalError == nil,
+                          self.received.count < self.flows.count else { return }
+                    self.fail(SpotifyAuth.AuthError.userCancelled)
                 }
             }
-            listener.start(queue: queue)
-            // Safety timeout: never hang forever if the browser journey stalls.
-            queue.asyncAfter(deadline: .now() + 300) { [weak self] in
-                guard let self, self.continuation != nil else { return }
-                self.fail(SpotifyAuth.AuthError.userCancelled)
+        }
+    }
+
+    func cancel() {
+        queue.async { [weak self] in
+            guard let self else { return }
+            if self.received.count < self.flows.count, self.terminalError == nil {
+                self.fail(CancellationError())
+            } else {
+                self.listener.cancel()
             }
         }
     }
 
     private func fail(_ error: Error) {
+        terminalError = error
         continuation?.resume(throwing: error)
         continuation = nil
+        waitingIndex = nil
         listener.cancel()
     }
 
@@ -497,6 +610,10 @@ private final class LoopbackWaiter: @unchecked Sendable {
     }
 
     private func handleRequest(_ firstLine: String, connection: NWConnection) {
+        guard received.count < flows.count else {
+            connection.cancel()
+            return
+        }
         let parts = firstLine.split(separator: " ")
         guard parts.count >= 2 else {
             connection.cancel()
@@ -547,10 +664,12 @@ private final class LoopbackWaiter: @unchecked Sendable {
 
         // Only record callbacks whose state matches the expected flow.
         if let state = callback.state, flows[received.count].state == state {
+            let callbackIndex = received.count
             received.append(callback)
-            if received.count == flows.count {
-                continuation?.resume(returning: received)
+            if waitingIndex == callbackIndex {
+                continuation?.resume(returning: callback)
                 continuation = nil
+                waitingIndex = nil
             }
         } else if callback.code == nil {
             // Error callback (user denied) — fail the flow.

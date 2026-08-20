@@ -131,8 +131,8 @@ struct ArtistDetailView: View {
                     .cornerRadius(20)
                 }
                 .buttonStyle(.plain)
-                .disabled(tracks.isEmpty)
-                .opacity(tracks.isEmpty ? 0.5 : 1)
+                .disabled(!app.isPlaybackReady || tracks.isEmpty)
+                .opacity(!app.isPlaybackReady || tracks.isEmpty ? 0.5 : 1)
                 .onHover { hovering in
                     if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
                 }

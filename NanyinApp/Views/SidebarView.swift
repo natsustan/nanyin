@@ -68,6 +68,25 @@ struct SidebarView: View {
                     .padding(.horizontal, 16)
                     .padding(.bottom, 8)
             }
+
+            Divider()
+                .overlay(Theme.playerBar)
+
+            HStack(spacing: 8) {
+                Text(app.userDisplayName.isEmpty ? "Spotify account" : app.userDisplayName)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineLimit(1)
+                Spacer()
+                Button("Sign Out") {
+                    Task { await app.signOut() }
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Theme.textSecondary)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.sidebar)

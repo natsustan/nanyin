@@ -246,6 +246,7 @@ private struct QueueRow: View {
             } label: {
                 Label("Add to Queue", systemImage: "text.badge.plus")
             }
+            .disabled(!app.isPlaybackReady)
             Divider()
             Button {
                 NSPasteboard.general.clearContents()
