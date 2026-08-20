@@ -515,17 +515,27 @@ struct SpotifyClient {
     }
 
     /// Remaining pages of the saved-albums library after an already-fetched
-    /// prefix (mirrors likedTracks(after:)).
-    func savedAlbums(offset: Int, total: Int) async throws -> [SavedAlbum] {
+    /// prefix (mirrors likedTracks(after:)). Reports whether every page kept
+    /// the expected total so callers can reject a snapshot that drifted while
+    /// offset pagination was in progress.
+    func savedAlbums(
+        offset: Int,
+        expectedTotal: Int
+    ) async throws -> (albums: [SavedAlbum], totalsMatch: Bool) {
         var result: [SavedAlbum] = []
         var cursor = offset
-        while cursor < total {
+        var totalsMatch = true
+        while cursor < expectedTotal {
             let page = try await savedAlbumsPage(offset: cursor)
-            guard !page.albums.isEmpty else { break }
+            totalsMatch = totalsMatch && page.total == expectedTotal
+            guard !page.albums.isEmpty else {
+                totalsMatch = false
+                break
+            }
             result += page.albums
             cursor += page.albums.count
         }
-        return result
+        return (result, totalsMatch)
     }
 
     // MARK: - Unified library writes and probes (M4.3)

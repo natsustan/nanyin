@@ -17,7 +17,16 @@ struct SavedAlbumCache: Equatable {
     /// payload to display for an album the server data doesn't include yet.
     struct OverrideView: Equatable {
         let saved: Bool
+        /// Whether the server total currently used by the cache already
+        /// includes this album. This stays stable across a successful write
+        /// until a later snapshot confirms that write.
+        let countedInServerTotal: Bool
         let album: SpotifyClient.SavedAlbum
+    }
+
+    struct Placement: Equatable {
+        let album: SpotifyClient.SavedAlbum
+        let index: Int
     }
 
     /// Display list (server order — newest saved first — with optimistic
@@ -56,6 +65,7 @@ struct SavedAlbumCache: Equatable {
         complete: Bool,
         overrides: [String: OverrideView]
     ) -> Set<String> {
+        let snapshot = Self.deduplicated(snapshot)
         let snapshotIDs = Set(snapshot.map(\.id))
         confirmedIDs = snapshotIDs
         knownIDs.formUnion(snapshotIDs)
@@ -106,6 +116,20 @@ struct SavedAlbumCache: Equatable {
         return prefix + cached.filter { !prefixIDs.contains($0.id) }
     }
 
+    static func isCompleteSnapshot(
+        _ snapshot: [SpotifyClient.SavedAlbum],
+        total: Int
+    ) -> Bool {
+        snapshot.count == total && Set(snapshot.map(\.id)).count == snapshot.count
+    }
+
+    private static func deduplicated(
+        _ albums: [SpotifyClient.SavedAlbum]
+    ) -> [SpotifyClient.SavedAlbum] {
+        var seen: Set<String> = []
+        return albums.filter { seen.insert($0.id).inserted }
+    }
+
     private func isConfirmed(
         _ override: OverrideView,
         id: String,
@@ -133,6 +157,17 @@ struct SavedAlbumCache: Equatable {
     mutating func removeOptimistic(id: String) {
         knownIDs.insert(id)
         albums.removeAll { $0.id == id }
+    }
+
+    func placement(for id: String) -> Placement? {
+        guard let index = albums.firstIndex(where: { $0.id == id }) else { return nil }
+        return Placement(album: albums[index], index: index)
+    }
+
+    mutating func restoreOptimistic(_ placement: Placement) {
+        knownIDs.insert(placement.album.id)
+        albums.removeAll { $0.id == placement.album.id }
+        albums.insert(placement.album, at: min(placement.index, albums.count))
     }
 
     /// Records a contains-probe answer. Callers must not invoke this while an
@@ -181,11 +216,10 @@ struct SavedAlbumCache: Equatable {
     /// hasn't confirmed yet. Never negative.
     func displayCount(overrides: [String: OverrideView]) -> Int {
         var count = serverTotal ?? albums.count
-        for (id, override) in overrides {
-            let serverHas = confirmedIDs.contains(id)
-            if override.saved, !serverHas {
+        for override in overrides.values {
+            if override.saved, !override.countedInServerTotal {
                 count += 1
-            } else if !override.saved, serverHas {
+            } else if !override.saved, override.countedInServerTotal {
                 count -= 1
             }
         }

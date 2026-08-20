@@ -584,8 +584,16 @@ final class AppModel {
     private struct AlbumSaveOverride {
         var mutation: MembershipMutation
         var album: SpotifyClient.SavedAlbum
+        var confirmedPlacement: SavedAlbumCache.Placement?
+        var countedInServerTotal: Bool
         var expiresAt: Date?
         var saved: Bool { mutation.desiredSaved }
+    }
+
+    private struct SavedAlbumsPaginationError: LocalizedError {
+        var errorDescription: String? {
+            "Saved Albums changed while loading. Please retry."
+        }
     }
 
     /// Desired save state that must win over lagged server data, exactly like
@@ -614,7 +622,11 @@ final class AppModel {
 
     private func albumOverrideViews() -> [String: SavedAlbumCache.OverrideView] {
         albumSaveOverrides.mapValues {
-            SavedAlbumCache.OverrideView(saved: $0.saved, album: $0.album)
+            SavedAlbumCache.OverrideView(
+                saved: $0.saved,
+                countedInServerTotal: $0.countedInServerTotal,
+                album: $0.album
+            )
         }
     }
 
@@ -682,12 +694,15 @@ final class AppModel {
             existing.expiresAt = nil
             albumSaveOverrides[album.id] = existing
         } else {
+            let confirmedSaved = albumCache.savedState(album.id) ?? false
             albumSaveOverrides[album.id] = AlbumSaveOverride(
                 mutation: MembershipMutation(
-                    confirmedSaved: albumCache.savedState(album.id) ?? false,
+                    confirmedSaved: confirmedSaved,
                     desiredSaved: saved
                 ),
                 album: album,
+                confirmedPlacement: confirmedSaved ? albumCache.placement(for: album.id) : nil,
+                countedInServerTotal: confirmedSaved,
                 expiresAt: nil
             )
         }
@@ -724,6 +739,12 @@ final class AppModel {
 
             guard epoch == accountEpoch else { return }
             guard var latest = albumSaveOverrides[id] else { return }
+            if succeeded {
+                latest.confirmedPlacement = attempted.saved
+                    ? albumCache.placement(for: id)
+                        ?? SavedAlbumCache.Placement(album: latest.album, index: 0)
+                    : nil
+            }
             switch latest.mutation.resolve(attempted, succeeded: succeeded) {
             case .persistLatest:
                 albumSaveOverrides[id] = latest
@@ -733,20 +754,28 @@ final class AppModel {
                     latest.expiresAt = Date().addingTimeInterval(albumSaveOverrideLagWindow)
                     albumSaveOverrides[id] = latest
                 } else {
+                    restoreConfirmedAlbumState(latest)
                     forgetAlbumSaveOverride(id)
                 }
                 return
             case let .rollback(confirmedSaved):
                 dlog("album save toggle FAILED for \(id), reverting to confirmed state")
-                let album = latest.album
+                assert(confirmedSaved == latest.mutation.confirmedSaved)
+                restoreConfirmedAlbumState(latest)
                 forgetAlbumSaveOverride(id)
-                if confirmedSaved {
-                    albumCache.insertOptimistic(album)
-                } else {
-                    albumCache.removeOptimistic(id: id)
-                }
                 return
             }
+        }
+    }
+
+    private func restoreConfirmedAlbumState(_ override: AlbumSaveOverride) {
+        if override.mutation.confirmedSaved {
+            albumCache.restoreOptimistic(
+                override.confirmedPlacement
+                    ?? SavedAlbumCache.Placement(album: override.album, index: 0)
+            )
+        } else {
+            albumCache.removeOptimistic(id: override.album.id)
         }
     }
 
@@ -776,9 +805,38 @@ final class AppModel {
     }
 
     private func clearSettledAlbumOverrides(_ confirmed: Set<String>) {
-        for id in confirmed where !activeAlbumSaveMutations.contains(id) {
-            albumSaveOverrides.removeValue(forKey: id)
+        for id in confirmed {
+            if activeAlbumSaveMutations.contains(id) {
+                guard var override = albumSaveOverrides[id] else { continue }
+                override.countedInServerTotal = override.saved
+                albumSaveOverrides[id] = override
+            } else {
+                albumSaveOverrides.removeValue(forKey: id)
+            }
         }
+    }
+
+    private func completeSavedAlbumsSnapshot(
+        using api: SpotifyClient,
+        prefix: (albums: [SpotifyClient.SavedAlbum], total: Int)
+    ) async throws -> [SpotifyClient.SavedAlbum]? {
+        guard prefix.total >= prefix.albums.count else { return nil }
+        if prefix.total == prefix.albums.count {
+            return SavedAlbumCache.isCompleteSnapshot(prefix.albums, total: prefix.total)
+                ? prefix.albums
+                : nil
+        }
+
+        let tail = try await api.savedAlbums(
+            offset: prefix.albums.count,
+            expectedTotal: prefix.total
+        )
+        let snapshot = prefix.albums + tail.albums
+        guard tail.totalsMatch,
+              SavedAlbumCache.isCompleteSnapshot(snapshot, total: prefix.total) else {
+            return nil
+        }
+        return snapshot
     }
 
     /// Reconciles Saved Albums with the server (page open / re-click forced,
@@ -827,42 +885,48 @@ final class AppModel {
                     return
                 }
 
-                if prefix.total <= prefix.albums.count {
-                    let confirmed = albumCache.applyServerSnapshot(
+                if prefix.total > prefix.albums.count {
+                    // Long library: paint the newest page while the tail pages in.
+                    let prefixConfirmed = albumCache.applyServerSnapshot(
                         prefix.albums,
                         total: prefix.total,
-                        complete: true,
+                        complete: false,
                         overrides: albumOverrideViews()
                     )
-                    clearSettledAlbumOverrides(confirmed)
-                    return
+                    clearSettledAlbumOverrides(prefixConfirmed)
                 }
 
-                // Long library: paint the newest page while the tail pages in.
-                let prefixConfirmed = albumCache.applyServerSnapshot(
-                    prefix.albums,
-                    total: prefix.total,
-                    complete: false,
-                    overrides: albumOverrideViews()
-                )
-                clearSettledAlbumOverrides(prefixConfirmed)
+                let snapshot = try await withAPIAuthRetry(for: epoch) { api in
+                    if let albums = try await self.completeSavedAlbumsSnapshot(
+                        using: api,
+                        prefix: prefix
+                    ) {
+                        return (albums, prefix.total)
+                    }
 
-                let tail = try await withAPIAuthRetry(for: epoch) { api in
-                    try await api.savedAlbums(offset: prefix.albums.count, total: prefix.total)
+                    // Offset pagination drifted. Retry once from offset zero;
+                    // a second inconsistent pass is surfaced instead of
+                    // publishing duplicate or missing rows as complete.
+                    let retryPrefix = try await api.savedAlbumsPage(offset: 0)
+                    guard let albums = try await self.completeSavedAlbumsSnapshot(
+                        using: api,
+                        prefix: retryPrefix
+                    ) else {
+                        throw SavedAlbumsPaginationError()
+                    }
+                    return (albums, retryPrefix.total)
                 }
                 guard epoch == accountEpoch else { return }
                 let confirmed = albumCache.applyServerSnapshot(
-                    prefix.albums + tail,
-                    total: prefix.total,
+                    snapshot.0,
+                    total: snapshot.1,
                     complete: true,
                     overrides: albumOverrideViews()
                 )
                 clearSettledAlbumOverrides(confirmed)
             } catch {
                 guard epoch == accountEpoch else { return }
-                if !albumCache.hasLoadedAnyData {
-                    savedAlbumsError = error.localizedDescription
-                }
+                savedAlbumsError = error.localizedDescription
                 dlog("saved albums refresh failed: \(error)")
             }
         }

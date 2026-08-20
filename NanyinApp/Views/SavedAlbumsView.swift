@@ -59,6 +59,9 @@ struct SavedAlbumsView: View {
         VStack(spacing: 0) {
             header
             Divider().overlay(Color(white: 0.18))
+            if app.savedAlbumsError != nil, app.hasSavedAlbumsData {
+                refreshErrorBanner
+            }
             content
         }
         .background(Theme.background)
@@ -242,6 +245,31 @@ struct SavedAlbumsView: View {
             .padding(.top, 20)
             .padding(.bottom, 24)
         }
+    }
+
+    private var refreshErrorBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            Text("Couldn’t refresh all saved albums.")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Theme.textSecondary)
+            Spacer()
+            Button("Retry") {
+                app.refreshSavedAlbums(force: true)
+            }
+            .buttonStyle(.link)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(Color.orange.opacity(0.10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(Color.orange.opacity(0.35), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .padding(.horizontal, 28)
+        .padding(.top, 16)
     }
 }
 

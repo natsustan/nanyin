@@ -16,10 +16,13 @@ private enum StateReducerTests {
         testStalePrefixCannotResurrectRemovedAlbum()
         testUnknownRemoveOverrideDoesNotChangeCount()
         testPrefixMergeKeepsCachedTailWithoutDuplicates()
+        testPrefixRefreshKeepsOverrideCountBaseline()
+        testCompleteSnapshotValidationRejectsPaginationDrift()
         testCompleteSnapshotReplacesDisplayAndClearsReconciliationFlag()
         testSaveOverrideConfirmedBySnapshotReportsForClearing()
         testRemoveOverrideNeedsCompleteSnapshotToConfirm()
         testProbeResultRecordsKnownState()
+        testRollbackRestoresOriginalAlbumPosition()
         testExpiryMarkingForcesFullReconciliation()
         print("State reducer tests passed")
     }
@@ -186,8 +189,16 @@ private enum StateReducerTests {
         )
     }
 
-    private static func override(_ album: SpotifyClient.SavedAlbum, saved: Bool) -> [String: SavedAlbumCache.OverrideView] {
-        [album.id: .init(saved: saved, album: album)]
+    private static func override(
+        _ album: SpotifyClient.SavedAlbum,
+        saved: Bool,
+        countedInServerTotal: Bool
+    ) -> [String: SavedAlbumCache.OverrideView] {
+        [album.id: .init(
+            saved: saved,
+            countedInServerTotal: countedInServerTotal,
+            album: album
+        )]
     }
 
     private static func testSaveOverrideInsertsAtTopAndBumpsCount() {
@@ -198,7 +209,7 @@ private enum StateReducerTests {
 
         let confirmed = cache.applyServerSnapshot(
             [album("a"), album("b")], total: 2, complete: false,
-            overrides: override(newAlbum, saved: true)
+            overrides: override(newAlbum, saved: true, countedInServerTotal: false)
         )
         expect(
             !confirmed.contains(newAlbum.id),
@@ -209,11 +220,11 @@ private enum StateReducerTests {
             "saved override must sit at the top of Recently Added"
         )
         expect(
-            cache.displayCount(overrides: override(newAlbum, saved: true)) == 3,
+            cache.displayCount(overrides: override(newAlbum, saved: true, countedInServerTotal: false)) == 3,
             "unconfirmed save must bump the count above the server total"
         )
         expect(
-            cache.savedState("new", overrides: override(newAlbum, saved: true)) == true,
+            cache.savedState("new", overrides: override(newAlbum, saved: true, countedInServerTotal: false)) == true,
             "override must answer the saved state"
         )
     }
@@ -224,7 +235,7 @@ private enum StateReducerTests {
         cache.applyServerSnapshot(snapshot, total: 2, complete: true, overrides: [:])
 
         let removed = snapshot[0]
-        let overrides = override(removed, saved: false)
+        let overrides = override(removed, saved: false, countedInServerTotal: true)
         cache.applyServerSnapshot(snapshot, total: 2, complete: false, overrides: overrides)
 
         expect(
@@ -247,7 +258,7 @@ private enum StateReducerTests {
 
         // User removes "a"; a lagged prefix snapshot still contains it.
         let removed = album("a")
-        let overrides = override(removed, saved: false)
+        let overrides = override(removed, saved: false, countedInServerTotal: true)
         cache.removeOptimistic(id: removed.id)
         cache.applyServerSnapshot([album("a"), album("b")], total: 3, complete: false, overrides: overrides)
 
@@ -268,7 +279,7 @@ private enum StateReducerTests {
         // Removing an album the server data never mentioned (saved and
         // removed before any refresh saw it) must not decrement the count.
         let ghost = album("ghost")
-        let overrides = override(ghost, saved: false)
+        let overrides = override(ghost, saved: false, countedInServerTotal: false)
         cache.applyServerSnapshot([album("a")], total: 1, complete: true, overrides: overrides)
 
         expect(cache.displayCount(overrides: overrides) == 1, "unknown removal must not change the count")
@@ -286,6 +297,38 @@ private enum StateReducerTests {
             "prefix merge must keep the cached tail exactly once, no duplicates"
         )
         expect(cache.displayCount(overrides: [:]) == 4, "server total must replace the stale one")
+    }
+
+    private static func testPrefixRefreshKeepsOverrideCountBaseline() {
+        var cache = SavedAlbumCache()
+        let snapshot = [album("a"), album("b"), album("c")]
+        cache.applyServerSnapshot(snapshot, total: 3, complete: true, overrides: [:])
+
+        let removed = snapshot[2]
+        let overrides = override(removed, saved: false, countedInServerTotal: true)
+        cache.removeOptimistic(id: removed.id)
+        cache.applyServerSnapshot([snapshot[0]], total: 3, complete: false, overrides: overrides)
+
+        expect(
+            cache.displayCount(overrides: overrides) == 2,
+            "a prefix refresh must not forget the confirmed baseline for a tail removal"
+        )
+    }
+
+    private static func testCompleteSnapshotValidationRejectsPaginationDrift() {
+        let duplicate = [album("a"), album("a"), album("b")]
+        expect(
+            !SavedAlbumCache.isCompleteSnapshot(duplicate, total: 3),
+            "a cross-page duplicate must invalidate a complete snapshot"
+        )
+        expect(
+            !SavedAlbumCache.isCompleteSnapshot([album("a"), album("b")], total: 3),
+            "a short pagination result must invalidate a complete snapshot"
+        )
+        expect(
+            SavedAlbumCache.isCompleteSnapshot([album("a"), album("b")], total: 2),
+            "a unique result matching the server total must be complete"
+        )
     }
 
     private static func testCompleteSnapshotReplacesDisplayAndClearsReconciliationFlag() {
@@ -308,7 +351,7 @@ private enum StateReducerTests {
 
         let confirmed = cache.applyServerSnapshot(
             [saved, album("a")], total: 2, complete: false,
-            overrides: override(saved, saved: true)
+            overrides: override(saved, saved: true, countedInServerTotal: false)
         )
 
         expect(
@@ -325,7 +368,7 @@ private enum StateReducerTests {
         var cache = SavedAlbumCache()
         cache.applyServerSnapshot([album("a"), album("b")], total: 3, complete: false, overrides: [:])
         let removed = album("b")
-        let overrides = override(removed, saved: false)
+        let overrides = override(removed, saved: false, countedInServerTotal: true)
 
         let prefixConfirmed = cache.applyServerSnapshot(
             [album("a")], total: 3, complete: false, overrides: overrides
@@ -358,6 +401,22 @@ private enum StateReducerTests {
         expect(
             cache.albums.map(\.id) == ["here"],
             "a positive probe must insert the row for display"
+        )
+    }
+
+    private static func testRollbackRestoresOriginalAlbumPosition() {
+        var cache = SavedAlbumCache()
+        let snapshot = [album("a"), album("b"), album("c")]
+        cache.applyServerSnapshot(snapshot, total: 3, complete: true, overrides: [:])
+        let placement = cache.placement(for: "b")
+        expect(placement != nil, "a cached album must expose its confirmed placement")
+
+        cache.removeOptimistic(id: "b")
+        cache.restoreOptimistic(placement!)
+
+        expect(
+            cache.albums.map(\.id) == ["a", "b", "c"],
+            "a failed removal must restore the album at its original index"
         )
     }
 
