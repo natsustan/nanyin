@@ -61,8 +61,11 @@ cleanup() {
 }
 trap cleanup EXIT
 xcrun swiftc \
+    "$ROOT_DIR/NanyinApp/Core/DebugLog.swift" \
+    "$ROOT_DIR/NanyinApp/Core/SpotifyClient.swift" \
     "$ROOT_DIR/NanyinApp/Core/CredentialRevision.swift" \
-    "$ROOT_DIR/NanyinApp/State/LikeMutation.swift" \
+    "$ROOT_DIR/NanyinApp/State/MembershipMutation.swift" \
+    "$ROOT_DIR/NanyinApp/State/SavedAlbumCache.swift" \
     "$ROOT_DIR/Tests/StateReducerTests.swift" \
     -o "$state_test_dir/state-reducer-tests"
 "$state_test_dir/state-reducer-tests"

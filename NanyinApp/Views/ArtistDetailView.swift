@@ -236,6 +236,13 @@ private struct AlbumCard: View {
 
     @State private var hovering = false
 
+    private var savedAlbum: SpotifyClient.SavedAlbum {
+        SpotifyClient.SavedAlbum(album: album, addedAt: nil)
+    }
+
+    private var isSavedKnown: Bool { app.isAlbumSaveKnown(album.id) }
+    private var isSaved: Bool { app.isAlbumSaved(album.id) }
+
     private var subtitle: String {
         [album.artistName, album.year ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
     }
@@ -265,6 +272,38 @@ private struct AlbumCard: View {
             self.hovering = hovering
         }
         .linkCursor()
+        .contextMenu {
+            Button {
+                app.playAlbum(id: album.id)
+            } label: {
+                Label("Play Album", systemImage: "play")
+            }
+            Divider()
+            if isSavedKnown, isSaved {
+                Button {
+                    app.removeSavedAlbum(savedAlbum)
+                } label: {
+                    Label("Remove from Saved Albums", systemImage: "minus.circle")
+                }
+            } else {
+                // Unknown state defaults to Save — both writes are
+                // idempotent server-side, so no probe is needed first.
+                Button {
+                    app.saveAlbum(savedAlbum)
+                } label: {
+                    Label("Save Album", systemImage: "plus.circle")
+                }
+            }
+            Divider()
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(
+                    "https://open.spotify.com/album/\(album.id)", forType: .string
+                )
+            } label: {
+                Label("Copy Album Link", systemImage: "link")
+            }
+        }
     }
 
     @ViewBuilder

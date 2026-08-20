@@ -1,13 +1,15 @@
-/// Pure state machine for one track's serialized optimistic like writes.
+/// Pure state machine for one id's serialized optimistic membership writes
+/// (Liked Songs tracks, saved albums). Latest local intent always wins over
+/// confirmed server state.
 ///
-/// `confirmedLiked` is the last state known to have reached Spotify.
-/// `desiredLiked` is the user's latest intent. They must remain separate:
+/// `confirmedSaved` is the last state known to have reached Spotify.
+/// `desiredSaved` is the user's latest intent. They must remain separate:
 /// rolling back by merely inverting the last click is incorrect when several
 /// clicks and failed requests interleave.
-struct LikeMutation: Equatable {
+struct MembershipMutation: Equatable {
     struct Attempt: Equatable {
         let revision: UInt64
-        let liked: Bool
+        let saved: Bool
     }
 
     enum Resolution: Equatable {
@@ -22,36 +24,42 @@ struct LikeMutation: Equatable {
         case rollback(to: Bool)
     }
 
-    private(set) var confirmedLiked: Bool
-    private(set) var desiredLiked: Bool
+    private(set) var confirmedSaved: Bool
+    private(set) var desiredSaved: Bool
     private(set) var revision: UInt64
 
-    init(confirmedLiked: Bool, desiredLiked: Bool) {
-        self.confirmedLiked = confirmedLiked
-        self.desiredLiked = desiredLiked
+    init(confirmedSaved: Bool, desiredSaved: Bool) {
+        self.confirmedSaved = confirmedSaved
+        self.desiredSaved = desiredSaved
         revision = 1
     }
 
-    mutating func setDesired(_ liked: Bool) {
-        desiredLiked = liked
+    mutating func setDesired(_ saved: Bool) {
+        desiredSaved = saved
         revision &+= 1
     }
 
+    /// Incorporates a newer server observation without changing the user's
+    /// intent or invalidating the attempt currently in flight.
+    mutating func observeConfirmedState(_ saved: Bool) {
+        confirmedSaved = saved
+    }
+
     func nextAttempt() -> Attempt {
-        Attempt(revision: revision, liked: desiredLiked)
+        Attempt(revision: revision, saved: desiredSaved)
     }
 
     mutating func resolve(_ attempt: Attempt, succeeded: Bool) -> Resolution {
         if succeeded {
-            confirmedLiked = attempt.liked
+            confirmedSaved = attempt.saved
         }
 
-        if desiredLiked == confirmedLiked {
+        if desiredSaved == confirmedSaved {
             return .settled(maskServerLag: succeeded)
         }
         if revision != attempt.revision {
             return .persistLatest
         }
-        return .rollback(to: confirmedLiked)
+        return .rollback(to: confirmedSaved)
     }
 }

@@ -77,6 +77,8 @@ struct RootView: View {
                 contextKey: "liked",
                 coverAssetName: "LikedSongsCover"
             )
+        case .savedAlbums:
+            SavedAlbumsView()
         case let .playlist(id, name):
             let info = app.playlists.first { $0.id == id }
             PlaylistDetailView(
@@ -98,7 +100,8 @@ struct RootView: View {
                 subtitle: subtitle,
                 coverURL: artworkURL,
                 contextKey: AppModel.albumContextKey(id),
-                label: "ALBUM"
+                label: "ALBUM",
+                albumId: id
             )
         }
     }

@@ -30,6 +30,7 @@ struct SidebarView: View {
                 .padding(.bottom, 8)
 
             entry(.liked, icon: Image(systemName: "heart.fill"), title: "Liked Songs", count: app.likedCount)
+            entry(.savedAlbums, icon: Image(systemName: "opticaldisc"), title: "Saved Albums", count: app.savedAlbumCount)
 
             if !app.playlists.isEmpty {
                 Text("PLAYLISTS")
