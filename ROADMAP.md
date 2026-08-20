@@ -1,6 +1,6 @@
 # nanyin — Roadmap
 
-> Status: M0 ✅ · M1 ✅ · hardening ✅ · M3 ✅ · M2 2.1/2.2/2.3/2.4/2.5 ✅ (2.6 paused in watch window) · M4.1 ✅ · M4.2 ✅ · M4.3 next
+> Status: M0 ✅ · M1 ✅ · hardening ✅ · M3 ✅ · M2 2.1/2.2/2.3/2.4/2.5 ✅ (2.6 paused in watch window) · M4.1 ✅ · M4.2 ✅ · M4.3 implemented (offline checks ✅, live verification pending)
 > Last updated: 2026-08-20
 
 ## Completed
@@ -111,6 +111,27 @@ Note: ncspot client id keeps /v1/search working (production-approved app).
 | 4.7 | Window: mini-player | Collapsed player-bar-only mode (classic Winamp-ish) | 0.5d |
 
 ### M4.3 — Album Library product plan
+
+Progress 2026-08-20 (implementation): all four slices landed offline.
+Data foundation: `LikeMutation` generalized to `MembershipMutation` (same
+latest-intent-wins reducer now backs both track likes and album saves);
+`SavedAlbumCache` extracted as a pure snapshot/override reconciler (unconfirmed
+saves pin to the top, removals need a *complete* snapshot to confirm, expired
+overrides force a full re-page) with deterministic tests in
+`Tests/StateReducerTests.swift`. SpotifyClient gained `GET /v1/me/albums`
+paging (added_at retained) plus the unified library surface
+(`PUT/DELETE /v1/me/library`, `GET /v1/me/library/contains` chunked at 40
+uris) — no deprecated album-specific endpoints. AppModel mirrors the likes
+machinery: one writer per album, `withAPIAuthRetry`, epoch fencing on every
+load/probe/mutation, sign-out wins. UI: Saved Albums sidebar entry + count,
+SavedAlbumsView (virtualized List rows, filter field, Recently Added/Album/
+Artist sort, cover hover-play via `playAlbum` → `spotify:album:<id>` context,
+context menus with remove/copy-link), always-mounted album header with
+SAVE ALBUM/SAVED (plus/check, never a heart) + Retry on failed track loads,
+and save/remove/play/copy on artist-page album cards. PlaylistDetailView
+now keeps its header mounted across loading/empty/error states. Live
+verification (>50-album pagination, rapid toggles, cross-client
+reconciliation) still pending explicit approval.
 
 Goal: make album-first listening a complete library flow. A user can save an
 album from its detail page, find it immediately in Saved Albums, and start the

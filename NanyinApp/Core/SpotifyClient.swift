@@ -78,6 +78,15 @@ struct SpotifyClient {
         let artworkURL: URL?
     }
 
+    /// A saved album entry from /v1/me/albums — the library item, not the
+    /// bare release (M4.3). Saved albums and Liked Songs stay separate.
+    struct SavedAlbum: Identifiable, Hashable {
+        let album: AlbumInfo
+        /// When the user saved it — drives the Recently Added ordering.
+        let addedAt: Date?
+        var id: String { album.id }
+    }
+
     struct PlaylistInfo: Identifiable, Hashable {
         let id: String
         let name: String
@@ -106,6 +115,12 @@ struct SpotifyClient {
 
     init(accessToken: String) {
         self.accessToken = accessToken
+    }
+
+    private static let iso8601Parser = ISO8601DateFormatter()
+
+    private static func parseISO8601(_ raw: String) -> Date? {
+        iso8601Parser.date(from: raw)
     }
 
     private func request(path: String, method: String, body: Data? = nil) -> URLRequest {
@@ -277,6 +292,28 @@ struct SpotifyClient {
 
     private struct ArtistAlbumsDTO: Codable {
         let items: [DiscographyAlbumDTO]?
+        let total: Int
+    }
+
+    private struct SavedAlbumItemDTO: Codable {
+        let addedAt: String?
+        let album: DiscographyAlbumDTO
+
+        enum CodingKeys: String, CodingKey {
+            case addedAt = "added_at"
+            case album
+        }
+
+        var toSavedAlbum: SavedAlbum {
+            SavedAlbum(
+                album: album.toAlbumInfo,
+                addedAt: addedAt.flatMap(SpotifyClient.parseISO8601)
+            )
+        }
+    }
+
+    private struct PagedSavedAlbumsDTO: Codable {
+        let items: [SavedAlbumItemDTO]?
         let total: Int
     }
 
@@ -457,6 +494,87 @@ struct SpotifyClient {
                 let retryAfter = Double(httpResponse?.value(forHTTPHeaderField: "Retry-After") ?? "") ?? 2.0
                 let wait = min(max(retryAfter, 1.0), 30.0)
                 dlog("web api 429 on \(method) /v1/me/tracks, retrying in \(wait)s")
+                try await Task.sleep(for: .seconds(wait))
+                attempt += 1
+                continue
+            }
+            if status == 401 { throw APIError.needsAuth }
+            throw APIError.http(status, "")
+        }
+    }
+
+    // MARK: - Saved Albums (M4.3)
+
+    /// One page of the user's saved albums (server order: newest first).
+    func savedAlbumsPage(offset: Int, limit: Int = 50) async throws -> (albums: [SavedAlbum], total: Int) {
+        let page: PagedSavedAlbumsDTO = try await get(
+            "/v1/me/albums",
+            query: ["limit": "\(limit)", "offset": "\(offset)"]
+        )
+        return ((page.items ?? []).map(\.toSavedAlbum), page.total)
+    }
+
+    /// Remaining pages of the saved-albums library after an already-fetched
+    /// prefix (mirrors likedTracks(after:)).
+    func savedAlbums(offset: Int, total: Int) async throws -> [SavedAlbum] {
+        var result: [SavedAlbum] = []
+        var cursor = offset
+        while cursor < total {
+            let page = try await savedAlbumsPage(offset: cursor)
+            guard !page.albums.isEmpty else { break }
+            result += page.albums
+            cursor += page.albums.count
+        }
+        return result
+    }
+
+    // MARK: - Unified library writes and probes (M4.3)
+
+    /// Saved-state probe via the unified library endpoint. Batched at 40
+    /// URIs (roadmap cap). The server lags behind its own writes — never use
+    /// this to confirm a save the app just made; keep the optimistic UI.
+    func libraryContainsAlbums(ids: [String]) async throws -> [Bool] {
+        var flags: [Bool] = []
+        for chunk in ids.chunked(into: 40) {
+            let batch: [Bool] = try await get(
+                "/v1/me/library/contains",
+                query: ["uris": chunk.map { "spotify:album:\($0)" }.joined(separator: ",")]
+            )
+            flags += batch
+        }
+        return flags
+    }
+
+    /// Saves albums to the user's library (PUT /v1/me/library).
+    func saveAlbumsToLibrary(ids: [String]) async throws {
+        try await mutateLibrary(ids: ids, method: "PUT")
+    }
+
+    /// Removes albums from the user's library (DELETE /v1/me/library).
+    func removeAlbumsFromLibrary(ids: [String]) async throws {
+        try await mutateLibrary(ids: ids, method: "DELETE")
+    }
+
+    /// PUT/DELETE /v1/me/library — the unified save surface. Never regress to
+    /// the deprecated album-specific /v1/me/albums save/remove endpoints.
+    private func mutateLibrary(ids: [String], method: String, retries: Int = 2) async throws {
+        let uris = ids.map { "spotify:album:\($0)" }
+        var components = URLComponents(string: "https://api.spotify.com/v1/me/library")!
+        components.queryItems = [URLQueryItem(name: "uris", value: uris.joined(separator: ","))]
+        var req = URLRequest(url: components.url!)
+        req.httpMethod = method
+        req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        var attempt = 0
+
+        while true {
+            let (_, response) = try await URLSession.shared.data(for: req)
+            let httpResponse = response as? HTTPURLResponse
+            let status = httpResponse?.statusCode ?? 0
+            if (200..<300).contains(status) { return }
+            if status == 429, attempt < retries {
+                let retryAfter = Double(httpResponse?.value(forHTTPHeaderField: "Retry-After") ?? "") ?? 2.0
+                let wait = min(max(retryAfter, 1.0), 30.0)
+                dlog("web api 429 on \(method) /v1/me/library, retrying in \(wait)s")
                 try await Task.sleep(for: .seconds(wait))
                 attempt += 1
                 continue
