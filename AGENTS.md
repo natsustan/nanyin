@@ -5,7 +5,13 @@ Native macOS Spotify client (SwiftUI shell + Rust librespot core). See `ROADMAP.
 ## Build
 
 ```sh
-./script/build_and_run.sh [--verify|--logs|--debug]
+# Default for agents and CI-like local verification. Never launches the app,
+# reads Keychain, or contacts Spotify.
+./script/agent_check.sh
+
+# LIVE commands: run only after explicit user authorization in the current
+# task. They terminate existing instances, build/package, and launch Nanyin.
+NANYIN_ALLOW_LIVE_SPOTIFY=1 ./script/build_and_run.sh [run|--live-smoke|--logs|--debug]
 # terminate → xcodegen (if needed) → xcodebuild → package to dist/ → launch.
 # stderr (dlog + eprintln) captured to build/nanyin-launch.log.
 xcodebuild -project Nanyin.xcodeproj -scheme Nanyin -configuration Debug build
@@ -20,6 +26,10 @@ Run the binary with stderr captured for diagnostics — Swift `dlog` + Rust `epr
 `rust/Cargo.toml` points at `research-repos/librespot` via **path dependencies** — NOT crates.io, NOT the git rev. The checkout carries an applied-but-upstream-unmerged patch:
 
 - **PR #1741** (connect: don't answer our own cluster update with another state update). Without it, being an active Connect device causes a state-PUT echo loop that has repeatedly ended in Spotify 429 responses. Dealer ghosting, spirc termination, and credential rejection were observed in the same incident, but the server-side causal chain is not publicly documented.
+
+The canonical patch artifact is checked in at
+`patches/librespot-pr-1741.patch`; `script/agent_check.sh` verifies that the
+vendored checkout contains that exact patch before building.
 
 DO NOT "upgrade" the librespot dependency to crates.io or a git rev until #1741 is merged upstream — you would silently drop the patch and re-enter the echo loop. Check upstream: https://github.com/librespot-org/librespot/pull/1741
 
@@ -44,10 +54,10 @@ Possible penalization signatures observed during the 2026-08-18 incident (also r
 - `failed to put connect state for new device` / `IncompleteMessage` on PUT + spirc task exit + auto re-init loop — 2026-08-18 first symptom.
 - Accesspoint TLS handshakes silently dropped (TCP connects, then timeout / `-9806 connection closed`) on ap-gew1/gue1/guc3 while `apresolve.spotify.com` and `accounts.spotify.com` still work. This is consistent with an accesspoint-specific block or outage, but does not by itself exclude local routing or TLS problems. Quick triage: `python3 -c "import socket,ssl; s=ssl.create_default_context().wrap_socket(socket.create_connection(('ap-gew1.spotify.com',443),timeout=6),server_hostname='ap-gew1.spotify.com'); print('TLS OK')"`.
 
-Use the idle probe to separate playback activity from dealer stability. Its result is diagnostic evidence, not proof of a specific server-side cause:
+Use the idle probe to separate playback activity from dealer stability. It is a LIVE command and requires explicit user authorization. Its result is diagnostic evidence, not proof of a specific server-side cause:
 
 ```sh
-script/dealer_probe.sh [device_id]   # 0 = stable for 300s; 1/3 = dealer failure; 2 = token missing/rejected; 5 = Keychain access failed
+NANYIN_ALLOW_LIVE_SPOTIFY=1 script/dealer_probe.sh [device_id]   # 0 = stable for 300s; 1/3 = dealer failure; 2 = token missing/rejected; 5 = Keychain access failed
 ```
 
 **CRITICAL — persist replacement refresh tokens**: Spotify may return a new
@@ -96,3 +106,26 @@ In the observed incident, the suspected restriction decayed within hours to abou
 - xcodegen 2.46: script phases go under `preBuildScripts:` (the `scripts:` key is silently ignored).
 - Dual OAuth flows are chained in ONE browser journey (loopback :8989, ncspot first, redirect to keymaster). The loopback listener must survive until ALL callbacks arrive.
 - UI: classic flat dark palette (`Theme.swift`), SF Pro, #1DB954 accent used sparingly.
+
+## Code Review Rules
+
+### Spotify auth and session recovery
+
+- Flag any reconnect path that refreshes a playback token after a generic
+  network, dealer, TLS, timeout, or initialization failure. Safe path: reuse
+  the current access token and refresh only after a typed authentication
+  rejection.
+- Flag any sign-out path where an in-flight refresh can persist a replacement
+  token after credential deletion. Safe path: refresh and clear operations for
+  each token kind share one serialized coordinator, and sign-out wins.
+- Flag any player event, completion monitor, or initialization result that can
+  publish after its generation was replaced or shutdown began. Safe path:
+  generation validation and state publication are atomic.
+
+### Liked Songs reconciliation
+
+- For changes to optimistic likes, verify rapid repeated toggles, stale server
+  snapshots, partial-prefix refreshes, failed writes, override expiry, and
+  account-epoch changes. Safe path: UI state is derived from the last confirmed
+  server state plus the latest non-expired local intent; an older result never
+  overwrites a newer intent.

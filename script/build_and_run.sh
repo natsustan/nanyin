@@ -24,7 +24,32 @@ export PATH="$HOME/.local/share/mise/shims:$HOME/.cargo/bin:$PATH"
 export RUST_LOG="${RUST_LOG:-librespot_connect=debug,librespot_core::dealer=warn}"
 
 usage() {
-  echo "usage: $0 [run|--debug|--logs|--verify]" >&2
+  echo "usage: NANYIN_ALLOW_LIVE_SPOTIFY=1 $0 [run|--debug|--logs|--live-smoke]" >&2
+}
+
+validate_mode() {
+  case "$MODE" in
+    run|--debug|debug|--logs|logs|--live-smoke|live-smoke)
+      ;;
+    --verify|verify)
+      echo "ERROR: --verify was renamed to --live-smoke because it launches Nanyin and contacts Spotify." >&2
+      usage
+      exit 2
+      ;;
+    *)
+      usage
+      exit 2
+      ;;
+  esac
+}
+
+require_live_spotify_opt_in() {
+  if [[ "${NANYIN_ALLOW_LIVE_SPOTIFY:-}" != "1" ]]; then
+    echo "ERROR: this command launches Nanyin and may use real Spotify credentials." >&2
+    echo "       Set NANYIN_ALLOW_LIVE_SPOTIFY=1 only after explicit user authorization." >&2
+    echo "       For agent-safe verification, run ./script/agent_check.sh instead." >&2
+    exit 64
+  fi
 }
 
 terminate_running_app() {
@@ -112,18 +137,18 @@ run_app() {
   return 1
 }
 
-verify_app() {
+live_smoke_app() {
   if ! run_app >/dev/null; then
     return 1
   fi
 
   sleep 3
   if pgrep -f "$PROCESS_PATTERN" >/dev/null 2>&1; then
-    echo "verify: OK — $APP_NAME alive 3s after launch"
+    echo "live-smoke: OK — $APP_NAME alive 3s after launch"
     return 0
   fi
 
-  echo "verify: FAILED — $APP_NAME exited within 3s of launch" >&2
+  echo "live-smoke: FAILED — $APP_NAME exited within 3s of launch" >&2
   print_recent_launch_logs
   return 1
 }
@@ -134,6 +159,8 @@ main() {
     exit 2
   fi
 
+  validate_mode
+  require_live_spotify_opt_in
   terminate_running_app
   generate_project_if_needed
   build_app
@@ -150,12 +177,8 @@ main() {
       run_app
       tail -n 50 -F "$LOG_FILE"
       ;;
-    --verify|verify)
-      verify_app
-      ;;
-    *)
-      usage
-      exit 2
+    --live-smoke|live-smoke)
+      live_smoke_app
       ;;
   esac
 }

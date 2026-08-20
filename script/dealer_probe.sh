@@ -15,8 +15,9 @@
 #   3  SESSION DIED after connecting
 #   5  Keychain read or write failed
 #   6  Nanyin is already running
+#  64  live Spotify opt-in missing
 #
-# Usage: script/dealer_probe.sh [device_id]
+# Usage: NANYIN_ALLOW_LIVE_SPOTIFY=1 script/dealer_probe.sh [device_id]
 
 set -euo pipefail
 
@@ -26,6 +27,14 @@ DEVICE_ID="${1:-nanyin_probe_check}"
 KEYCHAIN_ITEM_NOT_FOUND=44
 PLAYBACK_REFRESH_LOCK="${TMPDIR:-/tmp}/nanyin-playback-refresh.lock"
 
+require_live_spotify_opt_in() {
+    if [ "${NANYIN_ALLOW_LIVE_SPOTIFY:-}" != "1" ]; then
+        echo "ERROR: dealer_probe uses real Spotify credentials and opens a real dealer session." >&2
+        echo "       Set NANYIN_ALLOW_LIVE_SPOTIFY=1 only after explicit user authorization." >&2
+        exit 64
+    fi
+}
+
 ensure_nanyin_not_running() {
     if pgrep -f '[N]anyin.app' >/dev/null; then
         echo "ERROR: Nanyin is already running; stop it before starting the dealer probe." >&2
@@ -33,6 +42,7 @@ ensure_nanyin_not_running() {
     fi
 }
 
+require_live_spotify_opt_in
 ensure_nanyin_not_running
 
 cd "$(dirname "$0")/../rust"
