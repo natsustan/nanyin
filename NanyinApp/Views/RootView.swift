@@ -40,6 +40,24 @@ struct RootView: View {
         }
         .background(Theme.background)
         .ignoresSafeArea()
+        .toolbar {
+            ToolbarItemGroup(placement: .navigation) {
+                NavigationButton(
+                    systemImage: "chevron.left",
+                    help: "Back",
+                    shortcut: "[",
+                    enabled: app.canGoBack,
+                    action: app.goBack
+                )
+                NavigationButton(
+                    systemImage: "chevron.right",
+                    help: "Forward",
+                    shortcut: "]",
+                    enabled: app.canGoForward,
+                    action: app.goForward
+                )
+            }
+        }
     }
 
     @ViewBuilder
@@ -83,5 +101,30 @@ struct RootView: View {
                 label: "ALBUM"
             )
         }
+    }
+}
+
+private struct NavigationButton: View {
+    let systemImage: String
+    let help: String
+    let shortcut: KeyEquivalent
+    let enabled: Bool
+    let action: () -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(enabled ? (hovering ? .white : Color(white: 0.85)) : Theme.textSecondary)
+                .frame(width: 28, height: 28)
+                .background(hovering && enabled ? Color(white: 0.14) : .clear, in: Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .keyboardShortcut(shortcut, modifiers: .command)
+        .onHover { hovering = $0 }
+        .help(enabled ? help : "No navigation history")
     }
 }
