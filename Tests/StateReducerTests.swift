@@ -9,6 +9,7 @@ private enum StateReducerTests {
         testTwoSuccessfulWritesSettleOnLatestIntent()
         testRepeatedIntentAfterTwoFailuresRollsBackToServer()
         testRepeatedIntentAfterFailureThenSuccessSettles()
+        testNewerServerObservationWinsOverFailedWrite()
         testSignOutRejectsLateCredentialPersistence()
 
         testSaveOverrideInsertsAtTopAndBumpsCount()
@@ -24,7 +25,14 @@ private enum StateReducerTests {
         testSaveOverrideConfirmedBySnapshotReportsForClearing()
         testRemoveOverrideNeedsCompleteSnapshotToConfirm()
         testProbeResultRecordsKnownState()
+        testPartialPrefixPreservesPositiveProbe()
+        testCompleteSnapshotRejectsOlderProbe()
+        testChangedPrefixRejectsMixedPaginationSnapshot()
+        testPartialPrefixDoesNotDoubleAdjustRemovalCount()
         testRollbackRestoresOriginalAlbumPosition()
+        testConcurrentRemovalRollbacksRestoreOriginalOrder()
+        testNewlySavedAlbumRollbackRestoresAtTop()
+        testRollbackUsesNewerCanonicalOrder()
         testExpiryMarkingForcesFullReconciliation()
         print("State reducer tests passed")
     }
@@ -154,6 +162,28 @@ private enum StateReducerTests {
             expect(
                 mutation.confirmedSaved == !initiallySaved,
                 "the successful retry must become the confirmed state"
+            )
+        }
+    }
+
+    private static func testNewerServerObservationWinsOverFailedWrite() {
+        for observedSaved in [false, true] {
+            var mutation = MembershipMutation(
+                confirmedSaved: !observedSaved,
+                desiredSaved: observedSaved
+            )
+            let attempt = mutation.nextAttempt()
+
+            mutation.observeConfirmedState(observedSaved)
+
+            expect(
+                mutation.resolve(attempt, succeeded: false)
+                    == .settled(maskServerLag: false),
+                "a failed write must not roll back a newer server observation"
+            )
+            expect(
+                mutation.confirmedSaved == observedSaved,
+                "the newer server observation must remain authoritative"
             )
         }
     }
@@ -451,6 +481,81 @@ private enum StateReducerTests {
         )
     }
 
+    private static func testPartialPrefixPreservesPositiveProbe() {
+        var cache = SavedAlbumCache()
+        let tailAlbum = album("tail")
+        cache.noteProbe(tailAlbum, saved: true)
+
+        cache.applyServerSnapshot(
+            [album("head")], total: 2, complete: false, overrides: [:]
+        )
+
+        expect(
+            cache.savedState(tailAlbum.id) == true,
+            "a partial prefix must not overturn a positive probe for a tail album"
+        )
+    }
+
+    private static func testCompleteSnapshotRejectsOlderProbe() {
+        var cache = SavedAlbumCache()
+        cache.applyServerSnapshot([album("head")], total: 1, complete: true, overrides: [:])
+
+        // This result represents a contains request that started before the
+        // complete snapshot and returned afterward.
+        cache.noteProbe(album("stale"), saved: true)
+
+        expect(
+            cache.savedState("stale") == false,
+            "an older probe must not overwrite a newer complete snapshot"
+        )
+        expect(
+            cache.albums.map(\.id) == ["head"],
+            "an older positive probe must not resurrect a row"
+        )
+    }
+
+    private static func testChangedPrefixRejectsMixedPaginationSnapshot() {
+        let originalPrefix = [album("a"), album("b")]
+        let mixedSnapshot = originalPrefix + [album("c"), album("d")]
+
+        expect(
+            !SavedAlbumCache.prefixMatches(
+                [album("x"), album("a")],
+                total: 4,
+                snapshot: mixedSnapshot
+            ),
+            "a changed head must reject a snapshot assembled from older pages"
+        )
+        expect(
+            SavedAlbumCache.prefixMatches(
+                originalPrefix,
+                total: 4,
+                snapshot: mixedSnapshot
+            ),
+            "an unchanged head and total must validate the assembled snapshot"
+        )
+    }
+
+    private static func testPartialPrefixDoesNotDoubleAdjustRemovalCount() {
+        var cache = SavedAlbumCache()
+        let snapshot = [album("a"), album("b"), album("tail")]
+        cache.applyServerSnapshot(snapshot, total: 3, complete: true, overrides: [:])
+
+        let removed = snapshot[2]
+        let overrides = override(removed, saved: false, countedInServerTotal: true)
+        cache.removeOptimistic(id: removed.id)
+
+        // The server total already reflects the removal, but a prefix cannot
+        // prove that this tail album is gone. Keep the previous total until a
+        // complete snapshot can rebase and confirm the override.
+        cache.applyServerSnapshot([snapshot[0]], total: 2, complete: false, overrides: overrides)
+
+        expect(
+            cache.displayCount(overrides: overrides) == 2,
+            "a partial prefix must not subtract a tail removal twice"
+        )
+    }
+
     private static func testRollbackRestoresOriginalAlbumPosition() {
         var cache = SavedAlbumCache()
         let snapshot = [album("a"), album("b"), album("c")]
@@ -464,6 +569,59 @@ private enum StateReducerTests {
         expect(
             cache.albums.map(\.id) == ["a", "b", "c"],
             "a failed removal must restore the album at its original index"
+        )
+    }
+
+    private static func testConcurrentRemovalRollbacksRestoreOriginalOrder() {
+        var cache = SavedAlbumCache()
+        let snapshot = [album("a"), album("b"), album("c")]
+        cache.applyServerSnapshot(snapshot, total: 3, complete: true, overrides: [:])
+
+        let bPlacement = cache.placement(for: "b")!
+        cache.removeOptimistic(id: "b")
+        let aPlacement = cache.placement(for: "a")!
+        cache.removeOptimistic(id: "a")
+
+        // Complete in the order that broke absolute display indexes.
+        cache.restoreOptimistic(bPlacement)
+        cache.restoreOptimistic(aPlacement)
+
+        expect(
+            cache.albums.map(\.id) == ["a", "b", "c"],
+            "concurrent failed removals must restore the exact server order"
+        )
+    }
+
+    private static func testNewlySavedAlbumRollbackRestoresAtTop() {
+        var cache = SavedAlbumCache()
+        cache.applyServerSnapshot([album("a"), album("b")], total: 2, complete: true, overrides: [:])
+
+        let saved = album("new")
+        cache.insertOptimistic(saved)
+        let placement = cache.placement(for: saved.id)!
+        cache.removeOptimistic(id: saved.id)
+        cache.restoreOptimistic(placement)
+
+        expect(
+            cache.albums.map(\.id) == ["new", "a", "b"],
+            "a confirmed local save must return to the top when a later removal fails"
+        )
+    }
+
+    private static func testRollbackUsesNewerCanonicalOrder() {
+        var cache = SavedAlbumCache()
+        let b = album("b")
+        cache.applyServerSnapshot([album("a"), b, album("c")], total: 3, complete: true, overrides: [:])
+        let placement = cache.placement(for: b.id)!
+        cache.removeOptimistic(id: b.id)
+
+        let overrides = override(b, saved: false, countedInServerTotal: true)
+        cache.applyServerSnapshot([b, album("c")], total: 2, complete: true, overrides: overrides)
+        cache.restoreOptimistic(placement)
+
+        expect(
+            cache.albums.map(\.id) == ["b", "c"],
+            "a failed removal must follow a newer complete server ordering"
         )
     }
 

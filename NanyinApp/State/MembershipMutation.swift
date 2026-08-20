@@ -39,6 +39,12 @@ struct MembershipMutation: Equatable {
         revision &+= 1
     }
 
+    /// Incorporates a newer server observation without changing the user's
+    /// intent or invalidating the attempt currently in flight.
+    mutating func observeConfirmedState(_ saved: Bool) {
+        confirmedSaved = saved
+    }
+
     func nextAttempt() -> Attempt {
         Attempt(revision: revision, saved: desiredSaved)
     }

@@ -600,7 +600,7 @@ final class AppModel {
     /// track likes. One writer per album id; rapid toggles fold into the
     /// latest override.
     private var albumSaveOverrides: [String: AlbumSaveOverride] = [:]
-    private var activeAlbumSaveMutations: Set<String> = []
+    private var albumSaveMutationTasks: [String: Task<Void, Never>] = [:]
     private var isRefreshingSavedAlbums = false
     private var savedAlbumsRefreshPending = false
     private var lastSavedAlbumsRefresh = Date.distantPast
@@ -668,6 +668,7 @@ final class AppModel {
                     }
                     guard epoch == accountEpoch,
                           authState == .loggedIn,
+                          !isAlbumSaveKnown(id),
                           albumSaveOverrides[id] == nil else { return }
                     albumCache.noteProbe(album, saved: flags.first ?? false)
                     albumProbeFailures.remove(id)
@@ -748,9 +749,9 @@ final class AppModel {
             albumCache.removeOptimistic(id: album.id)
         }
 
-        if activeAlbumSaveMutations.insert(album.id).inserted {
+        if albumSaveMutationTasks[album.id] == nil {
             let epoch = accountEpoch
-            Task { [weak self] in
+            albumSaveMutationTasks[album.id] = Task { [weak self] in
                 await self?.flushAlbumSaveMutations(for: album.id, epoch: epoch)
             }
         }
@@ -760,9 +761,10 @@ final class AppModel {
     /// (mirror of flushLikeMutations).
     private func flushAlbumSaveMutations(for id: String, epoch: Int) async {
         defer {
-            if epoch == accountEpoch { activeAlbumSaveMutations.remove(id) }
+            if epoch == accountEpoch { albumSaveMutationTasks.removeValue(forKey: id) }
         }
         while epoch == accountEpoch, let current = albumSaveOverrides[id] {
+            guard !Task.isCancelled else { return }
             let attempted = current.mutation.nextAttempt()
             let succeeded: Bool
             do {
@@ -778,7 +780,7 @@ final class AppModel {
             if succeeded {
                 latest.confirmedPlacement = attempted.saved
                     ? albumCache.placement(for: id)
-                        ?? SavedAlbumCache.Placement(album: latest.album, index: 0)
+                        ?? SavedAlbumCache.Placement(album: latest.album, index: -1)
                     : nil
             }
             switch latest.mutation.resolve(attempted, succeeded: succeeded) {
@@ -808,7 +810,7 @@ final class AppModel {
         if override.mutation.confirmedSaved {
             albumCache.restoreOptimistic(
                 override.confirmedPlacement
-                    ?? SavedAlbumCache.Placement(album: override.album, index: 0)
+                    ?? SavedAlbumCache.Placement(album: override.album, index: -1)
             )
         } else {
             albumCache.removeOptimistic(id: override.album.id)
@@ -842,7 +844,7 @@ final class AppModel {
     /// the server as the membership source of truth.
     private func discardExpiredSettledAlbumOverrides(now: Date = Date()) {
         albumSaveOverrides = albumSaveOverrides.filter { id, override in
-            guard !activeAlbumSaveMutations.contains(id),
+            guard albumSaveMutationTasks[id] == nil,
                   let expiresAt = override.expiresAt else { return true }
             return expiresAt > now
         }
@@ -874,9 +876,13 @@ final class AppModel {
 
     private func clearSettledAlbumOverrides(_ confirmed: Set<String>) {
         for id in confirmed {
-            if activeAlbumSaveMutations.contains(id) {
+            if albumSaveMutationTasks[id] != nil {
                 guard var override = albumSaveOverrides[id] else { continue }
+                override.mutation.observeConfirmedState(override.saved)
                 override.countedInServerTotal = override.saved
+                override.confirmedPlacement = override.saved
+                    ? albumCache.placement(for: id)
+                    : nil
                 albumSaveOverrides[id] = override
             } else {
                 albumSaveOverrides.removeValue(forKey: id)
@@ -904,13 +910,27 @@ final class AppModel {
               SavedAlbumCache.isCompleteSnapshot(snapshot, total: prefix.total) else {
             return nil
         }
+        // Offset pagination is not atomic. Re-read the head after the tail so
+        // a same-total mutation that shifted page boundaries cannot publish a
+        // mixed snapshot as complete.
+        let verification = try await api.savedAlbumsPage(offset: 0)
+        guard verification.total == prefix.total,
+              verification.albums.map(\.id) == prefix.albums.map(\.id),
+              SavedAlbumCache.prefixMatches(
+                verification.albums,
+                total: verification.total,
+                snapshot: snapshot
+              ) else {
+            return nil
+        }
         return snapshot
     }
 
     /// Reconciles Saved Albums with the server (page open / re-click forced,
     /// app-active throttled). Renders the newest page immediately, then pages
-    /// the tail; a fast path skips re-paging when nothing changed. All loads,
-    /// probes, and mutations are fenced by account epoch.
+    /// the tail. Every accepted refresh completes the full snapshot so remote
+    /// tail-only changes converge. All loads, probes, and mutations are fenced
+    /// by account epoch.
     func refreshSavedAlbums(force: Bool = false) {
         guard authState == .loggedIn else { return }
         markExpiredAlbumOverridesForReconciliation()
@@ -940,18 +960,6 @@ final class AppModel {
                 }
                 guard epoch == accountEpoch, authState == .loggedIn else { return }
                 savedAlbumsError = nil
-
-                let prefixIDs = prefix.albums.map(\.id)
-                let prefixMatches = albumCache.isComplete
-                    && Array(albumCache.albums.prefix(prefixIDs.count).map(\.id)) == prefixIDs
-                // Skip a full re-page when the newest 50 and the total agree.
-                if albumCache.isComplete,
-                   albumSaveOverrides.isEmpty,
-                   !albumCache.needsFullReconciliation,
-                   prefixMatches,
-                   albumCache.serverTotal == prefix.total {
-                    return
-                }
 
                 if prefix.total > prefix.albums.count {
                     // Long library: paint the newest page while the tail pages in.
@@ -1164,6 +1172,10 @@ final class AppModel {
     /// Invalidates every task carrying the current account epoch before any
     /// replacement credentials can be installed.
     private func invalidateAccountSession() {
+        for task in albumSaveMutationTasks.values {
+            task.cancel()
+        }
+        albumSaveMutationTasks.removeAll()
         accountEpoch += 1
         _ = Core.shutdown()
         AudioRenderer.shared.stop()
@@ -1188,7 +1200,6 @@ final class AppModel {
         tracksError["liked"] = nil
         albumCache = SavedAlbumCache()
         albumSaveOverrides.removeAll()
-        activeAlbumSaveMutations.removeAll()
         albumProbeInFlight.removeAll()
         albumProbeFailures.removeAll()
         isRefreshingSavedAlbums = false

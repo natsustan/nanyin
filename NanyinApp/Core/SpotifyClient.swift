@@ -577,6 +577,7 @@ struct SpotifyClient {
         var attempt = 0
 
         while true {
+            try Task.checkCancellation()
             let (_, response) = try await URLSession.shared.data(for: req)
             let httpResponse = response as? HTTPURLResponse
             let status = httpResponse?.statusCode ?? 0

@@ -26,14 +26,20 @@ struct SavedAlbumCache: Equatable {
 
     struct Placement: Equatable {
         let album: SpotifyClient.SavedAlbum
+        /// Stable rank in the last server ordering. Unlike a display index,
+        /// this does not shift when another optimistic removal is applied.
         let index: Int
     }
 
     /// Display list (server order — newest saved first — with optimistic
     /// edits applied).
     private(set) var albums: [SpotifyClient.SavedAlbum] = []
-    /// IDs present in the most recently fetched server data. NOT accumulated
-    /// across fetches: old confirmations must not mask a newer server state.
+    /// Server ordering retained independently from optimistic removals so
+    /// failed concurrent removals can restore their exact relative order.
+    private var canonicalOrder: [String] = []
+    /// IDs confirmed present by server data. Prefix snapshots only add
+    /// confirmations because absence outside the fetched prefix is unknown;
+    /// a complete snapshot replaces the set.
     private(set) var confirmedIDs: Set<String> = []
     /// IDs whose saved state is known from the server (in list, or a contains
     /// probe answered for them).
@@ -67,12 +73,27 @@ struct SavedAlbumCache: Equatable {
     ) -> Set<String> {
         let snapshot = Self.deduplicated(snapshot)
         let snapshotIDs = Set(snapshot.map(\.id))
-        confirmedIDs = snapshotIDs
+        if complete {
+            confirmedIDs = snapshotIDs
+        } else {
+            confirmedIDs.formUnion(snapshotIDs)
+        }
         knownIDs.formUnion(snapshotIDs)
-        serverTotal = total
+        let canAdoptTotal = complete || overrides.allSatisfy { id, override in
+            isConfirmed(override, id: id, snapshotIDs: snapshotIDs, complete: false)
+        }
+        if canAdoptTotal {
+            serverTotal = total
+        }
         if complete {
             isComplete = true
             needsFullReconciliation = false
+            canonicalOrder = snapshot.map(\.id)
+        } else {
+            canonicalOrder = Self.mergeOrder(
+                prefix: snapshot.map(\.id),
+                cached: canonicalOrder
+            )
         }
 
         var display = complete ? snapshot : Self.merge(prefix: snapshot, cached: albums)
@@ -114,6 +135,20 @@ struct SavedAlbumCache: Equatable {
     ) -> [SpotifyClient.SavedAlbum] {
         let prefixIDs = Set(prefix.map(\.id))
         return prefix + cached.filter { !prefixIDs.contains($0.id) }
+    }
+
+    private static func mergeOrder(prefix: [String], cached: [String]) -> [String] {
+        let prefixIDs = Set(prefix)
+        return prefix + cached.filter { !prefixIDs.contains($0) }
+    }
+
+    static func prefixMatches(
+        _ prefix: [SpotifyClient.SavedAlbum],
+        total: Int,
+        snapshot: [SpotifyClient.SavedAlbum]
+    ) -> Bool {
+        total == snapshot.count
+            && snapshot.prefix(prefix.count).map(\.id) == prefix.map(\.id)
     }
 
     static func isCompleteSnapshot(
@@ -180,14 +215,23 @@ struct SavedAlbumCache: Equatable {
     }
 
     func placement(for id: String) -> Placement? {
-        guard let index = albums.firstIndex(where: { $0.id == id }) else { return nil }
-        return Placement(album: albums[index], index: index)
+        guard let album = albums.first(where: { $0.id == id }) else { return nil }
+        // A newly saved optimistic album precedes every known server row
+        // until a snapshot assigns its canonical position.
+        let index = canonicalOrder.firstIndex(of: id) ?? -1
+        return Placement(album: album, index: index)
     }
 
     mutating func restoreOptimistic(_ placement: Placement) {
         knownIDs.insert(placement.album.id)
         albums.removeAll { $0.id == placement.album.id }
-        albums.insert(placement.album, at: min(placement.index, albums.count))
+        let ranks = Dictionary(uniqueKeysWithValues: canonicalOrder.enumerated().map { ($1, $0) })
+        let targetRank = ranks[placement.album.id] ?? placement.index
+        let insertionIndex = albums.firstIndex { album in
+            guard let rank = ranks[album.id] else { return false }
+            return rank > targetRank
+        } ?? albums.count
+        albums.insert(placement.album, at: insertionIndex)
     }
 
     /// Records a contains-probe answer. Callers must not invoke this while an
@@ -195,12 +239,17 @@ struct SavedAlbumCache: Equatable {
     /// arriving after a local intent would otherwise read as confirmation of
     /// a write the server may not have applied yet.
     mutating func noteProbe(_ album: SpotifyClient.SavedAlbum, saved: Bool) {
+        // A complete snapshot is a newer observation for every album id.
+        // Ignore a contains request that started before it completed.
+        guard !isComplete else { return }
         knownIDs.insert(album.id)
         if saved {
             confirmedIDs.insert(album.id)
             if !albums.contains(where: { $0.id == album.id }) {
                 albums.insert(album, at: 0)
             }
+            canonicalOrder.removeAll { $0 == album.id }
+            canonicalOrder.insert(album.id, at: 0)
         } else {
             confirmedIDs.remove(album.id)
         }
