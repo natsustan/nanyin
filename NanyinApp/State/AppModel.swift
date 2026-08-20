@@ -203,6 +203,8 @@ final class AppModel {
     private var lastLikedRefresh = Date.distantPast
     /// Last server-reported library size (not adjusted by local overrides).
     private var likedServerTotal: Int?
+    /// Expired optimistic cache edits require one complete server snapshot.
+    private var likedCacheNeedsFullReconciliation = false
     /// Minimum gap between opportunistic probes (app-active). Page opens force.
     private let likedRefreshMinInterval: TimeInterval = 15
     /// Keep transient contains failures from leaving visible rows unresolved,
@@ -331,6 +333,9 @@ final class AppModel {
         }
         likedServerTotal = total
         likedCount = max(0, count)
+        if serverSnapshotIsComplete {
+            likedCacheNeedsFullReconciliation = false
+        }
         for (id, override) in likeOverrides {
             guard !activeLikeMutations.contains(id) else { continue }
             if override.liked && confirmedServerIDs.contains(id) {
@@ -366,9 +371,13 @@ final class AppModel {
     }
 
     private func pruneExpiredLikeOverrides(now: Date = Date()) {
+        let previousCount = likeOverrides.count
         likeOverrides = likeOverrides.filter { _, override in
             guard let expiresAt = override.expiresAt else { return true }
             return expiresAt > now
+        }
+        if likeOverrides.count < previousCount {
+            likedCacheNeedsFullReconciliation = true
         }
     }
 
@@ -423,6 +432,7 @@ final class AppModel {
                 // Skip a full re-page when the newest 50 and the total agree.
                 if likedSnapshotComplete,
                    likeOverrides.isEmpty,
+                   !likedCacheNeedsFullReconciliation,
                    prefixMatches,
                    previousTotal == prefix.total {
                     if tracksByContext["liked"] == nil {
@@ -456,6 +466,7 @@ final class AppModel {
                         serverSnapshotIsComplete: false
                     )
                     let reconciled = likedSnapshotComplete && likeOverrides.isEmpty
+                        && !likedCacheNeedsFullReconciliation
                         && (merged.count - cached.count) == (prefix.total - previousTotal)
                     if reconciled { return }
                 } else {
@@ -739,6 +750,7 @@ final class AppModel {
         likedRefreshPending = false
         lastLikedRefresh = .distantPast
         likedServerTotal = nil
+        likedCacheNeedsFullReconciliation = false
         likedCount = 0
         tracksByContext["liked"] = nil
         trackLoadingTokens["liked"] = nil
