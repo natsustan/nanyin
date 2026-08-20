@@ -18,9 +18,9 @@ struct SavedAlbumCache: Equatable {
     struct OverrideView: Equatable {
         let saved: Bool
         /// Whether the server total currently used by the cache already
-        /// includes this album. This stays stable across a successful write
-        /// until a later snapshot confirms that write.
-        let countedInServerTotal: Bool
+        /// includes this album. A later snapshot updates this baseline when
+        /// it conclusively observes the album's membership.
+        var countedInServerTotal: Bool
         let album: SpotifyClient.SavedAlbum
     }
 
@@ -123,6 +123,26 @@ struct SavedAlbumCache: Equatable {
         snapshot.count == total && Set(snapshot.map(\.id)).count == snapshot.count
     }
 
+    /// Updates each override's count baseline from membership observed in a
+    /// server snapshot. Presence is conclusive in any prefix; absence is only
+    /// conclusive when the snapshot covers the whole library.
+    static func rebasedOverrides(
+        _ overrides: [String: OverrideView],
+        snapshot: [SpotifyClient.SavedAlbum],
+        complete: Bool
+    ) -> [String: OverrideView] {
+        let snapshotIDs = Set(snapshot.map(\.id))
+        return overrides.mapValues { override in
+            var override = override
+            if snapshotIDs.contains(override.album.id) {
+                override.countedInServerTotal = true
+            } else if complete {
+                override.countedInServerTotal = false
+            }
+            return override
+        }
+    }
+
     private static func deduplicated(
         _ albums: [SpotifyClient.SavedAlbum]
     ) -> [SpotifyClient.SavedAlbum] {
@@ -215,7 +235,10 @@ struct SavedAlbumCache: Equatable {
     /// Sidebar count: server total adjusted by overrides the server data
     /// hasn't confirmed yet. Never negative.
     func displayCount(overrides: [String: OverrideView]) -> Int {
-        var count = serverTotal ?? albums.count
+        // Before the first server total, `albums` already has every optimistic
+        // edit applied, so applying override deltas again would double-count.
+        guard let serverTotal else { return albums.count }
+        var count = serverTotal
         for override in overrides.values {
             if override.saved, !override.countedInServerTotal {
                 count += 1

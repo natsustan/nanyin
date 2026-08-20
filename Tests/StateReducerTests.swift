@@ -15,6 +15,8 @@ private enum StateReducerTests {
         testRemoveOverrideDropsConfirmedRowAndCount()
         testStalePrefixCannotResurrectRemovedAlbum()
         testUnknownRemoveOverrideDoesNotChangeCount()
+        testSaveBeforeFirstSnapshotDoesNotDoubleCount()
+        testCompleteSnapshotRebasesRapidToggleCount()
         testPrefixMergeKeepsCachedTailWithoutDuplicates()
         testPrefixRefreshKeepsOverrideCountBaseline()
         testCompleteSnapshotValidationRejectsPaginationDrift()
@@ -283,6 +285,51 @@ private enum StateReducerTests {
         cache.applyServerSnapshot([album("a")], total: 1, complete: true, overrides: overrides)
 
         expect(cache.displayCount(overrides: overrides) == 1, "unknown removal must not change the count")
+    }
+
+    private static func testSaveBeforeFirstSnapshotDoesNotDoubleCount() {
+        var cache = SavedAlbumCache()
+        let saved = album("saved")
+        cache.insertOptimistic(saved)
+        let overrides = override(saved, saved: true, countedInServerTotal: false)
+
+        expect(
+            cache.displayCount(overrides: overrides) == 1,
+            "an optimistic save before the first server total must count exactly once"
+        )
+    }
+
+    private static func testCompleteSnapshotRebasesRapidToggleCount() {
+        var cache = SavedAlbumCache()
+        let saved = album("saved")
+        cache.applyServerSnapshot([saved], total: 1, complete: true, overrides: [:])
+
+        // Remove succeeded, then the user saved again while a snapshot that
+        // observes the intermediate removal arrived. The latest save stays
+        // optimistic, but its count baseline must follow that snapshot.
+        var overrides = override(saved, saved: true, countedInServerTotal: true)
+        overrides = SavedAlbumCache.rebasedOverrides(overrides, snapshot: [], complete: true)
+        cache.applyServerSnapshot([], total: 0, complete: true, overrides: overrides)
+
+        expect(cache.albums.map(\.id) == [saved.id], "latest save intent must remain visible")
+        expect(
+            cache.displayCount(overrides: overrides) == 1,
+            "a complete intermediate snapshot must rebase the latest intent count"
+        )
+
+        // The inverse Save -> Remove sequence must rebase in the other
+        // direction when the intermediate save appears in the snapshot.
+        cache = SavedAlbumCache()
+        cache.applyServerSnapshot([], total: 0, complete: true, overrides: [:])
+        overrides = override(saved, saved: false, countedInServerTotal: false)
+        overrides = SavedAlbumCache.rebasedOverrides(overrides, snapshot: [saved], complete: true)
+        cache.applyServerSnapshot([saved], total: 1, complete: true, overrides: overrides)
+
+        expect(cache.albums.isEmpty, "latest remove intent must remain hidden")
+        expect(
+            cache.displayCount(overrides: overrides) == 0,
+            "the inverse intermediate snapshot must rebase the latest remove count"
+        )
     }
 
     private static func testPrefixMergeKeepsCachedTailWithoutDuplicates() {

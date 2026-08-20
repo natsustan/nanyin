@@ -607,6 +607,8 @@ final class AppModel {
     private let savedAlbumsRefreshMinInterval: TimeInterval = 15
     private let albumSaveOverrideLagWindow: TimeInterval = 30
     private var albumProbeInFlight: Set<String> = []
+    private var albumProbeFailures: Set<String> = []
+    private let albumProbeRetryLimit = 2
 
     /// Sidebar count and page header: server total ± unconfirmed overrides.
     var savedAlbumCount: Int {
@@ -638,6 +640,10 @@ final class AppModel {
         albumCache.savedState(id, overrides: albumOverrideViews()) ?? false
     }
 
+    func didAlbumSaveProbeFail(_ id: String) -> Bool {
+        albumProbeFailures.contains(id)
+    }
+
     /// Album detail headers resolve their save state on first appearance.
     /// One contains probe per id; results never overwrite an active override.
     func requestSavedAlbumState(_ album: SpotifyClient.SavedAlbum) {
@@ -645,22 +651,52 @@ final class AppModel {
               !isAlbumSaveKnown(album.id),
               !albumProbeInFlight.contains(album.id) else { return }
         albumProbeInFlight.insert(album.id)
+        albumProbeFailures.remove(album.id)
         let epoch = accountEpoch
         let id = album.id
         Task {
             defer {
                 if epoch == accountEpoch { albumProbeInFlight.remove(id) }
             }
-            do {
-                let flags = try await withAPIAuthRetry(for: epoch) { api in
-                    try await api.libraryContainsAlbums(ids: [id])
+            var retryAttempt = 0
+            while epoch == accountEpoch,
+                  authState == .loggedIn,
+                  !isAlbumSaveKnown(id) {
+                do {
+                    let flags = try await withAPIAuthRetry(for: epoch) { api in
+                        try await api.libraryContainsAlbums(ids: [id])
+                    }
+                    guard epoch == accountEpoch,
+                          authState == .loggedIn,
+                          albumSaveOverrides[id] == nil else { return }
+                    albumCache.noteProbe(album, saved: flags.first ?? false)
+                    albumProbeFailures.remove(id)
+                    return
+                } catch SpotifyClient.APIError.needsAuth {
+                    guard epoch == accountEpoch,
+                          !isAlbumSaveKnown(id) else { return }
+                    albumProbeFailures.insert(id)
+                    dlog("library contains remained unauthorized for album \(id) after token refresh")
+                    return
+                } catch {
+                    guard epoch == accountEpoch,
+                          authState == .loggedIn,
+                          !isAlbumSaveKnown(id),
+                          !Task.isCancelled else { return }
+                    guard retryAttempt < albumProbeRetryLimit else {
+                        albumProbeFailures.insert(id)
+                        dlog("library contains failed for album \(id) after bounded retries: \(error)")
+                        return
+                    }
+                    retryAttempt += 1
+                    let delay = min(pow(2.0, Double(retryAttempt)), 4.0)
+                    dlog("library contains failed for album \(id): \(error); retrying in \(delay)s")
+                    do {
+                        try await Task.sleep(for: .seconds(delay))
+                    } catch {
+                        return
+                    }
                 }
-                guard epoch == accountEpoch,
-                      authState == .loggedIn,
-                      albumSaveOverrides[id] == nil else { return }
-                albumCache.noteProbe(album, saved: flags.first ?? false)
-            } catch {
-                dlog("library contains failed for album \(id): \(error)")
             }
         }
     }
@@ -793,15 +829,47 @@ final class AppModel {
         albumSaveOverrides.removeValue(forKey: id)
     }
 
-    private func pruneExpiredAlbumOverrides(now: Date = Date()) {
-        let previousCount = albumSaveOverrides.count
-        albumSaveOverrides = albumSaveOverrides.filter { _, override in
-            guard let expiresAt = override.expiresAt else { return true }
-            return expiresAt > now
-        }
-        if albumSaveOverrides.count < previousCount {
+    private func markExpiredAlbumOverridesForReconciliation(now: Date = Date()) {
+        if albumSaveOverrides.values.contains(where: { override in
+            override.expiresAt.map { $0 <= now } ?? false
+        }) {
             albumCache.markNeedsReconciliation()
         }
+    }
+
+    /// Successful writes remain authoritative through refresh failures. Only
+    /// a complete snapshot may retire an expired settled override and restore
+    /// the server as the membership source of truth.
+    private func discardExpiredSettledAlbumOverrides(now: Date = Date()) {
+        albumSaveOverrides = albumSaveOverrides.filter { id, override in
+            guard !activeAlbumSaveMutations.contains(id),
+                  let expiresAt = override.expiresAt else { return true }
+            return expiresAt > now
+        }
+    }
+
+    @discardableResult
+    private func applySavedAlbumsSnapshot(
+        _ snapshot: [SpotifyClient.SavedAlbum],
+        total: Int,
+        complete: Bool
+    ) -> Set<String> {
+        let overrides = SavedAlbumCache.rebasedOverrides(
+            albumOverrideViews(),
+            snapshot: snapshot,
+            complete: complete
+        )
+        for (id, view) in overrides {
+            guard var override = albumSaveOverrides[id] else { continue }
+            override.countedInServerTotal = view.countedInServerTotal
+            albumSaveOverrides[id] = override
+        }
+        return albumCache.applyServerSnapshot(
+            snapshot,
+            total: total,
+            complete: complete,
+            overrides: overrides
+        )
     }
 
     private func clearSettledAlbumOverrides(_ confirmed: Set<String>) {
@@ -845,7 +913,7 @@ final class AppModel {
     /// probes, and mutations are fenced by account epoch.
     func refreshSavedAlbums(force: Bool = false) {
         guard authState == .loggedIn else { return }
-        pruneExpiredAlbumOverrides()
+        markExpiredAlbumOverridesForReconciliation()
         guard !isRefreshingSavedAlbums else {
             savedAlbumsRefreshPending = true
             return
@@ -887,11 +955,10 @@ final class AppModel {
 
                 if prefix.total > prefix.albums.count {
                     // Long library: paint the newest page while the tail pages in.
-                    let prefixConfirmed = albumCache.applyServerSnapshot(
+                    let prefixConfirmed = applySavedAlbumsSnapshot(
                         prefix.albums,
                         total: prefix.total,
-                        complete: false,
-                        overrides: albumOverrideViews()
+                        complete: false
                     )
                     clearSettledAlbumOverrides(prefixConfirmed)
                 }
@@ -917,11 +984,11 @@ final class AppModel {
                     return (albums, retryPrefix.total)
                 }
                 guard epoch == accountEpoch else { return }
-                let confirmed = albumCache.applyServerSnapshot(
+                discardExpiredSettledAlbumOverrides()
+                let confirmed = applySavedAlbumsSnapshot(
                     snapshot.0,
                     total: snapshot.1,
-                    complete: true,
-                    overrides: albumOverrideViews()
+                    complete: true
                 )
                 clearSettledAlbumOverrides(confirmed)
             } catch {
@@ -1123,6 +1190,7 @@ final class AppModel {
         albumSaveOverrides.removeAll()
         activeAlbumSaveMutations.removeAll()
         albumProbeInFlight.removeAll()
+        albumProbeFailures.removeAll()
         isRefreshingSavedAlbums = false
         savedAlbumsRefreshPending = false
         lastSavedAlbumsRefresh = .distantPast

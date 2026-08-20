@@ -223,15 +223,16 @@ private struct SaveAlbumButton: View {
 
     private var isKnown: Bool { app.isAlbumSaveKnown(album.id) }
     private var isSaved: Bool { app.isAlbumSaved(album.id) }
+    private var probeFailed: Bool { app.didAlbumSaveProbeFail(album.id) }
 
     var body: some View {
         Button {
             app.toggleSavedAlbum(album)
         } label: {
             HStack(spacing: 6) {
-                Image(systemName: isSaved ? "checkmark" : "plus")
+                Image(systemName: probeFailed ? "arrow.clockwise" : (isSaved ? "checkmark" : "plus"))
                     .font(.system(size: 11, weight: .bold))
-                Text(isSaved ? "SAVED" : "SAVE ALBUM")
+                Text(probeFailed ? "RETRY" : (isSaved ? "SAVED" : "SAVE ALBUM"))
                     .font(.system(size: 12, weight: .bold))
                     .tracking(0.8)
             }
@@ -247,12 +248,16 @@ private struct SaveAlbumButton: View {
             )
         }
         .buttonStyle(.plain)
-        .disabled(!isKnown)
-        .opacity(isKnown ? 1 : 0.5)
+        .disabled(!isKnown && !probeFailed)
+        .opacity(isKnown || probeFailed ? 1 : 0.5)
         .onHover { hovering in
             self.hovering = hovering
             if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
         }
-        .help(isKnown ? (isSaved ? "Remove from Saved Albums" : "Save to Saved Albums") : "Checking Saved Albums…")
+        .help(
+            probeFailed
+                ? "Retry checking Saved Albums"
+                : (isKnown ? (isSaved ? "Remove from Saved Albums" : "Save to Saved Albums") : "Checking Saved Albums…")
+        )
     }
 }
