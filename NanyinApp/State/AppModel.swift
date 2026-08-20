@@ -7,11 +7,6 @@ import Foundation
 import Observation
 import AppKit
 
-/// Unbuffered debug logging to stderr (survives process kill, unlike print).
-func dlog(_ message: @autoclosure () -> String) {
-    FileHandle.standardError.write(Data("[nanyin] \(message())\n".utf8))
-}
-
 /// App-wide state: auth, playback, and glue between Web API and the Rust core.
 @Observable
 @MainActor
@@ -116,6 +111,7 @@ final class AppModel {
 
     private(set) var isPlaying = false
     private(set) var isBuffering = false
+    private var playbackWatchdog: Task<Void, Never>?
     // NOTE: playback position is intentionally NOT stored here. Polling it at
     // 2Hz from the app-wide observable would invalidate every view reading
     // the model (including every track row) — PlayerBar ticks it locally.
@@ -167,13 +163,14 @@ final class AppModel {
         case search
         case queue
         case liked
+        case savedAlbums
         case playlist(id: String, name: String)
         case artist(id: String, name: String, artworkURL: URL?)
         case album(id: String, name: String, subtitle: String, artworkURL: URL?)
 
         var contextKey: String? {
             switch self {
-            case .home, .queue: nil
+            case .home, .queue, .savedAlbums: nil
             case .search: "search"
             case .liked: "liked"
             case let .playlist(id, _): id
@@ -209,11 +206,11 @@ final class AppModel {
     /// Desired like state that must win over a lagged server snapshot.
     /// Successful writes expire after a bounded reconciliation window.
     private struct LikeOverride {
-        var mutation: LikeMutation
+        var mutation: MembershipMutation
         var track: SpotifyClient.Track
         var expiresAt: Date?
 
-        var liked: Bool { mutation.desiredLiked }
+        var liked: Bool { mutation.desiredSaved }
     }
     private var likeOverrides: [String: LikeOverride] = [:]
     /// One writer per track; rapid toggles are folded into the latest override.
@@ -385,9 +382,9 @@ final class AppModel {
             likeOverrides[track.id] = existing
         } else {
             likeOverrides[track.id] = LikeOverride(
-                mutation: LikeMutation(
-                    confirmedLiked: likedIDs.contains(track.id),
-                    desiredLiked: liked
+                mutation: MembershipMutation(
+                    confirmedSaved: likedIDs.contains(track.id),
+                    desiredSaved: liked
                 ),
                 track: track,
                 expiresAt: nil
@@ -530,6 +527,7 @@ final class AppModel {
 
     func handleAppDidBecomeActive() {
         refreshLiked(force: false)
+        refreshSavedAlbums(force: false)
     }
 
     /// Toggles like state for one track. Optimistic UI; server PUT/DELETE
@@ -564,7 +562,7 @@ final class AppModel {
             let attempted = current.mutation.nextAttempt()
             let succeeded: Bool
             do {
-                try await persistLike(id: id, liked: attempted.liked, epoch: epoch)
+                try await persistLike(id: id, liked: attempted.saved, epoch: epoch)
                 succeeded = true
             } catch {
                 guard epoch == accountEpoch else { return }
@@ -591,6 +589,440 @@ final class AppModel {
                 forgetLikeOverride(id)
                 applyLocalLikeState(track, liked: confirmedLiked)
                 return
+            }
+        }
+    }
+
+    // MARK: - Saved Albums (M4.3)
+
+    /// Pure cache: display list, server confirmations, and count derivation.
+    /// Overrides are passed in as views so the cache stays snapshot-driven
+    /// and deterministic (see SavedAlbumCache).
+    private var albumCache = SavedAlbumCache()
+    private(set) var savedAlbumsError: String?
+
+    private struct AlbumSaveOverride {
+        var mutation: MembershipMutation
+        var album: SpotifyClient.SavedAlbum
+        var confirmedPlacement: SavedAlbumCache.Placement?
+        var countedInServerTotal: Bool
+        var expiresAt: Date?
+        var saved: Bool { mutation.desiredSaved }
+    }
+
+    private struct SavedAlbumsPaginationError: LocalizedError {
+        var errorDescription: String? {
+            "Saved Albums changed while loading. Please retry."
+        }
+    }
+
+    /// Desired save state that must win over lagged server data, exactly like
+    /// track likes. One writer per album id; rapid toggles fold into the
+    /// latest override.
+    private var albumSaveOverrides: [String: AlbumSaveOverride] = [:]
+    private var albumSaveMutationTasks: [String: Task<Void, Never>] = [:]
+    private var isRefreshingSavedAlbums = false
+    private var savedAlbumsRefreshPending = false
+    private var lastSavedAlbumsRefresh = Date.distantPast
+    private let savedAlbumsRefreshMinInterval: TimeInterval = 15
+    private let albumSaveOverrideLagWindow: TimeInterval = 30
+    private var albumProbeInFlight: Set<String> = []
+    private var albumProbeFailures: Set<String> = []
+    private let albumProbeRetryLimit = 2
+
+    /// Sidebar count and page header: server total ± unconfirmed overrides.
+    var savedAlbumCount: Int {
+        albumCache.displayCount(overrides: albumOverrideViews())
+    }
+
+    /// The Saved Albums display list (Recently Added order — newest first).
+    var savedAlbums: [SpotifyClient.SavedAlbum] {
+        albumCache.albums
+    }
+
+    var hasSavedAlbumsData: Bool { albumCache.hasLoadedAnyData }
+
+    private func albumOverrideViews() -> [String: SavedAlbumCache.OverrideView] {
+        albumSaveOverrides.mapValues {
+            SavedAlbumCache.OverrideView(
+                saved: $0.saved,
+                countedInServerTotal: $0.countedInServerTotal,
+                album: $0.album
+            )
+        }
+    }
+
+    func isAlbumSaveKnown(_ id: String) -> Bool {
+        albumCache.isKnown(id, overrides: albumOverrideViews())
+    }
+
+    func isAlbumSaved(_ id: String) -> Bool {
+        albumCache.savedState(id, overrides: albumOverrideViews()) ?? false
+    }
+
+    func didAlbumSaveProbeFail(_ id: String) -> Bool {
+        albumProbeFailures.contains(id)
+    }
+
+    /// Album detail headers resolve their save state on first appearance.
+    /// One contains probe per id; results never overwrite an active override.
+    func requestSavedAlbumState(_ album: SpotifyClient.SavedAlbum) {
+        guard authState == .loggedIn,
+              !isAlbumSaveKnown(album.id),
+              !albumProbeInFlight.contains(album.id) else { return }
+        albumProbeInFlight.insert(album.id)
+        albumProbeFailures.remove(album.id)
+        let epoch = accountEpoch
+        let id = album.id
+        Task {
+            defer {
+                if epoch == accountEpoch { albumProbeInFlight.remove(id) }
+            }
+            var retryAttempt = 0
+            while epoch == accountEpoch,
+                  authState == .loggedIn,
+                  !isAlbumSaveKnown(id) {
+                do {
+                    let flags = try await withAPIAuthRetry(for: epoch) { api in
+                        try await api.libraryContainsAlbums(ids: [id])
+                    }
+                    guard epoch == accountEpoch,
+                          authState == .loggedIn,
+                          !isAlbumSaveKnown(id),
+                          albumSaveOverrides[id] == nil else { return }
+                    albumCache.noteProbe(album, saved: flags.first ?? false)
+                    albumProbeFailures.remove(id)
+                    return
+                } catch SpotifyClient.APIError.needsAuth {
+                    guard epoch == accountEpoch,
+                          !isAlbumSaveKnown(id) else { return }
+                    albumProbeFailures.insert(id)
+                    dlog("library contains remained unauthorized for album \(id) after token refresh")
+                    return
+                } catch {
+                    guard epoch == accountEpoch,
+                          authState == .loggedIn,
+                          !isAlbumSaveKnown(id),
+                          !Task.isCancelled else { return }
+                    guard retryAttempt < albumProbeRetryLimit else {
+                        albumProbeFailures.insert(id)
+                        dlog("library contains failed for album \(id) after bounded retries: \(error)")
+                        return
+                    }
+                    retryAttempt += 1
+                    let delay = min(pow(2.0, Double(retryAttempt)), 4.0)
+                    dlog("library contains failed for album \(id): \(error); retrying in \(delay)s")
+                    do {
+                        try await Task.sleep(for: .seconds(delay))
+                    } catch {
+                        return
+                    }
+                }
+            }
+        }
+    }
+
+    /// Header toggle — only callable once the state is known (button is
+    /// disabled while a probe is in flight, same discipline as likes).
+    func toggleSavedAlbum(_ album: SpotifyClient.SavedAlbum) {
+        guard authState == .loggedIn else { return }
+        guard isAlbumSaveKnown(album.id) else {
+            requestSavedAlbumState(album)
+            return
+        }
+        setSavedAlbum(album, saved: !isAlbumSaved(album.id))
+    }
+
+    /// Explicit-intent entries for context menus on cards/rows where the
+    /// state may not be known yet — both writes are idempotent server-side.
+    func saveAlbum(_ album: SpotifyClient.SavedAlbum) {
+        setSavedAlbum(album, saved: true)
+    }
+
+    func removeSavedAlbum(_ album: SpotifyClient.SavedAlbum) {
+        setSavedAlbum(album, saved: false)
+    }
+
+    private func setSavedAlbum(_ album: SpotifyClient.SavedAlbum, saved: Bool) {
+        guard authState == .loggedIn else { return }
+        if var existing = albumSaveOverrides[album.id] {
+            existing.mutation.setDesired(saved)
+            existing.album = album
+            existing.expiresAt = nil
+            albumSaveOverrides[album.id] = existing
+        } else {
+            let confirmedSaved = albumCache.savedState(album.id) ?? false
+            albumSaveOverrides[album.id] = AlbumSaveOverride(
+                mutation: MembershipMutation(
+                    confirmedSaved: confirmedSaved,
+                    desiredSaved: saved
+                ),
+                album: album,
+                confirmedPlacement: confirmedSaved ? albumCache.placement(for: album.id) : nil,
+                countedInServerTotal: confirmedSaved,
+                expiresAt: nil
+            )
+        }
+        if saved {
+            albumCache.insertOptimistic(album)
+        } else {
+            albumCache.removeOptimistic(id: album.id)
+        }
+
+        if albumSaveMutationTasks[album.id] == nil {
+            let epoch = accountEpoch
+            albumSaveMutationTasks[album.id] = Task { [weak self] in
+                await self?.flushAlbumSaveMutations(for: album.id, epoch: epoch)
+            }
+        }
+    }
+
+    /// Persists save/remove for one album in order, latest intent wins
+    /// (mirror of flushLikeMutations).
+    private func flushAlbumSaveMutations(for id: String, epoch: Int) async {
+        defer {
+            if epoch == accountEpoch { albumSaveMutationTasks.removeValue(forKey: id) }
+        }
+        while epoch == accountEpoch, let current = albumSaveOverrides[id] {
+            guard !Task.isCancelled else { return }
+            let attempted = current.mutation.nextAttempt()
+            let succeeded: Bool
+            do {
+                try await persistAlbumSave(id: id, saved: attempted.saved, epoch: epoch)
+                succeeded = true
+            } catch {
+                guard epoch == accountEpoch else { return }
+                succeeded = false
+            }
+
+            guard epoch == accountEpoch else { return }
+            guard var latest = albumSaveOverrides[id] else { return }
+            if succeeded {
+                latest.confirmedPlacement = attempted.saved
+                    ? albumCache.placement(for: id)
+                        ?? SavedAlbumCache.Placement(album: latest.album, index: -1)
+                    : nil
+            }
+            switch latest.mutation.resolve(attempted, succeeded: succeeded) {
+            case .persistLatest:
+                albumSaveOverrides[id] = latest
+                continue
+            case let .settled(maskServerLag):
+                if maskServerLag {
+                    latest.expiresAt = Date().addingTimeInterval(albumSaveOverrideLagWindow)
+                    albumSaveOverrides[id] = latest
+                } else {
+                    restoreConfirmedAlbumState(latest)
+                    forgetAlbumSaveOverride(id)
+                }
+                return
+            case let .rollback(confirmedSaved):
+                dlog("album save toggle FAILED for \(id), reverting to confirmed state")
+                assert(confirmedSaved == latest.mutation.confirmedSaved)
+                restoreConfirmedAlbumState(latest)
+                forgetAlbumSaveOverride(id)
+                return
+            }
+        }
+    }
+
+    private func restoreConfirmedAlbumState(_ override: AlbumSaveOverride) {
+        if override.mutation.confirmedSaved {
+            albumCache.restoreOptimistic(
+                override.confirmedPlacement
+                    ?? SavedAlbumCache.Placement(album: override.album, index: -1)
+            )
+        } else {
+            albumCache.removeOptimistic(id: override.album.id)
+        }
+    }
+
+    private func persistAlbumSave(id: String, saved: Bool, epoch: Int) async throws {
+        try await withAPIAuthRetry(for: epoch) { api in
+            if saved {
+                try await api.saveAlbumsToLibrary(ids: [id])
+            } else {
+                try await api.removeAlbumsFromLibrary(ids: [id])
+            }
+        }
+    }
+
+    private func forgetAlbumSaveOverride(_ id: String) {
+        albumSaveOverrides.removeValue(forKey: id)
+    }
+
+    private func markExpiredAlbumOverridesForReconciliation(now: Date = Date()) {
+        if albumSaveOverrides.values.contains(where: { override in
+            override.expiresAt.map { $0 <= now } ?? false
+        }) {
+            albumCache.markNeedsReconciliation()
+        }
+    }
+
+    /// Successful writes remain authoritative through refresh failures. Only
+    /// a complete snapshot may retire an expired settled override and restore
+    /// the server as the membership source of truth.
+    private func discardExpiredSettledAlbumOverrides(now: Date = Date()) {
+        albumSaveOverrides = albumSaveOverrides.filter { id, override in
+            guard albumSaveMutationTasks[id] == nil,
+                  let expiresAt = override.expiresAt else { return true }
+            return expiresAt > now
+        }
+    }
+
+    @discardableResult
+    private func applySavedAlbumsSnapshot(
+        _ snapshot: [SpotifyClient.SavedAlbum],
+        total: Int,
+        complete: Bool
+    ) -> Set<String> {
+        let overrides = SavedAlbumCache.rebasedOverrides(
+            albumOverrideViews(),
+            snapshot: snapshot,
+            complete: complete
+        )
+        for (id, view) in overrides {
+            guard var override = albumSaveOverrides[id] else { continue }
+            override.countedInServerTotal = view.countedInServerTotal
+            albumSaveOverrides[id] = override
+        }
+        return albumCache.applyServerSnapshot(
+            snapshot,
+            total: total,
+            complete: complete,
+            overrides: overrides
+        )
+    }
+
+    private func clearSettledAlbumOverrides(_ confirmed: Set<String>) {
+        for id in confirmed {
+            if albumSaveMutationTasks[id] != nil {
+                guard var override = albumSaveOverrides[id] else { continue }
+                override.mutation.observeConfirmedState(override.saved)
+                override.countedInServerTotal = override.saved
+                override.confirmedPlacement = override.saved
+                    ? albumCache.placement(for: id)
+                    : nil
+                albumSaveOverrides[id] = override
+            } else {
+                albumSaveOverrides.removeValue(forKey: id)
+            }
+        }
+    }
+
+    private func completeSavedAlbumsSnapshot(
+        using api: SpotifyClient,
+        prefix: (albums: [SpotifyClient.SavedAlbum], total: Int)
+    ) async throws -> [SpotifyClient.SavedAlbum]? {
+        guard prefix.total >= prefix.albums.count else { return nil }
+        if prefix.total == prefix.albums.count {
+            return SavedAlbumCache.isCompleteSnapshot(prefix.albums, total: prefix.total)
+                ? prefix.albums
+                : nil
+        }
+
+        let tail = try await api.savedAlbums(
+            offset: prefix.albums.count,
+            expectedTotal: prefix.total
+        )
+        let snapshot = prefix.albums + tail.albums
+        guard tail.totalsMatch,
+              SavedAlbumCache.isCompleteSnapshot(snapshot, total: prefix.total) else {
+            return nil
+        }
+        // Offset pagination is not atomic. Re-read the head after the tail so
+        // a same-total mutation that shifted page boundaries cannot publish a
+        // mixed snapshot as complete.
+        let verification = try await api.savedAlbumsPage(offset: 0)
+        guard verification.total == prefix.total,
+              verification.albums.map(\.id) == prefix.albums.map(\.id),
+              SavedAlbumCache.prefixMatches(
+                verification.albums,
+                total: verification.total,
+                snapshot: snapshot
+              ) else {
+            return nil
+        }
+        return snapshot
+    }
+
+    /// Reconciles Saved Albums with the server (page open / re-click forced,
+    /// app-active throttled). Renders the newest page immediately, then pages
+    /// the tail. Every accepted refresh completes the full snapshot so remote
+    /// tail-only changes converge. All loads, probes, and mutations are fenced
+    /// by account epoch.
+    func refreshSavedAlbums(force: Bool = false) {
+        guard authState == .loggedIn else { return }
+        markExpiredAlbumOverridesForReconciliation()
+        guard !isRefreshingSavedAlbums else {
+            savedAlbumsRefreshPending = true
+            return
+        }
+        if !force, Date().timeIntervalSince(lastSavedAlbumsRefresh) < savedAlbumsRefreshMinInterval {
+            return
+        }
+        isRefreshingSavedAlbums = true
+        lastSavedAlbumsRefresh = Date()
+        let epoch = accountEpoch
+        Task {
+            defer {
+                if epoch == accountEpoch {
+                    isRefreshingSavedAlbums = false
+                    if savedAlbumsRefreshPending {
+                        savedAlbumsRefreshPending = false
+                        refreshSavedAlbums(force: true)
+                    }
+                }
+            }
+            do {
+                let prefix = try await withAPIAuthRetry(for: epoch) { api in
+                    try await api.savedAlbumsPage(offset: 0)
+                }
+                guard epoch == accountEpoch, authState == .loggedIn else { return }
+                savedAlbumsError = nil
+
+                if prefix.total > prefix.albums.count {
+                    // Long library: paint the newest page while the tail pages in.
+                    let prefixConfirmed = applySavedAlbumsSnapshot(
+                        prefix.albums,
+                        total: prefix.total,
+                        complete: false
+                    )
+                    clearSettledAlbumOverrides(prefixConfirmed)
+                }
+
+                let snapshot = try await withAPIAuthRetry(for: epoch) { api in
+                    if let albums = try await self.completeSavedAlbumsSnapshot(
+                        using: api,
+                        prefix: prefix
+                    ) {
+                        return (albums, prefix.total)
+                    }
+
+                    // Offset pagination drifted. Retry once from offset zero;
+                    // a second inconsistent pass is surfaced instead of
+                    // publishing duplicate or missing rows as complete.
+                    let retryPrefix = try await api.savedAlbumsPage(offset: 0)
+                    guard let albums = try await self.completeSavedAlbumsSnapshot(
+                        using: api,
+                        prefix: retryPrefix
+                    ) else {
+                        throw SavedAlbumsPaginationError()
+                    }
+                    return (albums, retryPrefix.total)
+                }
+                guard epoch == accountEpoch else { return }
+                discardExpiredSettledAlbumOverrides()
+                let confirmed = applySavedAlbumsSnapshot(
+                    snapshot.0,
+                    total: snapshot.1,
+                    complete: true
+                )
+                clearSettledAlbumOverrides(confirmed)
+            } catch {
+                guard epoch == accountEpoch else { return }
+                savedAlbumsError = error.localizedDescription
+                dlog("saved albums refresh failed: \(error)")
             }
         }
     }
@@ -758,6 +1190,7 @@ final class AppModel {
 
     /// Clean shutdown of the Rust core (Connect goodbye) — app quit path.
     func shutdown() {
+        cancelPlaybackWatchdog()
         _ = Core.shutdown()
         AudioRenderer.shared.stop()
         NowPlayingManager.shared.clear()
@@ -766,6 +1199,11 @@ final class AppModel {
     /// Invalidates every task carrying the current account epoch before any
     /// replacement credentials can be installed.
     private func invalidateAccountSession() {
+        for task in albumSaveMutationTasks.values {
+            task.cancel()
+        }
+        albumSaveMutationTasks.removeAll()
+        cancelPlaybackWatchdog()
         accountEpoch += 1
         playbackGeneration &+= 1
         activePlaybackGeneration = nil
@@ -808,6 +1246,14 @@ final class AppModel {
         searchQuery = ""
         searchArtists.removeAll()
         isSearching = false
+        albumCache = SavedAlbumCache()
+        albumSaveOverrides.removeAll()
+        albumProbeInFlight.removeAll()
+        albumProbeFailures.removeAll()
+        isRefreshingSavedAlbums = false
+        savedAlbumsRefreshPending = false
+        lastSavedAlbumsRefresh = .distantPast
+        savedAlbumsError = nil
         playbackAccessToken = ""
         webAccessToken = ""
         webTokenExpiry = .distantPast
@@ -886,6 +1332,7 @@ final class AppModel {
             }
             guard epoch == accountEpoch, authState == .loggedIn else { return }
             refreshLiked(force: true)
+            refreshSavedAlbums(force: true)
         }
     }
 
@@ -1130,6 +1577,7 @@ final class AppModel {
         guard newPage != page else {
             // Re-clicking the current live page is a manual refresh.
             if case .liked = newPage { refreshLiked(force: true) }
+            if case .savedAlbums = newPage { refreshSavedAlbums(force: true) }
             if case .queue = newPage { refreshQueue() }
             return
         }
@@ -1162,6 +1610,11 @@ final class AppModel {
         if case .liked = newPage {
             // refreshLiked owns the fetch (and the first-visit loader).
             refreshLiked(force: true)
+            return
+        }
+        if case .savedAlbums = newPage {
+            // refreshSavedAlbums owns the fetch (and the first-visit loader).
+            refreshSavedAlbums(force: true)
             return
         }
         if case let .artist(id, _, artworkURL) = newPage, artworkURL == nil {
@@ -1209,7 +1662,7 @@ final class AppModel {
                 case .search:
                     // Results are fetched by search(), not by page-open.
                     return
-                case .queue, .home:
+                case .queue, .home, .savedAlbums:
                     // Live views — nothing to prefetch.
                     return
                 }
@@ -1317,6 +1770,7 @@ final class AppModel {
     /// if the context path doesn't start audio in time.
     func play(track: SpotifyClient.Track, contextKey: String) {
         guard isPlaybackReady else { return }
+        cancelPlaybackWatchdog()
         if pendingQueueHistory == nil, let nowPlaying, nowPlaying.uri != track.uri {
             pendingQueueHistory = (nowPlaying, durationMs)
         }
@@ -1336,7 +1790,7 @@ final class AppModel {
             contextURI = "spotify:playlist:\(id)"
         case let .album(id, _, _, _):
             contextURI = "spotify:album:\(id)"
-        case .search, .artist, .queue, .home:
+        case .search, .artist, .queue, .home, .savedAlbums:
             // Ad-hoc context: results are small — play the window directly.
             contextURI = nil
         }
@@ -1368,12 +1822,52 @@ final class AppModel {
     /// If a context load doesn't produce audio within 8s, retry windowed.
     private func scheduleContextFallback(track: SpotifyClient.Track, contextKey: String, index: Int) {
         let uri = track.uri
-        Task {
+        playbackWatchdog = Task {
             try? await Task.sleep(for: .seconds(8))
             guard !Task.isCancelled, isBuffering, nowPlaying?.uri == uri else { return }
             dlog("context load stalled — falling back to windowed tracks")
+            playbackWatchdog = nil
             playWindowed(track: track, contextKey: contextKey, index: index)
         }
+    }
+
+    /// Whole-album playback via the server-resolved context — never uploads
+    /// a track-URI list (M4.3 roadmap rule; large context uploads get
+    /// 429-rejected silently).
+    func playAlbum(id: String) {
+        guard isPlaybackReady else { return }
+        cancelPlaybackWatchdog()
+        let uri = "spotify:album:\(id)"
+        isBuffering = true
+        let rc = Core.playContext(uri, startIndex: 0)
+        dlog("playAlbum(\(uri)) rc=\(rc)")
+        if rc != 0 {
+            isBuffering = false
+            return
+        }
+        playbackWatchdog = Task {
+            try? await Task.sleep(for: .seconds(8))
+            guard !Task.isCancelled, isBuffering else { return }
+            dlog("album context load stalled — clearing buffering state")
+            isBuffering = false
+            playbackWatchdog = nil
+        }
+    }
+
+    private func cancelPlaybackWatchdog() {
+        playbackWatchdog?.cancel()
+        playbackWatchdog = nil
+    }
+
+    /// Retry button on failed track loads: drop the caches for the current
+    /// page and reload it through the normal navigate() path.
+    func retryCurrentPageLoad() {
+        guard let key = page.contextKey else { return }
+        loadEpoch += 1
+        tracksByContext[key] = nil
+        tracksError[key] = nil
+        albumsByArtist[key] = nil
+        navigate(to: page)
     }
 
     // MARK: - Core callbacks
@@ -1403,14 +1897,18 @@ final class AppModel {
     private func handle(_ event: Core.Event, generation: UInt64) {
         switch event {
         case .playing:
+            cancelPlaybackWatchdog()
             isPlaying = true
             isBuffering = false
             pushNowPlayingInfo()
         case let .paused(_, positionMs):
+            cancelPlaybackWatchdog()
             isPlaying = false
+            isBuffering = false
             _ = positionMs
             pushNowPlayingInfo()
         case .stopped:
+            cancelPlaybackWatchdog()
             isPlaying = false
             isBuffering = false
             pushNowPlayingInfo()
@@ -1593,6 +2091,7 @@ final class AppModel {
 
     func playURI(_ input: String) {
         guard isPlaybackReady else { return }
+        cancelPlaybackWatchdog()
         var uri = input.trimmingCharacters(in: .whitespacesAndNewlines)
         if !uri.hasPrefix("spotify:"), let id = SpotifyClient.trackId(from: uri) {
             uri = "spotify:track:\(id)"
@@ -1671,11 +2170,13 @@ final class AppModel {
 
     func next() {
         guard isPlaybackReady else { return }
+        cancelPlaybackWatchdog()
         _ = Core.next()
     }
 
     func prev() {
         guard isPlaybackReady else { return }
+        cancelPlaybackWatchdog()
         _ = Core.prev()
     }
 
