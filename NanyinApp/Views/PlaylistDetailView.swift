@@ -98,6 +98,7 @@ struct PlaylistDetailView: View {
                     .cornerRadius(20)
                 }
                 .buttonStyle(.plain)
+                .disabled(!app.isPlaybackReady || tracks.isEmpty)
                 .onHover { hovering in
                     if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
                 }

@@ -109,6 +109,7 @@ struct PlayerBar: View {
                     }
                     .buttonStyle(.plain)
                 }
+                .disabled(!app.isPlaybackReady)
 
                 HStack(spacing: 8) {
                     Text(Theme.fmtTime(effectivePosition))
@@ -117,6 +118,7 @@ struct PlayerBar: View {
                         .frame(width: 34, alignment: .trailing)
 
                     slider
+                        .allowsHitTesting(app.isPlaybackReady)
 
                     Text(Theme.fmtTime(max(app.durationMs, 0)))
                         .font(.system(size: 10, design: .monospaced))
@@ -149,6 +151,7 @@ struct PlayerBar: View {
                 ), in: 0 ... 1)
                 .controlSize(.mini)
                 .frame(width: 130)
+                .disabled(!app.isPlaybackReady)
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
             .padding(.trailing, 16)

@@ -26,6 +26,11 @@ struct CredentialPersistenceState: Equatable {
         isClearing ? nil : revision.snapshot
     }
 
+    mutating func beginNewSession() -> UInt64 {
+        installNewSession()
+        return revision.snapshot
+    }
+
     mutating func beginClear() {
         revision.invalidate()
         isClearing = true

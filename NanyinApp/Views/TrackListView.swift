@@ -151,11 +151,13 @@ struct TrackRow: View {
             } label: {
                 Label("Play", systemImage: "play")
             }
+            .disabled(!app.isPlaybackReady)
             Button {
                 app.addToQueue(track)
             } label: {
                 Label("Add to Queue", systemImage: "text.badge.plus")
             }
+            .disabled(!app.isPlaybackReady)
             if isLikeKnown {
                 Button {
                     app.toggleLike(track)

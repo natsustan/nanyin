@@ -83,7 +83,7 @@ struct HomeView: View {
     }
 
     private var canPlay: Bool {
-        SpotifyClient.trackId(from: trackInput) != nil
+        app.isPlaybackReady && SpotifyClient.trackId(from: trackInput) != nil
     }
 
     private func play() {

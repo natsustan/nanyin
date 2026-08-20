@@ -23,10 +23,10 @@ final class AppModel {
         case loggedIn
     }
 
-    struct PlayerInitError: Error, LocalizedError {
-        let message: String
-        init(detail: String) { message = detail }
-        var errorDescription: String? { message }
+    enum PlaybackConnectionState: Equatable {
+        case connecting
+        case ready
+        case unavailable(String)
     }
 
     // MARK: - Auth
@@ -44,6 +44,8 @@ final class AppModel {
     private var webTokenExpiry: Date = .distantPast
     private var api: SpotifyClient?
     private var accountEpoch = 0
+    private var playbackGeneration: UInt64 = 0
+    private var activePlaybackGeneration: UInt64?
     private var webRefreshInFlight: (epoch: Int, task: Task<SpotifyAuth.Token, Error>)?
 
     /// Returns a valid Web API access token, refreshing when near expiry.
@@ -139,7 +141,22 @@ final class AppModel {
     }
 
     private(set) var nowPlaying: NowPlaying?
-    private(set) var connectionNote: String?
+    private(set) var playbackConnectionState: PlaybackConnectionState = .connecting
+
+    var isPlaybackReady: Bool {
+        playbackConnectionState == .ready
+    }
+
+    var connectionNote: String? {
+        switch playbackConnectionState {
+        case .connecting:
+            "Connecting playback…"
+        case .ready:
+            nil
+        case let .unavailable(message):
+            message
+        }
+    }
 
     // MARK: - Library (M1)
 
@@ -667,41 +684,24 @@ final class AppModel {
     private var nowPlayingMgr: NowPlayingManager { NowPlayingManager.shared }
 
     func start() {
+        let epoch = accountEpoch
+        let startedAt = ContinuousClock.now
         Task {
             do {
                 dlog("silent refresh…")
                 let web = try await SpotifyAuth.refreshAccessToken(for: .web)
+                guard epoch == accountEpoch, authState == .checking else { return }
                 apply(webToken: web)
-                dlog("web refresh OK, playback refresh…")
-                let playback = try await SpotifyAuth.refreshAccessToken(for: .playback)
-                apply(playbackToken: playback)
-                dlog("refresh OK, init player…")
-                try await initPlayerAndUser()
-                nowPlayingMgr.activate()
                 authState = .loggedIn
-                dlog("logged in (silent)")
+                playbackConnectionState = .connecting
+                dlog("logged in (silent), time to shell: \(startedAt.duration(to: .now))")
+                restoreUserAndLibrary(for: epoch)
+                restorePlayback(for: epoch)
             } catch {
-                if case SpotifyAuth.AuthError.refreshTokenRevoked = error {
-                    // SpotifyAuth attempted to drop the dead credential and
-                    // includes any cleanup failure in the surfaced error.
-                    dlog("silent login failed: \(error)")
-                    authError = error.localizedDescription
-                    authState = .loggedOut
-                } else if error is PlayerInitError {
-                    // Credentials are valid — only the player couldn't start
-                    // (typically Spotify accesspoint risk-control throttling).
-                    // Don't bounce to the login page: Web API (library,
-                    // search) works without the dealer; playback recovers on
-                    // a later launch once the block decays.
-                    dlog("player init failed, keeping session: \(error)")
-                    authState = .loggedIn
-                    connectionNote = "Playback service unavailable — will retry on relaunch"
-                    loadLibrary()
-                } else {
-                    dlog("silent login failed: \(error)")
-                    authError = error.localizedDescription
-                    authState = .loggedOut
-                }
+                guard epoch == accountEpoch, authState == .checking else { return }
+                dlog("silent login failed: \(error)")
+                authError = error.localizedDescription
+                authState = .loggedOut
             }
         }
     }
@@ -709,21 +709,38 @@ final class AppModel {
     func signIn() {
         authState = .signingIn
         authError = nil
+        let epoch = accountEpoch
         Task {
             do {
-                let tokens = try await SpotifyAuth.signIn()
-                apply(webToken: tokens.web)
-                apply(playbackToken: tokens.playback)
-                try await initPlayerAndUser()
-                nowPlayingMgr.activate()
-                authState = .loggedIn
+                let playback = try await SpotifyAuth.signIn { web in
+                    guard epoch == self.accountEpoch,
+                          self.authState == .signingIn else { return }
+                    self.apply(webToken: web)
+                    self.authState = .loggedIn
+                    self.playbackConnectionState = .connecting
+                    self.restoreUserAndLibrary(for: epoch)
+                    NSApp.activate(ignoringOtherApps: true)
+                }
+                guard epoch == accountEpoch, authState == .loggedIn else { return }
+                apply(playbackToken: playback)
+                initializePlayback(for: epoch, accessToken: playback.accessToken)
                 // The browser that hosted the OAuth journey holds focus;
                 // pull nanyin back to the foreground so the completed
                 // sign-in is actually visible (no nanyin:// scheme needed).
                 NSApp.activate(ignoringOtherApps: true)
             } catch {
-                authError = error.localizedDescription
-                authState = .loggedOut
+                guard epoch == accountEpoch else { return }
+                if authState == .loggedIn {
+                    dlog("playback sign-in failed, keeping Web session: \(error)")
+                    playbackConnectionState = .unavailable(
+                        "Playback authorization unavailable — sign out and sign in again"
+                    )
+                } else if authState == .signingIn {
+                    authError = error.localizedDescription
+                    authState = .loggedOut
+                } else {
+                    return
+                }
                 // Same for failures: surface the error instead of leaving
                 // the user staring at a closed browser tab.
                 NSApp.activate(ignoringOtherApps: true)
@@ -742,6 +759,9 @@ final class AppModel {
     /// replacement credentials can be installed.
     private func invalidateAccountSession() {
         accountEpoch += 1
+        playbackGeneration &+= 1
+        activePlaybackGeneration = nil
+        SpotifyAuth.invalidateInteractiveSignIn()
         _ = Core.shutdown()
         AudioRenderer.shared.stop()
         webRefreshInFlight?.task.cancel()
@@ -770,7 +790,7 @@ final class AppModel {
         userDisplayName = ""
         userId = ""
         nowPlaying = nil
-        connectionNote = nil
+        playbackConnectionState = .connecting
         queueEpoch += 1
         queueCurrent = nil
         queueUpcoming = []
@@ -807,43 +827,111 @@ final class AppModel {
         playbackAccessToken = playbackToken.accessToken
     }
 
-    private func initPlayerAndUser() async throws {
-        let deviceId = try KeychainStore.spotifyDeviceId()
-        switch await Core.initializePlayer(
-            accessToken: playbackAccessToken,
-            deviceId: deviceId
-        ) {
-        case .connected:
-            break
-        case let .credentialsRejected(message):
-            dlog("player init credentials rejected: \(message)")
-            throw PlayerInitError(detail: "Player credentials rejected: \(message)")
-        case let .failed(code, message):
-            dlog("player init rc=\(code): \(message)")
-            throw PlayerInitError(detail: "Player init failed (rc \(code)): \(message)")
-        }
-        do {
-            if let profile = try await api?.currentUser() {
+    private func restoreUserAndLibrary(for epoch: Int) {
+        Task {
+            guard epoch == accountEpoch, authState == .loggedIn, let api else { return }
+            let startedAt = ContinuousClock.now
+            do {
+                let profile = try await api.currentUser()
+                guard epoch == accountEpoch, authState == .loggedIn else { return }
                 userDisplayName = profile.displayName ?? profile.id
                 userId = profile.id
-                dlog("/v1/me OK — \(userDisplayName) (id \(userId))")
+                dlog("/v1/me OK: \(startedAt.duration(to: .now))")
+            } catch {
+                dlog("/v1/me failed: \(error)")
             }
-        } catch {
-            dlog("/v1/me failed: \(error)")
         }
-        loadLibrary()
-    }
-
-    /// Loads playlists + liked songs in the background after login.
-    private func loadLibrary() {
         Task {
+            guard epoch == accountEpoch, authState == .loggedIn, let api else { return }
+            let startedAt = ContinuousClock.now
             do {
-                playlists = try await api!.playlists()
+                let loadedPlaylists = try await api.playlists()
+                guard epoch == accountEpoch, authState == .loggedIn else { return }
+                playlists = loadedPlaylists
+                dlog("playlists loaded: \(startedAt.duration(to: .now))")
             } catch {
                 dlog("library load failed: \(error)")
             }
+            guard epoch == accountEpoch, authState == .loggedIn else { return }
             refreshLiked(force: true)
         }
+    }
+
+    private func restorePlayback(for epoch: Int) {
+        Task {
+            do {
+                let startedAt = ContinuousClock.now
+                let playback = try await SpotifyAuth.refreshAccessToken(for: .playback)
+                guard epoch == accountEpoch, authState == .loggedIn else { return }
+                apply(playbackToken: playback)
+                dlog("playback refresh OK: \(startedAt.duration(to: .now))")
+                initializePlayback(for: epoch, accessToken: playback.accessToken)
+            } catch {
+                guard epoch == accountEpoch, authState == .loggedIn else { return }
+                dlog("playback refresh failed, keeping Web session: \(error)")
+                if case SpotifyAuth.AuthError.refreshTokenRevoked = error {
+                    playbackConnectionState = .unavailable(
+                        "Playback authorization expired — sign out and sign in again"
+                    )
+                } else {
+                    playbackConnectionState = .unavailable(
+                        "Playback service unavailable — will retry on relaunch"
+                    )
+                }
+            }
+        }
+    }
+
+    private func initializePlayback(for epoch: Int, accessToken: String) {
+        let generation = beginPlaybackConnection()
+        Task {
+            guard isCurrentPlayback(epoch: epoch, generation: generation) else { return }
+            let deviceId: String
+            do {
+                deviceId = try KeychainStore.spotifyDeviceId()
+            } catch {
+                guard isCurrentPlayback(epoch: epoch, generation: generation) else { return }
+                playbackConnectionState = .unavailable(error.localizedDescription)
+                return
+            }
+            let startedAt = ContinuousClock.now
+            let result = await Core.initializePlayer(
+                accessToken: accessToken,
+                deviceId: deviceId,
+                generation: generation
+            )
+            guard isCurrentPlayback(epoch: epoch, generation: generation) else { return }
+            switch result {
+            case .connected:
+                activePlaybackGeneration = generation
+                playbackConnectionState = .ready
+                nowPlayingMgr.activate()
+                dlog("player init OK: \(startedAt.duration(to: .now))")
+            case let .credentialsRejected(message):
+                dlog("player init credentials rejected: \(message)")
+                playbackConnectionState = .unavailable(
+                    "Playback authorization expired — sign out and sign in again"
+                )
+            case let .failed(code, message):
+                dlog("player init rc=\(code): \(message)")
+                playbackConnectionState = .unavailable(
+                    "Playback service unavailable — will retry on relaunch"
+                )
+            }
+        }
+    }
+
+    private func beginPlaybackConnection() -> UInt64 {
+        playbackGeneration &+= 1
+        activePlaybackGeneration = nil
+        playbackConnectionState = .connecting
+        return playbackGeneration
+    }
+
+    private func isCurrentPlayback(epoch: Int, generation: UInt64) -> Bool {
+        epoch == accountEpoch
+            && generation == playbackGeneration
+            && authState == .loggedIn
     }
 
     // MARK: - Search (M3)
@@ -1195,6 +1283,7 @@ final class AppModel {
     /// Connect state gets 429-rejected. Falls back to a bounded track window
     /// if the context path doesn't start audio in time.
     func play(track: SpotifyClient.Track, contextKey: String) {
+        guard isPlaybackReady else { return }
         if pendingQueueHistory == nil, let nowPlaying, nowPlaying.uri != track.uri {
             pendingQueueHistory = (nowPlaying, durationMs)
         }
@@ -1233,6 +1322,7 @@ final class AppModel {
 
     /// Bounded-context fallback: 50 tracks from the clicked index.
     private func playWindowed(track: SpotifyClient.Track, contextKey: String, index: Int) {
+        guard isPlaybackReady else { return }
         guard let context = tracksByContext[contextKey] else {
             _ = Core.playTracks([track.uri])
             return
@@ -1267,18 +1357,17 @@ final class AppModel {
             default: break
             }
         }
-        Core.onConnected = {
-            self.connectionNote = nil
+        Core.onDisconnected = { generation in
+            self.reconnect(disconnectedGeneration: generation)
         }
-        Core.onDisconnected = {
-            self.reconnect()
-        }
-        Core.onEvent = { event in
-            self.handle(event)
+        Core.onEvent = { generation, event in
+            guard self.authState == .loggedIn,
+                  self.activePlaybackGeneration == generation else { return }
+            self.handle(event, generation: generation)
         }
     }
 
-    private func handle(_ event: Core.Event) {
+    private func handle(_ event: Core.Event, generation: UInt64) {
         switch event {
         case .playing:
             isPlaying = true
@@ -1294,7 +1383,7 @@ final class AppModel {
             pushNowPlayingInfo()
         case let .loading(uri, _):
             isBuffering = true
-            fetchMetadata(uri: uri)
+            fetchMetadata(uri: uri, playbackGeneration: generation)
         case let .trackChanged(uri, durationMs, title, artists, album, coverURL):
             let previous = nowPlaying
             let previousDurationMs = self.durationMs
@@ -1321,7 +1410,7 @@ final class AppModel {
                     )
                 }
             } else {
-                fetchMetadata(uri: uri)
+                fetchMetadata(uri: uri, playbackGeneration: generation)
             }
         case .position:
             break // position handled by PlayerBar's local Core.positionMs polling
@@ -1347,7 +1436,7 @@ final class AppModel {
         }
     }
 
-    private func fetchMetadata(uri: String) {
+    private func fetchMetadata(uri: String, playbackGeneration: UInt64) {
         // Skip when we already have richer local data for this URI.
         if nowPlaying?.uri == uri, nowPlaying?.title != "…" { return }
         guard let id = SpotifyClient.trackId(from: uri) else { return }
@@ -1359,6 +1448,8 @@ final class AppModel {
                 dlog("fetchMetadata FAILED for \(id)")
                 return
             }
+            guard authState == .loggedIn,
+                  activePlaybackGeneration == playbackGeneration else { return }
             let artwork = track.artworkURL
             dlog("fetchMetadata OK artwork=\(artwork?.absoluteString ?? "nil")")
             nowPlaying = NowPlaying(
@@ -1391,36 +1482,41 @@ final class AppModel {
     /// aggressive refresh on every disconnect rotates tokens in a loop,
     /// which Spotify's risk control treats as abuse and revokes everything
     /// (learned the hard way: refresh token got invalidated).
-    private func reconnect() {
-        guard authState == .loggedIn else { return }
+    private func reconnect(disconnectedGeneration: UInt64) {
+        guard authState == .loggedIn,
+              activePlaybackGeneration == disconnectedGeneration else { return }
         let epoch = accountEpoch
         let accessToken = playbackAccessToken
-        connectionNote = "Reconnecting…"
+        let generation = beginPlaybackConnection()
         Task {
             let deviceId: String
             do {
                 deviceId = try KeychainStore.spotifyDeviceId()
             } catch {
-                guard epoch == accountEpoch, authState == .loggedIn else { return }
+                guard isCurrentPlayback(epoch: epoch, generation: generation) else { return }
                 dlog("device id persistence failed: \(error)")
-                connectionNote = "Connection lost — \(error.localizedDescription)"
+                playbackConnectionState = .unavailable(
+                    "Connection lost — \(error.localizedDescription)"
+                )
                 return
             }
             // 1) Try re-init with the CURRENT access token — cheap and usually
             //    sufficient (librespot also refreshes internally via login5).
-            guard epoch == accountEpoch, authState == .loggedIn else { return }
+            guard isCurrentPlayback(epoch: epoch, generation: generation) else { return }
             let result = await Core.initializePlayer(
                 accessToken: accessToken,
-                deviceId: deviceId
+                deviceId: deviceId,
+                generation: generation
             )
-            guard epoch == accountEpoch, authState == .loggedIn else { return }
+            guard isCurrentPlayback(epoch: epoch, generation: generation) else { return }
             switch result {
             case .connected:
-                connectionNote = nil
+                activePlaybackGeneration = generation
+                playbackConnectionState = .ready
                 return
             case let .failed(code, message):
                 dlog("reconnect kept current token after init rc=\(code): \(message)")
-                connectionNote = "Connection lost — \(message)"
+                playbackConnectionState = .unavailable("Connection lost — \(message)")
                 return
             case let .credentialsRejected(message):
                 dlog("reconnect credentials rejected: \(message)")
@@ -1428,29 +1524,33 @@ final class AppModel {
             // 2) Only an explicit credential rejection may mint a fresh token.
             do {
                 let token = try await SpotifyAuth.refreshAccessToken(for: .playback)
-                guard epoch == accountEpoch, authState == .loggedIn else { return }
+                guard isCurrentPlayback(epoch: epoch, generation: generation) else { return }
                 apply(playbackToken: token)
                 let retry = await Core.initializePlayer(
-                    accessToken: playbackAccessToken,
-                    deviceId: deviceId
+                    accessToken: token.accessToken,
+                    deviceId: deviceId,
+                    generation: generation
                 )
-                guard epoch == accountEpoch, authState == .loggedIn else { return }
+                guard isCurrentPlayback(epoch: epoch, generation: generation) else { return }
                 switch retry {
                 case .connected:
-                    connectionNote = nil
+                    activePlaybackGeneration = generation
+                    playbackConnectionState = .ready
                 case let .credentialsRejected(message), let .failed(_, message):
-                    connectionNote = "Connection lost — \(message)"
+                    playbackConnectionState = .unavailable("Connection lost — \(message)")
                 }
             } catch {
-                guard epoch == accountEpoch, authState == .loggedIn else { return }
+                guard isCurrentPlayback(epoch: epoch, generation: generation) else { return }
                 if case SpotifyAuth.AuthError.refreshTokenRevoked = error {
-                    // Dead credential: surface re-auth instead of a footnote.
-                    // Retrying against a revoked token only feeds risk control.
-                    dlog("playback refresh token revoked — forcing re-auth")
-                    invalidateAccountSession()
-                    authError = error.localizedDescription
+                    // Playback authorization is independent from the Web API
+                    // session. Keep browsing available and require an explicit
+                    // user-driven sign-in before opening a browser.
+                    dlog("playback refresh token revoked — keeping Web session")
+                    playbackConnectionState = .unavailable(
+                        "Playback authorization expired — sign out and sign in again"
+                    )
                 } else {
-                    connectionNote = "Connection lost — sign in again"
+                    playbackConnectionState = .unavailable("Connection lost — sign in again")
                 }
             }
         }
@@ -1459,6 +1559,7 @@ final class AppModel {
     // MARK: - Playback commands
 
     func playURI(_ input: String) {
+        guard isPlaybackReady else { return }
         var uri = input.trimmingCharacters(in: .whitespacesAndNewlines)
         if !uri.hasPrefix("spotify:"), let id = SpotifyClient.trackId(from: uri) {
             uri = "spotify:track:\(id)"
@@ -1472,6 +1573,7 @@ final class AppModel {
     }
 
     func togglePlay() {
+        guard isPlaybackReady else { return }
         if isPlaying {
             _ = Core.pause()
         } else {
@@ -1497,11 +1599,13 @@ final class AppModel {
     }
 
     func toggleShuffle() {
+        guard isPlaybackReady else { return }
         shuffle.toggle()
         _ = Core.setShuffle(shuffle)
     }
 
     func cycleRepeat() {
+        guard isPlaybackReady else { return }
         switch repeatMode {
         case .off: repeatMode = .all
         case .all: repeatMode = .one
@@ -1513,6 +1617,7 @@ final class AppModel {
 
     /// Appends to the active queue (right-click → Add to queue).
     func addToQueue(_ track: SpotifyClient.Track) {
+        guard isPlaybackReady else { return }
         let rc = Core.addToQueue(track.uri)
         if rc == 0 {
             refreshQueueSoon()
@@ -1520,16 +1625,25 @@ final class AppModel {
     }
 
     func seek(to fraction: Double) {
+        guard isPlaybackReady else { return }
         _ = Core.seek(UInt32(fraction * Double(max(durationMs, 1))))
     }
 
     func setVolume(_ fraction: Double) {
+        guard isPlaybackReady else { return }
         volume = fraction
         AudioRenderer.shared.volume = Float(fraction)
         _ = Core.setVolume(UInt16(fraction * 65_535))
     }
 
-    func next() { _ = Core.next() }
-    func prev() { _ = Core.prev() }
+    func next() {
+        guard isPlaybackReady else { return }
+        _ = Core.next()
+    }
+
+    func prev() {
+        guard isPlaybackReady else { return }
+        _ = Core.prev()
+    }
 
 }

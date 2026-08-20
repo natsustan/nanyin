@@ -55,10 +55,13 @@ struct NanyinApp: App {
             CommandMenu("Playback") {
                 Button("Play / Pause") { delegate.appModel.togglePlay() }
                     .keyboardShortcut(.space, modifiers: [])
+                    .disabled(!delegate.appModel.isPlaybackReady)
                 Button("Next") { delegate.appModel.next() }
                     .keyboardShortcut(.rightArrow, modifiers: .command)
+                    .disabled(!delegate.appModel.isPlaybackReady)
                 Button("Previous") { delegate.appModel.prev() }
                     .keyboardShortcut(.leftArrow, modifiers: .command)
+                    .disabled(!delegate.appModel.isPlaybackReady)
             }
         }
     }

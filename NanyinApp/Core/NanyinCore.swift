@@ -36,9 +36,9 @@ enum Core {
         case endOfTrack
     }
 
-    nonisolated(unsafe) static var onEvent: (@MainActor (Event) -> Void)?
-    nonisolated(unsafe) static var onConnected: (@MainActor () -> Void)?
-    nonisolated(unsafe) static var onDisconnected: (@MainActor () -> Void)?
+    nonisolated(unsafe) static var onEvent: (@MainActor (UInt64, Event) -> Void)?
+    nonisolated(unsafe) static var onConnected: (@MainActor (UInt64) -> Void)?
+    nonisolated(unsafe) static var onDisconnected: (@MainActor (UInt64) -> Void)?
     nonisolated(unsafe) static var onAudioData: ((UnsafePointer<Float>, Int) -> Void)?
     nonisolated(unsafe) static var onAudioControl: ((UInt8) -> Void)?
 
@@ -63,17 +63,21 @@ enum Core {
         }
         nanyin_register_playback_state_callback { json in
             guard let json = json.map(String.init(cString:)) else { return }
-            Core.handleStateJSON(json)
+            Core.handleStateJSON(json, generation: Core.currentCallbackGeneration())
         }
         nanyin_register_session_connected_callback {
-            Task { @MainActor in Core.onConnected?() }
+            let generation = Core.currentCallbackGeneration()
+            let handler = Core.onConnected
+            Task { @MainActor in handler?(generation) }
         }
         nanyin_register_session_disconnected_callback {
-            Task { @MainActor in Core.onDisconnected?() }
+            let generation = Core.currentCallbackGeneration()
+            let handler = Core.onDisconnected
+            Task { @MainActor in handler?(generation) }
         }
     }
 
-    nonisolated private static func handleStateJSON(_ json: String) {
+    nonisolated private static func handleStateJSON(_ json: String, generation: UInt64) {
         guard let data = json.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let eventName = object["event"] as? String
@@ -109,9 +113,8 @@ enum Core {
         default: return
         }
 
-        Task { @MainActor in
-            Core.onEvent?(event)
-        }
+        let handler = Core.onEvent
+        Task { @MainActor in handler?(generation, event) }
     }
 
     // MARK: - FFI calls
@@ -126,27 +129,47 @@ enum Core {
     )
     private static let initStateLock = NSLock()
     nonisolated(unsafe) private static var initGeneration: UInt64 = 0
+    nonisolated(unsafe) private static var callbackGeneration: UInt64 = 0
 
-    nonisolated private static func currentInitGeneration() -> UInt64 {
+    nonisolated private static func currentCallbackGeneration() -> UInt64 {
         initStateLock.lock()
         defer { initStateLock.unlock() }
-        return initGeneration
+        return callbackGeneration
+    }
+
+    nonisolated private static func beginInitialization(
+        callbackGeneration: UInt64
+    ) -> UInt64 {
+        initStateLock.lock()
+        initGeneration &+= 1
+        self.callbackGeneration = callbackGeneration
+        let generation = initGeneration
+        initStateLock.unlock()
+        return generation
+    }
+
+    nonisolated private static func acceptsInitialization(_ generation: UInt64) -> Bool {
+        initStateLock.lock()
+        defer { initStateLock.unlock() }
+        return initGeneration == generation
     }
 
     nonisolated private static func invalidateInitialization() {
         initStateLock.lock()
         initGeneration &+= 1
+        callbackGeneration = 0
         initStateLock.unlock()
     }
 
     nonisolated static func initializePlayer(
         accessToken: String,
-        deviceId: String
+        deviceId: String,
+        generation: UInt64
     ) async -> InitializationResult {
-        let generation = currentInitGeneration()
+        let initialization = beginInitialization(callbackGeneration: generation)
         return await withCheckedContinuation { cont in
             initQueue.async {
-                guard generation == currentInitGeneration() else {
+                guard acceptsInitialization(initialization) else {
                     cont.resume(returning: .failed(
                         code: -1,
                         message: "Player initialization cancelled"
@@ -156,7 +179,7 @@ enum Core {
                 let result = initializePlayerBlocking(
                     accessToken: accessToken, deviceId: deviceId
                 )
-                guard generation == currentInitGeneration() else {
+                guard acceptsInitialization(initialization) else {
                     _ = nanyin_shutdown()
                     cont.resume(returning: .failed(
                         code: -1,

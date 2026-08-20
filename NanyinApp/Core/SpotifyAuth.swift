@@ -126,11 +126,17 @@ enum SpotifyAuth {
             }
         }
 
-        func install(_ token: String?) throws {
-            guard let token else { return }
-            persistenceState.installNewSession()
+        func beginInteractiveSession() -> UInt64 {
             inFlight?.task.cancel()
             inFlight = nil
+            return persistenceState.beginNewSession()
+        }
+
+        func install(_ token: String?, expectedRevision: UInt64) throws {
+            guard persistenceState.acceptsRefresh(expectedRevision) else {
+                throw CancellationError()
+            }
+            guard let token else { return }
             try SpotifyAuth.setRefreshTokenUncoordinated(token, for: kind)
         }
 
@@ -188,6 +194,28 @@ enum SpotifyAuth {
 
     private static let webTokenCoordinator = TokenCoordinator(kind: .web)
     private static let playbackTokenCoordinator = TokenCoordinator(kind: .playback)
+    private static let interactiveSignInLock = NSLock()
+    nonisolated(unsafe) private static var interactiveSignInID: UUID?
+
+    private static func beginInteractiveSignIn() -> UUID {
+        interactiveSignInLock.lock()
+        defer { interactiveSignInLock.unlock() }
+        let id = UUID()
+        interactiveSignInID = id
+        return id
+    }
+
+    private static func acceptsInteractiveSignIn(_ id: UUID) -> Bool {
+        interactiveSignInLock.lock()
+        defer { interactiveSignInLock.unlock() }
+        return interactiveSignInID == id
+    }
+
+    static func invalidateInteractiveSignIn() {
+        interactiveSignInLock.lock()
+        interactiveSignInID = nil
+        interactiveSignInLock.unlock()
+    }
 
     // MARK: - Token persistence
 
@@ -278,9 +306,14 @@ enum SpotifyAuth {
 
     // MARK: - Interactive flow (two chained authorizations, one browser tab)
 
-    /// Runs both flows: opens the browser once; after the first callback the
-    /// page redirects to the second authorization; returns both tokens.
-    static func signIn() async throws -> (web: Token, playback: Token) {
+    /// Runs both flows in one browser journey. Publishes the Web token as soon
+    /// as it is safely persisted; playback authorization remains independent.
+    static func signIn(
+        onWebToken: @escaping @MainActor (Token) -> Void
+    ) async throws -> Token {
+        let signInID = beginInteractiveSignIn()
+        let webRevision = await webTokenCoordinator.beginInteractiveSession()
+        let playbackRevision = await playbackTokenCoordinator.beginInteractiveSession()
         let webFlow = Flow(kind: .web)
         let playbackFlow = Flow(kind: .playback)
 
@@ -294,8 +327,22 @@ enum SpotifyAuth {
         }
 
         let webToken = try await exchange(callbacks[0], flow: webFlow)
+        guard acceptsInteractiveSignIn(signInID) else { throw CancellationError() }
+        try await installRefreshToken(
+            webToken.refreshToken,
+            for: .web,
+            expectedRevision: webRevision
+        )
+        await onWebToken(webToken)
+
         let playbackToken = try await exchange(callbacks[1], flow: playbackFlow)
-        return (webToken, playbackToken)
+        guard acceptsInteractiveSignIn(signInID) else { throw CancellationError() }
+        try await installRefreshToken(
+            playbackToken.refreshToken,
+            for: .playback,
+            expectedRevision: playbackRevision
+        )
+        return playbackToken
     }
 
     struct Flow {
@@ -366,9 +413,7 @@ enum SpotifyAuth {
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
             throw AuthError.tokenExchangeFailed(String(data: data, encoding: .utf8) ?? "unknown")
         }
-        let token = try decodeToken(data)
-        try await installRefreshToken(token.refreshToken, for: flow.kind)
-        return token
+        return try decodeToken(data)
     }
 
     // MARK: - Helpers
@@ -400,14 +445,21 @@ enum SpotifyAuth {
 
     private static func installRefreshToken(
         _ token: String?,
-        for kind: TokenKind
+        for kind: TokenKind,
+        expectedRevision: UInt64
     ) async throws {
         if kind == .playback {
             return try await withPlaybackRefreshLock {
-                try await coordinator(for: kind).install(token)
+                try await coordinator(for: kind).install(
+                    token,
+                    expectedRevision: expectedRevision
+                )
             }
         }
-        try await coordinator(for: kind).install(token)
+        try await coordinator(for: kind).install(
+            token,
+            expectedRevision: expectedRevision
+        )
     }
 
     /// Shares a BSD file lock with dealer_probe.sh so only one process can
