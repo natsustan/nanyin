@@ -10,10 +10,10 @@ struct RootView: View {
 
     var body: some View {
         switch app.authState {
-        case .checking:
+        case .checking, .signingOut:
             VStack(spacing: 12) {
                 ProgressView()
-                Text("Restoring session…")
+                Text(app.authState == .signingOut ? "Signing out…" : "Restoring session…")
                     .foregroundStyle(Theme.textSecondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

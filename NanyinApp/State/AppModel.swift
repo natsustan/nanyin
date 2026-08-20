@@ -20,6 +20,7 @@ final class AppModel {
         case checking // trying silent refresh on launch
         case loggedOut
         case signingIn
+        case signingOut
         case loggedIn
     }
 
@@ -827,10 +828,11 @@ final class AppModel {
         pendingQueueHistory = nil
         isLoadingQueue = false
         queueRefreshPending = false
-        authState = .loggedOut
     }
 
     func signOut() async {
+        guard authState == .loggedIn else { return }
+        authState = .signingOut
         invalidateAccountSession()
         var keychainErrors: [String] = []
         for kind in [SpotifyAuth.TokenKind.web, .playback] {
@@ -844,6 +846,7 @@ final class AppModel {
         authError = keychainErrors.isEmpty
             ? nil
             : "Signed out, but stored credentials could not be removed: \(keychainErrors.joined(separator: "; "))"
+        authState = .loggedOut
     }
 
     private func apply(webToken: SpotifyAuth.Token) {
@@ -1291,10 +1294,14 @@ final class AppModel {
             completion(false)
             return
         }
+        let account = accountEpoch
         metadataFetchInFlight = true
         Task {
             var succeeded = false
-            if let track = try? await api?.track(id: id) {
+            if let track = try? await api?.track(id: id),
+               account == accountEpoch,
+               authState == .loggedIn,
+               nowPlaying?.uri == uri {
                 applyNowPlaying(track)
                 succeeded = true
             }
