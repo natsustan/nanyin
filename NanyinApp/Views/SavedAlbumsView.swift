@@ -5,12 +5,14 @@
 
 import SwiftUI
 
-/// Saved Albums aggregate page (M4.3): virtualized album rows with cover
-/// hover-play, client-side filter, sort orders, and whole-album context
-/// playback. Saved albums and Liked Songs are separate concepts — no hearts
-/// here, only plus/check semantics.
+/// Saved Albums aggregate page (M4.3): cover grid with hover play, client-side
+/// filter, sort orders, and whole-album context playback. Saved albums and
+/// Liked Songs are separate concepts — no hearts here, only plus/check
+/// semantics.
 ///
-/// Single scroll region: fixed header + one recycling List (UI perf rules).
+/// Single scroll region: fixed header + one vertical ScrollView holding a
+/// lazy cover grid (UI perf rules — grids are lazy, like the discography
+/// strips, never a nested same-axis scroller).
 struct SavedAlbumsView: View {
     @Environment(AppModel.self) private var app
 
@@ -166,7 +168,7 @@ struct SavedAlbumsView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            albumList
+            albumGrid
         }
     }
 
@@ -224,64 +226,56 @@ struct SavedAlbumsView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private var albumList: some View {
-        List {
-            ForEach(visibleAlbums) { saved in
-                SavedAlbumRow(album: saved)
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
+    /// The page's single vertical scroller. LazyVGrid materializes cards only
+    /// near the viewport — same laziness contract as the discography strips.
+    private var albumGrid: some View {
+        ScrollView {
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 170), spacing: 16)],
+                spacing: 18
+            ) {
+                ForEach(visibleAlbums) { saved in
+                    SavedAlbumCard(album: saved)
+                }
             }
+            .padding(.horizontal, 28)
+            .padding(.top, 20)
+            .padding(.bottom, 24)
         }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-        .environment(\.defaultMinListRowHeight, 72)
     }
 }
 
-/// One saved-album row: cover with hover play, album/artist/year/count line,
-/// saved check (minus on hover = remove). Single click opens the album page.
-private struct SavedAlbumRow: View {
+/// One saved-album card: square cover with a hover play circle and a remove
+/// badge, title + artist/year beneath. Click opens the album page. Hover
+/// state is card-local (never in the grid parent — UI perf rules).
+private struct SavedAlbumCard: View {
     @Environment(AppModel.self) private var app
     let album: SpotifyClient.SavedAlbum
 
-    /// Row-local hover state (never in the list parent — UI perf rules).
     @State private var hovering = false
 
     private var subtitle: String {
-        [
-            album.album.artistName,
-            album.album.year ?? "",
-            album.album.trackCount > 0
-                ? (album.album.trackCount == 1 ? "1 track" : "\(album.album.trackCount) tracks")
-                : "",
-        ]
-        .filter { !$0.isEmpty }
-        .joined(separator: " · ")
+        [album.album.artistName, album.album.year ?? ""]
+            .filter { !$0.isEmpty }
+            .joined(separator: " · ")
     }
 
     var body: some View {
-        HStack(spacing: 14) {
+        VStack(alignment: .leading, spacing: 8) {
             cover
-            VStack(alignment: .leading, spacing: 3) {
-                Text(album.album.name)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                if !subtitle.isEmpty {
-                    Text(subtitle)
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.textSecondary)
-                        .lineLimit(1)
-                }
-            }
-            Spacer()
-            removeButton
-                .frame(width: 32, alignment: .center)
+            Text(album.album.name)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+            Text(subtitle)
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.textSecondary)
+                .lineLimit(1)
         }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 10)
-        .background(hovering ? Theme.hover : .clear)
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(hovering ? Color(white: 0.13) : .clear)
+        .cornerRadius(8)
         .contentShape(Rectangle())
         .onTapGesture {
             app.open(.album(
@@ -316,55 +310,70 @@ private struct SavedAlbumRow: View {
         .onHover { hovering = $0 }
     }
 
-    /// Cover with a play affordance on hover — starts the whole album via its
-    /// server-resolved context at index 0 (no track-URI upload).
     private var cover: some View {
-        ZStack {
-            Group {
-                if let url = album.album.artworkURL {
-                    AsyncImage(url: url) { image in
-                        image.resizable().scaledToFill()
-                    } placeholder: {
-                        Color(white: 0.14)
-                    }
-                } else {
-                    ZStack {
-                        Color(white: 0.14)
-                        Image("MusicIcon")
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(width: 22, height: 22)
-                            .foregroundStyle(Theme.textSecondary)
-                    }
+        Group {
+            if let url = album.album.artworkURL {
+                AsyncImage(url: url) { image in
+                    image.resizable().scaledToFill()
+                } placeholder: {
+                    placeholderCover
                 }
-            }
-            if hovering {
-                Color.black.opacity(0.45)
-                Image(systemName: "play.fill")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(.white)
+            } else {
+                placeholderCover
             }
         }
-        .frame(width: 52, height: 52)
-        .cornerRadius(4)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            if hovering { app.playAlbum(id: album.id) }
+        .aspectRatio(1, contentMode: .fit)
+        .frame(maxWidth: .infinity)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .shadow(color: .black.opacity(0.35), radius: 8, y: 4)
+        .overlay(alignment: .topTrailing) {
+            if hovering { removeBadge.padding(6) }
+        }
+        .overlay(alignment: .bottomLeading) {
+            if hovering { playButton.padding(8) }
         }
     }
 
-    /// Saved state indicator: check when saved (always, on this page), minus
-    /// on hover to communicate removal.
-    private var removeButton: some View {
+    /// Green play circle (Spotify-grid style) — starts the whole album via
+    /// its server-resolved context at index 0 (no track-URI upload).
+    private var playButton: some View {
+        Button {
+            app.playAlbum(id: album.id)
+        } label: {
+            Image(systemName: "play.fill")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(.black)
+                .frame(width: 34, height: 34)
+                .background(Circle().fill(Theme.accent))
+                .shadow(color: .black.opacity(0.4), radius: 6, y: 2)
+        }
+        .buttonStyle(.plain)
+        .help("Play Album")
+    }
+
+    /// Everything in this grid is saved by definition, so the badge appears
+    /// only on hover, as the removal affordance (minus, not a heart).
+    private var removeBadge: some View {
         Button {
             app.removeSavedAlbum(album)
         } label: {
-            Image(systemName: hovering ? "minus.circle" : "checkmark.circle.fill")
-                .font(.system(size: 15))
-                .foregroundStyle(hovering ? Theme.textSecondary : Theme.accent)
+            Image(systemName: "minus.circle.fill")
+                .font(.system(size: 17))
+                .foregroundStyle(.white)
+                .shadow(color: .black.opacity(0.5), radius: 4)
         }
         .buttonStyle(.plain)
-        .opacity(hovering ? 1 : 0.85)
         .help("Remove from Saved Albums")
+    }
+
+    private var placeholderCover: some View {
+        ZStack {
+            Color(white: 0.14)
+            Image("MusicIcon")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 34, height: 34)
+                .foregroundStyle(Theme.textSecondary)
+        }
     }
 }

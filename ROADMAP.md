@@ -133,6 +133,13 @@ now keeps its header mounted across loading/empty/error states. Live
 verification (>50-album pagination, rapid toggles, cross-client
 reconciliation) still pending explicit approval.
 
+Progress 2026-08-20 (later): Saved Albums page switched to a cover grid per
+user preference — `LazyVGrid` (adaptive ~170pt cards) in the page's single
+vertical `ScrollView`; card = square cover + hover play circle (green,
+Spotify-grid style) + hover minus badge for removal; click opens the album
+page. Live-verified the row/list layout earlier the same day (106-album
+library, correct count); grid layout verified live right after.
+
 Goal: make album-first listening a complete library flow. A user can save an
 album from its detail page, find it immediately in Saved Albums, and start the
 whole album with one action. Saving an album must not imply that every track is
@@ -141,14 +148,13 @@ in Liked Songs, and liking one or more tracks must not save the album.
 Primary UI:
 
 ```text
-YOUR LIBRARY              SAVED ALBUMS                         68 albums
-♥  Liked Songs      423    [Filter albums…]  [Recently Added ▾]
+YOUR LIBRARY              SAVED ALBUMS                          68 albums
+♥  Liked Songs      423   [Filter albums…]  [Recently Added ▾]
 ▣  Saved Albums      68
-                           ▶  [cover]  Random Access Memories
-PLAYLISTS                            Daft Punk · 2013 · 13 tracks       ✓
-Discover Weekly
-Daily Mix 1                ▶  [cover]  Kind of Blue
-                                     Miles Davis · 1959 · 5 tracks     ✓
+                           [cover]     [cover]     [cover]     [cover]
+PLAYLISTS                  RAM         Kind of      Blue        ...
+Discover Weekly            Daft Punk   Miles ...   Coltrane
+Daily Mix 1
 ```
 
 Album detail header:
@@ -164,17 +170,19 @@ Album detail header:
 MVP product scope:
 
 - Add a fixed `Saved Albums` sidebar entry with the current library count.
-- Build a virtualized `List` with prominent cover art, album, primary artist,
-  year, track count, and saved state. Default to `Recently Added`; also support
+- Build a cover grid (`LazyVGrid` in the page's single vertical ScrollView —
+  grid layout per user preference, 2026-08-20) with prominent cover art,
+  album, primary artist, and year. Default to `Recently Added`; also support
   `Album` and `Artist` sort orders plus a client-side album/artist filter.
-- Single-click a row to open the existing album detail page. A cover hover play
-  action and `Play Album` context-menu action start the server-resolved
-  `spotify:album:<id>` context at index 0 without uploading track URIs.
+- Single-click a card to open the existing album detail page. A hover play
+  circle on the cover and `Play Album` context-menu action start the
+  server-resolved `spotify:album:<id>` context at index 0 without uploading
+  track URIs.
 - Add `SAVE ALBUM` / `SAVED` to the album header. Use plus/check semantics, not
   a heart, so album saves cannot be confused with Liked Songs. Keep the header
   visible and interactive while tracks are loading, empty, or failed.
 - Add Save/Remove, Play Album, and Copy Album Link actions to album-card and
-  Saved Albums row context menus. Removal is immediate and does not require a
+  Saved Albums card context menus. Removal is immediate and does not require a
   confirmation dialog; a failed write restores the previous state.
 - Show explicit loading, empty, and retryable error states. An empty state links
   to Search even though dedicated album search results are a follow-up.
@@ -212,7 +220,7 @@ Delivery slices:
    concurrency tests.
 2. **Save round-trip (0.5d):** stable album header, Save/Saved control, artist
    album-card menu, optimistic update, auth retry, and rollback.
-3. **Saved Albums page (0.75–1d):** navigation, count, virtualized rows,
+3. **Saved Albums page (0.75–1d):** navigation, count, cover grid,
    filtering/sorting, whole-album playback, context menus, and page states.
 4. **Verification (0.5d):** >50-album pagination, rapid toggles, stale refresh,
    failed writes, account changes, and cross-client convergence. Normal agent
@@ -234,7 +242,8 @@ Acceptance criteria:
   header's save control.
 
 Follow-ups, not part of M4.3 MVP: album results in Search, a Home-page Recently
-Saved Albums shelf, grid/list view switching, and bulk library actions.
+Saved Albums shelf, an optional compact list view alongside the grid, and bulk
+library actions.
 
 ## M5 — Distribution
 
