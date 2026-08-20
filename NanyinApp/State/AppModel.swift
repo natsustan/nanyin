@@ -47,6 +47,7 @@ final class AppModel {
     private var playbackGeneration: UInt64 = 0
     private var activePlaybackGeneration: UInt64?
     private var webRefreshInFlight: (epoch: Int, task: Task<SpotifyAuth.Token, Error>)?
+    private var interactiveSignInTask: Task<Void, Never>?
 
     /// Returns a valid Web API access token, refreshing when near expiry.
     /// Concurrent callers share one in-flight refresh.
@@ -707,10 +708,16 @@ final class AppModel {
     }
 
     func signIn() {
+        guard authState == .loggedOut else { return }
         authState = .signingIn
         authError = nil
         let epoch = accountEpoch
-        Task {
+        interactiveSignInTask = Task {
+            defer {
+                if epoch == accountEpoch {
+                    interactiveSignInTask = nil
+                }
+            }
             do {
                 let playback = try await SpotifyAuth.signIn { web in
                     guard epoch == self.accountEpoch,
@@ -761,11 +768,18 @@ final class AppModel {
         accountEpoch += 1
         playbackGeneration &+= 1
         activePlaybackGeneration = nil
+        loadEpoch += 1
+        searchEpoch += 1
         SpotifyAuth.invalidateInteractiveSignIn()
         _ = Core.shutdown()
         AudioRenderer.shared.stop()
+        nowPlayingMgr.clear()
+        interactiveSignInTask?.cancel()
+        interactiveSignInTask = nil
         webRefreshInFlight?.task.cancel()
         webRefreshInFlight = nil
+        searchDebounce?.cancel()
+        searchDebounce = nil
         likedProbeTask?.cancel()
         likedProbeTask = nil
         pendingLikeProbeIDs.removeAll()
@@ -780,9 +794,19 @@ final class AppModel {
         likedServerTotal = nil
         likedCacheNeedsFullReconciliation = false
         likedCount = 0
-        tracksByContext["liked"] = nil
-        trackLoadingTokens["liked"] = nil
-        tracksError["liked"] = nil
+        page = .home
+        history.removeAll()
+        forwardStack.removeAll()
+        playlists.removeAll()
+        tracksByContext.removeAll()
+        albumsByArtist.removeAll()
+        artistsByID.removeAll()
+        artistProfileFetches.removeAll()
+        trackLoadingTokens.removeAll()
+        tracksError.removeAll()
+        searchQuery = ""
+        searchArtists.removeAll()
+        isSearching = false
         playbackAccessToken = ""
         webAccessToken = ""
         webTokenExpiry = .distantPast
@@ -790,6 +814,11 @@ final class AppModel {
         userDisplayName = ""
         userId = ""
         nowPlaying = nil
+        isPlaying = false
+        isBuffering = false
+        durationMs = 0
+        shuffle = false
+        repeatMode = .off
         playbackConnectionState = .connecting
         queueEpoch += 1
         queueCurrent = nil
@@ -974,23 +1003,24 @@ final class AppModel {
             return
         }
         let epoch = searchEpoch
+        let account = accountEpoch
         isSearching = true
         Task {
             do {
-                // Token may have expired while idle — revalidate (same as open()).
-                await refreshAPIClient()
-                let results = try await api!.search(query)
+                let results = try await withAPIAuthRetry(for: account) { api in
+                    try await api.search(query)
+                }
                 // Discard if the query changed mid-flight.
-                guard epoch == searchEpoch else { return }
+                guard account == accountEpoch, epoch == searchEpoch else { return }
                 dlog("search \"\(query)\" → \(results.tracks.count) tracks, \(results.artists.count) artists")
                 tracksByContext["search"] = results.tracks
                 searchArtists = results.artists
             } catch {
-                guard epoch == searchEpoch else { return }
+                guard account == accountEpoch, epoch == searchEpoch else { return }
                 tracksError["search"] = error.localizedDescription
                 dlog("search failed: \(error)")
             }
-            if epoch == searchEpoch {
+            if account == accountEpoch, epoch == searchEpoch {
                 isSearching = false
             }
         }
@@ -1146,19 +1176,20 @@ final class AppModel {
             do {
                 // Token may have expired while the app sat idle — revalidate.
                 await refreshAPIClient()
+                guard epoch == loadEpoch, let api else { return }
                 var discography: [SpotifyClient.AlbumInfo]?
                 let tracks: [SpotifyClient.Track]
                 switch newPage {
                 case .liked:
-                    tracks = try await api!.likedTracks()
+                    tracks = try await api.likedTracks()
                 case let .playlist(id, _):
-                    tracks = try await api!.playlistTracks(id)
+                    tracks = try await api.playlistTracks(id)
                 case let .artist(id, _, _):
                     // Top tracks and discography in parallel; discography is a
                     // bonus section — its failure must not fail the page.
-                    async let albums = api!.artistAlbums(id)
+                    async let albums = api.artistAlbums(id)
                     do {
-                        tracks = try await api!.artistTopTracks(id)
+                        tracks = try await api.artistTopTracks(id)
                     } catch {
                         // Preserve a successful discography even when the
                         // top-tracks endpoint fails, so the artist page can
@@ -1171,7 +1202,7 @@ final class AppModel {
                     }
                     discography = try? await albums
                 case let .album(id, _, _, _):
-                    tracks = try await api!.albumTracks(id)
+                    tracks = try await api.albumTracks(id)
                 case .search:
                     // Results are fetched by search(), not by page-open.
                     return
@@ -1199,27 +1230,22 @@ final class AppModel {
     func loadArtistProfileIfNeeded(id: String) {
         guard artistsByID[id] == nil, !artistProfileFetches.contains(id) else { return }
         artistProfileFetches.insert(id)
+        let account = accountEpoch
         Task {
-            defer { artistProfileFetches.remove(id) }
-            var artist: SpotifyClient.Artist?
-            do {
-                if let client = api {
-                    // The existing client is already authenticated in the
-                    // normal path; avoid a redundant token check here.
-                    artist = try await client.artist(id)
-                } else {
-                    await refreshAPIClient()
-                    artist = try? await api?.artist(id)
+            defer {
+                if account == accountEpoch {
+                    artistProfileFetches.remove(id)
                 }
-            } catch SpotifyClient.APIError.needsAuth {
-                // Refresh only when the current client is actually rejected.
-                await refreshAPIClient(forceRefresh: true)
-                artist = try? await api?.artist(id)
+            }
+            do {
+                let artist = try await withAPIAuthRetry(for: account) { api in
+                    try await api.artist(id)
+                }
+                guard account == accountEpoch else { return }
+                artistsByID[id] = artist
             } catch {
                 return
             }
-            guard let artist else { return }
-            artistsByID[id] = artist
         }
     }
 
