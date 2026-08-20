@@ -107,6 +107,7 @@ final class AppModel {
 
     private(set) var isPlaying = false
     private(set) var isBuffering = false
+    private var albumPlaybackTimeout: Task<Void, Never>?
     // NOTE: playback position is intentionally NOT stored here. Polling it at
     // 2Hz from the app-wide observable would invalidate every view reading
     // the model (including every track row) — PlayerBar ticks it locally.
@@ -1164,6 +1165,7 @@ final class AppModel {
 
     /// Clean shutdown of the Rust core (Connect goodbye) — app quit path.
     func shutdown() {
+        cancelAlbumPlaybackTimeout()
         _ = Core.shutdown()
         AudioRenderer.shared.stop()
         NowPlayingManager.shared.clear()
@@ -1176,6 +1178,7 @@ final class AppModel {
             task.cancel()
         }
         albumSaveMutationTasks.removeAll()
+        cancelAlbumPlaybackTimeout()
         accountEpoch += 1
         _ = Core.shutdown()
         AudioRenderer.shared.stop()
@@ -1645,6 +1648,7 @@ final class AppModel {
     /// Connect state gets 429-rejected. Falls back to a bounded track window
     /// if the context path doesn't start audio in time.
     func play(track: SpotifyClient.Track, contextKey: String) {
+        cancelAlbumPlaybackTimeout()
         if pendingQueueHistory == nil, let nowPlaying, nowPlaying.uri != track.uri {
             pendingQueueHistory = (nowPlaying, durationMs)
         }
@@ -1707,13 +1711,27 @@ final class AppModel {
     /// a track-URI list (M4.3 roadmap rule; large context uploads get
     /// 429-rejected silently).
     func playAlbum(id: String) {
+        cancelAlbumPlaybackTimeout()
         let uri = "spotify:album:\(id)"
         isBuffering = true
         let rc = Core.playContext(uri, startIndex: 0)
         dlog("playAlbum(\(uri)) rc=\(rc)")
         if rc != 0 {
             isBuffering = false
+            return
         }
+        albumPlaybackTimeout = Task {
+            try? await Task.sleep(for: .seconds(8))
+            guard !Task.isCancelled, isBuffering else { return }
+            dlog("album context load stalled — clearing buffering state")
+            isBuffering = false
+            albumPlaybackTimeout = nil
+        }
+    }
+
+    private func cancelAlbumPlaybackTimeout() {
+        albumPlaybackTimeout?.cancel()
+        albumPlaybackTimeout = nil
     }
 
     /// Retry button on failed track loads: drop the caches for the current
@@ -1755,14 +1773,18 @@ final class AppModel {
     private func handle(_ event: Core.Event) {
         switch event {
         case .playing:
+            cancelAlbumPlaybackTimeout()
             isPlaying = true
             isBuffering = false
             pushNowPlayingInfo()
         case let .paused(_, positionMs):
+            cancelAlbumPlaybackTimeout()
             isPlaying = false
+            isBuffering = false
             _ = positionMs
             pushNowPlayingInfo()
         case .stopped:
+            cancelAlbumPlaybackTimeout()
             isPlaying = false
             isBuffering = false
             pushNowPlayingInfo()
@@ -1933,6 +1955,7 @@ final class AppModel {
     // MARK: - Playback commands
 
     func playURI(_ input: String) {
+        cancelAlbumPlaybackTimeout()
         var uri = input.trimmingCharacters(in: .whitespacesAndNewlines)
         if !uri.hasPrefix("spotify:"), let id = SpotifyClient.trackId(from: uri) {
             uri = "spotify:track:\(id)"
@@ -2003,7 +2026,14 @@ final class AppModel {
         _ = Core.setVolume(UInt16(fraction * 65_535))
     }
 
-    func next() { _ = Core.next() }
-    func prev() { _ = Core.prev() }
+    func next() {
+        cancelAlbumPlaybackTimeout()
+        _ = Core.next()
+    }
+
+    func prev() {
+        cancelAlbumPlaybackTimeout()
+        _ = Core.prev()
+    }
 
 }
