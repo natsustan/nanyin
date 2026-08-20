@@ -1484,7 +1484,7 @@ final class AppModel {
     /// (learned the hard way: refresh token got invalidated).
     private func reconnect(disconnectedGeneration: UInt64) {
         guard authState == .loggedIn,
-              activePlaybackGeneration == disconnectedGeneration else { return }
+              playbackGeneration == disconnectedGeneration else { return }
         let epoch = accountEpoch
         let accessToken = playbackAccessToken
         let generation = beginPlaybackConnection()
