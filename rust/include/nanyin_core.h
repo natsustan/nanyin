@@ -12,8 +12,9 @@ extern "C" {
 // Error codes returned by most functions:
 //   0  = success
 //  -1  = general error
-//  -2  = session disconnected — refresh token and call nanyin_init_player again
+//  -2  = session disconnected
 //  -3  = session not ready — retry after the connected callback
+//  -4  = credentials rejected — refresh the playback token once
 
 // === Lifecycle ===
 
@@ -88,7 +89,8 @@ typedef void (*NanyinSessionConnectedCallback)(void);
 void nanyin_register_session_connected_callback(NanyinSessionConnectedCallback callback);
 
 /// Fired when the session drops (idle timeout, network loss, revoke).
-/// Swift should refresh the token and call nanyin_init_player again.
+/// Swift should re-init with the current token first. Refresh only when
+/// nanyin_init_player explicitly returns -4 (credentials rejected).
 typedef void (*NanyinSessionDisconnectedCallback)(void);
 void nanyin_register_session_disconnected_callback(NanyinSessionDisconnectedCallback callback);
 

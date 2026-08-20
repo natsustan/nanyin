@@ -190,10 +190,11 @@ final class AppModel {
     /// Desired like state that must win over a lagged server snapshot.
     /// Successful writes expire after a bounded reconciliation window.
     private struct LikeOverride {
-        let liked: Bool
-        let track: SpotifyClient.Track
-        let mutationID: UUID
+        var mutation: LikeMutation
+        var track: SpotifyClient.Track
         var expiresAt: Date?
+
+        var liked: Bool { mutation.desiredLiked }
     }
     private var likeOverrides: [String: LikeOverride] = [:]
     /// One writer per track; rapid toggles are folded into the latest override.
@@ -358,12 +359,21 @@ final class AppModel {
     }
 
     private func rememberLikeOverride(_ track: SpotifyClient.Track, liked: Bool) {
-        likeOverrides[track.id] = LikeOverride(
-            liked: liked,
-            track: track,
-            mutationID: UUID(),
-            expiresAt: nil
-        )
+        if var existing = likeOverrides[track.id] {
+            existing.mutation.setDesired(liked)
+            existing.track = track
+            existing.expiresAt = nil
+            likeOverrides[track.id] = existing
+        } else {
+            likeOverrides[track.id] = LikeOverride(
+                mutation: LikeMutation(
+                    confirmedLiked: likedIDs.contains(track.id),
+                    desiredLiked: liked
+                ),
+                track: track,
+                expiresAt: nil
+            )
+        }
     }
 
     private func forgetLikeOverride(_ id: String) {
@@ -515,26 +525,7 @@ final class AppModel {
         let wasLiked = likedIDs.contains(track.id)
         rememberLikeOverride(track, liked: !wasLiked)
         knownLikeIDs.insert(track.id)
-        if wasLiked {
-            likedIDs.remove(track.id)
-        } else {
-            likedIDs.insert(track.id)
-        }
-        if likedServerTotal != nil {
-            likedCount += wasLiked ? -1 : 1
-        }
-
-        // Liked page cache maintenance: unliking removes the row, a like
-        // inserts at top (matches Spotify's newest-first ordering).
-        if var liked = tracksByContext["liked"] {
-            if wasLiked {
-                liked.removeAll { $0.id == track.id }
-                tracksByContext["liked"] = liked
-            } else {
-                liked.insert(track, at: 0)
-                tracksByContext["liked"] = liked
-            }
-        }
+        applyLocalLikeState(track, liked: !wasLiked)
 
         if activeLikeMutations.insert(track.id).inserted {
             let epoch = accountEpoch
@@ -550,21 +541,36 @@ final class AppModel {
         defer {
             if epoch == accountEpoch { activeLikeMutations.remove(id) }
         }
-        while epoch == accountEpoch, let attempted = likeOverrides[id] {
+        while epoch == accountEpoch, let current = likeOverrides[id] {
+            let attempted = current.mutation.nextAttempt()
+            let succeeded: Bool
             do {
                 try await persistLike(id: id, liked: attempted.liked, epoch: epoch)
+                succeeded = true
             } catch {
                 guard epoch == accountEpoch else { return }
-                // An older failed request must not undo a newer click.
-                guard likeOverrides[id]?.mutationID == attempted.mutationID else { continue }
-                revertLike(attempted.track, failedDesired: attempted.liked)
-                return
+                succeeded = false
             }
 
+            guard epoch == accountEpoch else { return }
             guard var latest = likeOverrides[id] else { return }
-            guard latest.liked != attempted.liked else {
-                latest.expiresAt = Date().addingTimeInterval(likeOverrideLagWindow)
+            switch latest.mutation.resolve(attempted, succeeded: succeeded) {
+            case .persistLatest:
                 likeOverrides[id] = latest
+                continue
+            case let .settled(maskServerLag):
+                if maskServerLag {
+                    latest.expiresAt = Date().addingTimeInterval(likeOverrideLagWindow)
+                    likeOverrides[id] = latest
+                } else {
+                    forgetLikeOverride(id)
+                }
+                return
+            case let .rollback(confirmedLiked):
+                dlog("like toggle FAILED for \(id), reverting to confirmed state")
+                let track = latest.track
+                forgetLikeOverride(id)
+                applyLocalLikeState(track, liked: confirmedLiked)
                 return
             }
         }
@@ -597,24 +603,26 @@ final class AppModel {
         toggleLike(track)
     }
 
-    private func revertLike(_ track: SpotifyClient.Track, failedDesired: Bool) {
-        dlog("like toggle FAILED for \(track.id), reverting")
-        guard likeOverrides[track.id]?.liked == failedDesired else { return }
-        forgetLikeOverride(track.id)
-        if failedDesired {
-            let removed = likedIDs.remove(track.id) != nil
-            if removed, likedServerTotal != nil { likedCount -= 1 }
+    private func applyLocalLikeState(_ track: SpotifyClient.Track, liked: Bool) {
+        let changed: Bool
+        if liked {
+            changed = likedIDs.insert(track.id).inserted
         } else {
-            let inserted = likedIDs.insert(track.id).inserted
-            if inserted, likedServerTotal != nil { likedCount += 1 }
+            changed = likedIDs.remove(track.id) != nil
         }
+        if changed, likedServerTotal != nil {
+            likedCount += liked ? 1 : -1
+        }
+
+        // Liked page cache maintenance: unliking removes the row, a like
+        // inserts at top (matches Spotify's newest-first ordering).
         if var liked = tracksByContext["liked"] {
-            if failedDesired {
-                liked.removeAll { $0.id == track.id }
-            } else {
+            if likedIDs.contains(track.id) {
                 if !liked.contains(where: { $0.id == track.id }) {
                     liked.insert(track, at: 0)
                 }
+            } else {
+                liked.removeAll { $0.id == track.id }
             }
             tracksByContext["liked"] = liked
         }
@@ -801,11 +809,18 @@ final class AppModel {
 
     private func initPlayerAndUser() async throws {
         let deviceId = try KeychainStore.spotifyDeviceId()
-        let rc = await Core.initializePlayer(accessToken: playbackAccessToken, deviceId: deviceId)
-        guard rc == 0 else {
-            let detail = Core.lastErrorMessage() ?? "unknown"
-            dlog("player init rc=\(rc): \(detail)")
-            throw PlayerInitError(detail: "Player init failed (rc \(rc)): \(detail)")
+        switch await Core.initializePlayer(
+            accessToken: playbackAccessToken,
+            deviceId: deviceId
+        ) {
+        case .connected:
+            break
+        case let .credentialsRejected(message):
+            dlog("player init credentials rejected: \(message)")
+            throw PlayerInitError(detail: "Player credentials rejected: \(message)")
+        case let .failed(code, message):
+            dlog("player init rc=\(code): \(message)")
+            throw PlayerInitError(detail: "Player init failed (rc \(code)): \(message)")
         }
         do {
             if let profile = try await api?.currentUser() {
@@ -1394,20 +1409,38 @@ final class AppModel {
             // 1) Try re-init with the CURRENT access token — cheap and usually
             //    sufficient (librespot also refreshes internally via login5).
             guard epoch == accountEpoch, authState == .loggedIn else { return }
-            let rc = await Core.initializePlayer(accessToken: accessToken, deviceId: deviceId)
+            let result = await Core.initializePlayer(
+                accessToken: accessToken,
+                deviceId: deviceId
+            )
             guard epoch == accountEpoch, authState == .loggedIn else { return }
-            if rc == 0 {
+            switch result {
+            case .connected:
                 connectionNote = nil
                 return
+            case let .failed(code, message):
+                dlog("reconnect kept current token after init rc=\(code): \(message)")
+                connectionNote = "Connection lost — \(message)"
+                return
+            case let .credentialsRejected(message):
+                dlog("reconnect credentials rejected: \(message)")
             }
-            // 2) Only if that fails, mint a fresh token via refresh.
+            // 2) Only an explicit credential rejection may mint a fresh token.
             do {
                 let token = try await SpotifyAuth.refreshAccessToken(for: .playback)
                 guard epoch == accountEpoch, authState == .loggedIn else { return }
                 apply(playbackToken: token)
-                let rc2 = await Core.initializePlayer(accessToken: playbackAccessToken, deviceId: deviceId)
+                let retry = await Core.initializePlayer(
+                    accessToken: playbackAccessToken,
+                    deviceId: deviceId
+                )
                 guard epoch == accountEpoch, authState == .loggedIn else { return }
-                connectionNote = rc2 == 0 ? nil : "Connection lost"
+                switch retry {
+                case .connected:
+                    connectionNote = nil
+                case let .credentialsRejected(message), let .failed(_, message):
+                    connectionNote = "Connection lost — \(message)"
+                }
             } catch {
                 guard epoch == accountEpoch, authState == .loggedIn else { return }
                 if case SpotifyAuth.AuthError.refreshTokenRevoked = error {

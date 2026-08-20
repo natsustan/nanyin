@@ -19,10 +19,12 @@ use librespot_core::authentication::Credentials;
 use librespot_core::cache::Cache;
 use librespot_core::config::{DeviceType, SessionConfig};
 use librespot_core::session::Session;
+use librespot_core::AccessPointAuthenticationError;
 use librespot_playback::config::{AudioFormat, Bitrate, PlayerConfig};
 use librespot_playback::mixer::softmixer::SoftMixer;
 use librespot_playback::mixer::{Mixer, MixerConfig};
 use librespot_playback::player::Player;
+use librespot_protocol::keyexchange::ErrorCode;
 
 use once_cell::sync::Lazy;
 use serde_json::json;
@@ -35,8 +37,57 @@ use proxy_sink::mk_proxy_sink;
 // ============================================================================
 //  0 = success
 // -1 = general error
-// -2 = session disconnected — Swift should refresh the token and re-init
+// -2 = session disconnected
 // -3 = session not ready yet — retry when the connected callback fires
+// -4 = credentials rejected — Swift may refresh the playback token once
+
+const PLAYER_INIT_FAILED: i32 = -1;
+const PLAYER_INIT_CREDENTIALS_REJECTED: i32 = -4;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PlayerInitFailureKind {
+    CredentialsRejected,
+    Other,
+}
+
+#[derive(Debug)]
+struct PlayerInitFailure {
+    kind: PlayerInitFailureKind,
+    message: String,
+}
+
+impl PlayerInitFailure {
+    fn other(message: impl Into<String>) -> Self {
+        Self {
+            kind: PlayerInitFailureKind::Other,
+            message: message.into(),
+        }
+    }
+
+    fn from_librespot(error: &librespot_core::Error) -> Self {
+        let kind = if matches!(
+            error.error.downcast_ref::<AccessPointAuthenticationError>(),
+            Some(AccessPointAuthenticationError::LoginFailed(
+                ErrorCode::BadCredentials | ErrorCode::CouldNotValidateCredentials
+            ))
+        ) {
+            PlayerInitFailureKind::CredentialsRejected
+        } else {
+            PlayerInitFailureKind::Other
+        };
+        Self {
+            kind,
+            message: format!("spirc init: {error:?}"),
+        }
+    }
+
+    fn code(&self) -> i32 {
+        match self.kind {
+            PlayerInitFailureKind::CredentialsRejected => PLAYER_INIT_CREDENTIALS_REJECTED,
+            PlayerInitFailureKind::Other => PLAYER_INIT_FAILED,
+        }
+    }
+}
 
 // ============================================================================
 // Global state
@@ -239,24 +290,37 @@ pub extern "C" fn nanyin_init_player(access_token: *const c_char, device_id: *co
 
     if access_token.is_null() {
         eprintln!("nanyin_core: init_player: token is null");
-        return -1;
+        set_last_error("access token is null");
+        return PLAYER_INIT_FAILED;
     }
     let token = unsafe {
         match CStr::from_ptr(access_token).to_str() {
             Ok(s) => s.to_string(),
             Err(_) => {
                 eprintln!("nanyin_core: init_player: invalid utf8 token");
-                return -1;
+                set_last_error("access token is invalid utf8");
+                return PLAYER_INIT_FAILED;
             }
         }
     };
     let device = unsafe {
         if device_id.is_null() {
-            format!("nanyin_{}", std::process::id())
+            eprintln!("nanyin_core: init_player: device id is null");
+            set_last_error("device id is null");
+            return PLAYER_INIT_FAILED;
         } else {
             match CStr::from_ptr(device_id).to_str() {
+                Ok("") => {
+                    eprintln!("nanyin_core: init_player: device id is empty");
+                    set_last_error("device id is empty");
+                    return PLAYER_INIT_FAILED;
+                }
                 Ok(s) => s.to_string(),
-                Err(_) => format!("nanyin_{}", std::process::id()),
+                Err(_) => {
+                    eprintln!("nanyin_core: init_player: invalid utf8 device id");
+                    set_last_error("device id is invalid utf8");
+                    return PLAYER_INIT_FAILED;
+                }
             }
         }
     };
@@ -304,9 +368,9 @@ pub extern "C" fn nanyin_init_player(access_token: *const c_char, device_id: *co
             0
         }
         Err(e) => {
-            eprintln!("nanyin_core: init_player FAILED: {e}");
-            set_last_error(&e);
-            -1
+            eprintln!("nanyin_core: init_player FAILED: {}", e.message);
+            set_last_error(&e.message);
+            e.code()
         }
     }
 }
@@ -315,7 +379,7 @@ async fn init_player_async(
     access_token: &str,
     device_id: &str,
     generation: u64,
-) -> Result<(), String> {
+) -> Result<(), PlayerInitFailure> {
     eprintln!("nanyin_core: init_player_async starting (device {device_id})");
 
     let session_config = SessionConfig {
@@ -343,7 +407,8 @@ async fn init_player_async(
     // and then connects the session itself. Connecting twice yields NotConnected.
 
     let mixer: Arc<SoftMixer> = Arc::new(
-        SoftMixer::open(MixerConfig::default()).map_err(|e| format!("mixer: {e}"))?,
+        SoftMixer::open(MixerConfig::default())
+            .map_err(|e| PlayerInitFailure::other(format!("mixer: {e}")))?,
     );
 
     let player_config = PlayerConfig {
@@ -390,10 +455,11 @@ async fn init_player_async(
     )
     .await
     .map_err(|_| {
-        "spirc init: timed out — Spotify accesspoints unreachable (risk-control throttling?)"
-            .to_string()
+        PlayerInitFailure::other(
+            "spirc init: timed out — Spotify accesspoints unreachable (risk-control throttling?)",
+        )
     })?
-    .map_err(|e| format!("spirc init: {e:?}"))?;
+    .map_err(|e| PlayerInitFailure::from_librespot(&e))?;
 
     let spirc = Arc::new(spirc);
     let published = {
@@ -412,7 +478,7 @@ async fn init_player_async(
     if !published {
         let _ = spirc.shutdown();
         session.shutdown();
-        return Err("player initialization cancelled".to_string());
+        return Err(PlayerInitFailure::other("player initialization cancelled"));
     }
 
     let spirc_handle = RUNTIME.spawn(spirc_task);
@@ -926,14 +992,62 @@ fn _unused(m: mpsc::UnboundedSender<()>) {}
 #[cfg(test)]
 mod tests {
     use super::{
-        interpolated_position_ms, with_current_player_generation, PlaybackPosition,
-        PLAYER_GENERATION, PLAYER_LIFECYCLE,
+        interpolated_position_ms, nanyin_init_player, with_current_player_generation,
+        AccessPointAuthenticationError, ErrorCode, PlaybackPosition, PlayerInitFailure,
+        PlayerInitFailureKind, PLAYER_GENERATION, PLAYER_INIT_CREDENTIALS_REJECTED,
+        PLAYER_INIT_FAILED, PLAYER_LIFECYCLE,
     };
+    use librespot_core::Error;
+    use std::ffi::CString;
+    use std::io;
+    use std::ptr;
     use std::sync::atomic::Ordering;
     use std::sync::mpsc;
     use std::sync::TryLockError;
     use std::thread;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn player_init_refreshes_only_after_typed_credential_rejection() {
+        for code in [ErrorCode::BadCredentials, ErrorCode::CouldNotValidateCredentials] {
+            let error = Error::permission_denied(AccessPointAuthenticationError::LoginFailed(code));
+            let failure = PlayerInitFailure::from_librespot(&error);
+            assert_eq!(failure.kind, PlayerInitFailureKind::CredentialsRejected);
+            assert_eq!(failure.code(), PLAYER_INIT_CREDENTIALS_REJECTED);
+        }
+
+        let generic_permission_denied = Error::permission_denied(io::Error::other("client token 403"));
+        let try_another_ap = Error::permission_denied(
+            AccessPointAuthenticationError::LoginFailed(ErrorCode::TryAnotherAP),
+        );
+        let unavailable = Error::unavailable(io::Error::other("TLS timeout"));
+        for error in [generic_permission_denied, try_another_ap, unavailable] {
+            let failure = PlayerInitFailure::from_librespot(&error);
+            assert_eq!(failure.kind, PlayerInitFailureKind::Other);
+            assert_eq!(failure.code(), PLAYER_INIT_FAILED);
+        }
+    }
+
+    #[test]
+    fn player_init_rejects_missing_or_invalid_device_ids() {
+        let token = CString::new("access-token").unwrap();
+        assert_eq!(
+            nanyin_init_player(token.as_ptr(), ptr::null()),
+            PLAYER_INIT_FAILED
+        );
+
+        let empty = CString::new("").unwrap();
+        assert_eq!(
+            nanyin_init_player(token.as_ptr(), empty.as_ptr()),
+            PLAYER_INIT_FAILED
+        );
+
+        let invalid_utf8 = [0xff_u8, 0];
+        assert_eq!(
+            nanyin_init_player(token.as_ptr(), invalid_utf8.as_ptr().cast()),
+            PLAYER_INIT_FAILED
+        );
+    }
 
     #[test]
     fn player_event_generation_check_is_atomic_with_rebuilds() {

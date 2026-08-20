@@ -17,7 +17,7 @@ import Network
 ///   2. Playback credential via the librespot keymaster client (accepted by
 ///      login5).
 enum SpotifyAuth {
-    enum TokenKind: String {
+    enum TokenKind: String, Sendable {
         case web // ncspot client — Web API
         case playback // keymaster client — librespot session
 
@@ -43,7 +43,7 @@ enum SpotifyAuth {
         }
     }
 
-    struct Token: Codable {
+    struct Token: Codable, Sendable {
         let accessToken: String
         let refreshToken: String?
         let expiresAt: Date
@@ -76,9 +76,122 @@ enum SpotifyAuth {
         }
     }
 
+    /// Serializes refresh and persistence for one credential kind. The actor
+    /// deliberately yields during the HTTP request, so `clear()` can advance
+    /// the revision immediately; the late response then fails its persistence
+    /// fence instead of resurrecting a signed-out credential.
+    private actor TokenCoordinator {
+        private let kind: TokenKind
+        private var persistenceState = CredentialPersistenceState()
+        private var inFlight: (id: UUID, task: Task<Token, Error>)?
+
+        init(kind: TokenKind) {
+            self.kind = kind
+        }
+
+        func refresh(
+            request: @escaping @Sendable (String) async throws -> Token
+        ) async throws -> Token {
+            guard let expectedRevision = persistenceState.beginRefresh() else {
+                throw AuthError.refreshFailed("credential was cleared")
+            }
+            if let inFlight {
+                return try await inFlight.task.value
+            }
+
+            let id = UUID()
+            let task = Task<Token, Error> {
+                if self.kind == .playback {
+                    return try await SpotifyAuth.withPlaybackRefreshLock {
+                        try await self.performRefresh(
+                            expectedRevision: expectedRevision,
+                            request: request
+                        )
+                    }
+                }
+                return try await self.performRefresh(
+                    expectedRevision: expectedRevision,
+                    request: request
+                )
+            }
+            inFlight = (id, task)
+
+            do {
+                let token = try await task.value
+                clearInFlight(id: id)
+                return token
+            } catch {
+                clearInFlight(id: id)
+                throw error
+            }
+        }
+
+        func install(_ token: String?) throws {
+            guard let token else { return }
+            persistenceState.installNewSession()
+            inFlight?.task.cancel()
+            inFlight = nil
+            try SpotifyAuth.setRefreshTokenUncoordinated(token, for: kind)
+        }
+
+        func clear() throws {
+            invalidateRefreshes()
+            try deleteCredential()
+        }
+
+        func invalidateRefreshes() {
+            persistenceState.beginClear()
+            inFlight?.task.cancel()
+            inFlight = nil
+        }
+
+        func deleteCredential() throws {
+            try SpotifyAuth.setRefreshTokenUncoordinated(nil, for: kind)
+        }
+
+        private func persistReplacement(
+            _ token: String?,
+            expectedRevision: UInt64
+        ) throws {
+            guard persistenceState.acceptsRefresh(expectedRevision) else {
+                throw CancellationError()
+            }
+            if let token {
+                try SpotifyAuth.setRefreshTokenUncoordinated(token, for: kind)
+            }
+        }
+
+        private func performRefresh(
+            expectedRevision: UInt64,
+            request: @escaping @Sendable (String) async throws -> Token
+        ) async throws -> Token {
+            guard persistenceState.acceptsRefresh(expectedRevision) else {
+                throw CancellationError()
+            }
+            guard let storedToken = try SpotifyAuth.storedRefreshTokenUncoordinated(for: kind) else {
+                throw AuthError.refreshFailed("no stored refresh token")
+            }
+            let token = try await request(storedToken)
+            try persistReplacement(
+                token.refreshToken,
+                expectedRevision: expectedRevision
+            )
+            return token
+        }
+
+        private func clearInFlight(id: UUID) {
+            if inFlight?.id == id {
+                inFlight = nil
+            }
+        }
+    }
+
+    private static let webTokenCoordinator = TokenCoordinator(kind: .web)
+    private static let playbackTokenCoordinator = TokenCoordinator(kind: .playback)
+
     // MARK: - Token persistence
 
-    static func storedRefreshToken(for kind: TokenKind) throws -> String? {
+    private static func storedRefreshTokenUncoordinated(for kind: TokenKind) throws -> String? {
         // Migrate: the original single-flow keymaster token (all scopes incl.
         // streaming) works as the playback refresh token.
         if kind == .playback, try KeychainStore.string(forKey: kind.keychainKey) == nil {
@@ -91,7 +204,10 @@ enum SpotifyAuth {
         return try KeychainStore.string(forKey: kind.keychainKey)
     }
 
-    static func setRefreshToken(_ token: String?, for kind: TokenKind) throws {
+    private static func setRefreshTokenUncoordinated(
+        _ token: String?,
+        for kind: TokenKind
+    ) throws {
         if let token {
             try KeychainStore.setString(token, forKey: kind.keychainKey)
         } else {
@@ -99,31 +215,42 @@ enum SpotifyAuth {
         }
     }
 
-    /// Waits for any in-flight playback refresh before deleting its credential,
-    /// so a rotated token cannot be persisted after sign-out.
+    /// Invalidates any in-flight refresh before deleting its credential, so a
+    /// late replacement token cannot be persisted after sign-out.
     static func clearRefreshToken(for kind: TokenKind) async throws {
         if kind == .playback {
+            let coordinator = coordinator(for: kind)
+            await coordinator.invalidateRefreshes()
             return try await withPlaybackRefreshLock {
-                try setRefreshToken(nil, for: kind)
+                try await coordinator.deleteCredential()
             }
         }
-        try setRefreshToken(nil, for: kind)
+        try await coordinator(for: kind).clear()
     }
 
     /// Refreshes the access token of the given kind (no browser).
     static func refreshAccessToken(for kind: TokenKind) async throws -> Token {
-        if kind == .playback {
-            return try await withPlaybackRefreshLock {
-                try await refreshAccessTokenUnlocked(for: kind)
-            }
+        let request: @Sendable (String) async throws -> Token = { refreshToken in
+            try await requestRefreshAccessToken(for: kind, refreshToken: refreshToken)
         }
-        return try await refreshAccessTokenUnlocked(for: kind)
+        do {
+            return try await coordinator(for: kind).refresh(request: request)
+        } catch {
+            guard case AuthError.refreshTokenRevoked = error else { throw error }
+            var cleanupError: String?
+            do {
+                try await clearRefreshToken(for: kind)
+            } catch {
+                cleanupError = error.localizedDescription
+            }
+            throw AuthError.refreshTokenRevoked(cleanupError: cleanupError)
+        }
     }
 
-    private static func refreshAccessTokenUnlocked(for kind: TokenKind) async throws -> Token {
-        guard let refreshToken = try storedRefreshToken(for: kind) else {
-            throw AuthError.refreshFailed("no stored refresh token")
-        }
+    private static func requestRefreshAccessToken(
+        for kind: TokenKind,
+        refreshToken: String
+    ) async throws -> Token {
         var req = URLRequest(url: URL(string: "https://accounts.spotify.com/api/token")!)
         req.httpMethod = "POST"
         req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
@@ -140,19 +267,13 @@ enum SpotifyAuth {
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
             let body = String(data: data, encoding: .utf8) ?? "unknown"
             if body.contains("invalid_grant") {
-                // Preserve the rejected-token diagnosis even if Keychain
-                // cleanup fails, while surfacing that failure to the caller.
-                var cleanupError: String?
-                do {
-                    try setRefreshToken(nil, for: kind)
-                } catch {
-                    cleanupError = error.localizedDescription
-                }
-                throw AuthError.refreshTokenRevoked(cleanupError: cleanupError)
+                // The coordinator owns cleanup so refresh and sign-out share
+                // one serialized persistence boundary.
+                throw AuthError.refreshTokenRevoked(cleanupError: nil)
             }
             throw AuthError.refreshFailed(body)
         }
-        return try decodeToken(data, for: kind)
+        return try decodeToken(data)
     }
 
     // MARK: - Interactive flow (two chained authorizations, one browser tab)
@@ -245,21 +366,20 @@ enum SpotifyAuth {
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
             throw AuthError.tokenExchangeFailed(String(data: data, encoding: .utf8) ?? "unknown")
         }
-        return try decodeToken(data, for: flow.kind)
+        let token = try decodeToken(data)
+        try await installRefreshToken(token.refreshToken, for: flow.kind)
+        return token
     }
 
     // MARK: - Helpers
 
-    private static func decodeToken(_ data: Data, for kind: TokenKind) throws -> Token {
+    private static func decodeToken(_ data: Data) throws -> Token {
         struct Response: Decodable {
             let access_token: String
             let refresh_token: String?
             let expires_in: Int
         }
         let r = try JSONDecoder().decode(Response.self, from: data)
-        if let refresh = r.refresh_token {
-            try setRefreshToken(refresh, for: kind)
-        }
         return Token(
             accessToken: r.access_token,
             refreshToken: r.refresh_token,
@@ -269,6 +389,25 @@ enum SpotifyAuth {
 
     private static func escape(_ s: String) -> String {
         s.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? s
+    }
+
+    private static func coordinator(for kind: TokenKind) -> TokenCoordinator {
+        switch kind {
+        case .web: webTokenCoordinator
+        case .playback: playbackTokenCoordinator
+        }
+    }
+
+    private static func installRefreshToken(
+        _ token: String?,
+        for kind: TokenKind
+    ) async throws {
+        if kind == .playback {
+            return try await withPlaybackRefreshLock {
+                try await coordinator(for: kind).install(token)
+            }
+        }
+        try await coordinator(for: kind).install(token)
     }
 
     /// Shares a BSD file lock with dealer_probe.sh so only one process can

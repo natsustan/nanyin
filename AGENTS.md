@@ -21,15 +21,22 @@ xcodebuild -project Nanyin.xcodeproj -scheme Nanyin -configuration Debug build
 
 Run the binary with stderr captured for diagnostics — Swift `dlog` + Rust `eprintln` stream unbuffered. `RUST_LOG=librespot_connect=debug,librespot_core::dealer=warn` for librespot internals.
 
-## CRITICAL: vendored librespot with local patch
+## CRITICAL: vendored librespot with local patches
 
-`rust/Cargo.toml` points at `research-repos/librespot` via **path dependencies** — NOT crates.io, NOT the git rev. The checkout carries an applied-but-upstream-unmerged patch:
+`rust/Cargo.toml` points at `research-repos/librespot` via **path dependencies** — NOT crates.io, NOT the git rev. The checkout carries applied local patches:
 
 - **PR #1741** (connect: don't answer our own cluster update with another state update). Without it, being an active Connect device causes a state-PUT echo loop that has repeatedly ended in Spotify 429 responses. Dealer ghosting, spirc termination, and credential rejection were observed in the same incident, but the server-side causal chain is not publicly documented.
+- **Typed AP authentication error re-export** (local): lets the Rust bridge distinguish explicit `BadCredentials` / `CouldNotValidateCredentials` responses from unrelated `PermissionDenied` failures. Without it, reconnect could rotate the playback token after client-token HTTP 403 responses.
 
 The canonical patch artifact is checked in at
 `patches/librespot-pr-1741.patch`; `script/agent_check.sh` verifies that the
 vendored checkout contains that exact patch before building.
+
+`patches/librespot-auth-error-classification.patch` is a narrow local API
+patch that re-exports librespot's access-point authentication error. The Rust
+bridge uses it to distinguish an explicit credential rejection from generic
+`PermissionDenied` failures such as client-token HTTP 403 responses. Keep this
+patch until upstream exposes an equivalent typed classification.
 
 DO NOT "upgrade" the librespot dependency to crates.io or a git rev until #1741 is merged upstream — you would silently drop the patch and re-enter the echo loop. Check upstream: https://github.com/librespot-org/librespot/pull/1741
 

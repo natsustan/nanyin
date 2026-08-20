@@ -10,6 +10,12 @@ import NanyinCore
 /// Callback storage is nonisolated (Rust invokes us on background threads);
 /// events hop to the MainActor via Task.
 enum Core {
+    enum InitializationResult: Equatable {
+        case connected
+        case credentialsRejected(message: String)
+        case failed(code: Int32, message: String)
+    }
+
     /// Playback event delivered from Rust as JSON.
     enum Event {
         case loading(uri: String, positionMs: Int)
@@ -133,12 +139,18 @@ enum Core {
         initStateLock.unlock()
     }
 
-    nonisolated static func initializePlayer(accessToken: String, deviceId: String) async -> Int32 {
+    nonisolated static func initializePlayer(
+        accessToken: String,
+        deviceId: String
+    ) async -> InitializationResult {
         let generation = currentInitGeneration()
         return await withCheckedContinuation { cont in
             initQueue.async {
                 guard generation == currentInitGeneration() else {
-                    cont.resume(returning: Int32(-1))
+                    cont.resume(returning: .failed(
+                        code: -1,
+                        message: "Player initialization cancelled"
+                    ))
                     return
                 }
                 let result = initializePlayerBlocking(
@@ -146,7 +158,10 @@ enum Core {
                 )
                 guard generation == currentInitGeneration() else {
                     _ = nanyin_shutdown()
-                    cont.resume(returning: Int32(-1))
+                    cont.resume(returning: .failed(
+                        code: -1,
+                        message: "Player initialization cancelled"
+                    ))
                     return
                 }
                 cont.resume(returning: result)
@@ -156,10 +171,19 @@ enum Core {
 
     nonisolated private static func initializePlayerBlocking(
         accessToken: String, deviceId: String
-    ) -> Int32 {
+    ) -> InitializationResult {
         installCallbacks()
-        return accessToken.withCString { token in
+        let code = accessToken.withCString { token in
             deviceId.withCString { nanyin_init_player(token, $0) }
+        }
+        let message = code == 0 ? "" : lastErrorMessage() ?? "unknown"
+        switch code {
+        case 0:
+            return .connected
+        case -4:
+            return .credentialsRejected(message: message)
+        default:
+            return .failed(code: code, message: message)
         }
     }
 

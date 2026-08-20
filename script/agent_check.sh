@@ -7,7 +7,11 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUST_MANIFEST="$ROOT_DIR/rust/Cargo.toml"
 LIBRESPOT_DIR="$ROOT_DIR/research-repos/librespot"
-LIBRESPOT_PATCH="$ROOT_DIR/patches/librespot-pr-1741.patch"
+LIBRESPOT_PATCHES=(
+    "$ROOT_DIR/patches/librespot-pr-1741.patch"
+    "$ROOT_DIR/patches/librespot-auth-error-classification.patch"
+)
+XCODE_PROJECT_FILE="$ROOT_DIR/Nanyin.xcodeproj/project.pbxproj"
 
 export PATH="$HOME/.local/share/mise/shims:$HOME/.cargo/bin:$PATH"
 export CARGO_NET_OFFLINE=true
@@ -35,10 +39,33 @@ for dependency in core connect playback metadata protocol; do
         || fail "librespot-${dependency} is not pinned to the vendored path"
 done
 git -C "$LIBRESPOT_DIR" diff --check
-git -C "$LIBRESPOT_DIR" apply --reverse --check "$LIBRESPOT_PATCH" \
-    || fail "required librespot PR #1741 patch is not applied exactly"
+for patch in "${LIBRESPOT_PATCHES[@]}"; do
+    git -C "$LIBRESPOT_DIR" apply --reverse --check --unidiff-zero "$patch" \
+        || fail "required librespot patch is not applied exactly: ${patch##*/}"
+done
 
 command -v mise >/dev/null 2>&1 || fail "mise is required"
+command -v xcrun >/dev/null 2>&1 || fail "Xcode command-line tools are required"
+
+step "checking Xcode source membership"
+while IFS= read -r source; do
+    source_name="${source##*/}"
+    rg -Fq "$source_name in Sources" "$XCODE_PROJECT_FILE" \
+        || fail "$source is missing from Nanyin.xcodeproj; run xcodegen generate"
+done < <(rg --files "$ROOT_DIR/NanyinApp" -g '*.swift')
+
+step "running Swift state reducer tests"
+state_test_dir="$(mktemp -d "${TMPDIR:-/tmp}/nanyin-state-tests.XXXXXX")"
+cleanup() {
+    rm -r -- "$state_test_dir"
+}
+trap cleanup EXIT
+xcrun swiftc \
+    "$ROOT_DIR/NanyinApp/Core/CredentialRevision.swift" \
+    "$ROOT_DIR/NanyinApp/State/LikeMutation.swift" \
+    "$ROOT_DIR/Tests/StateReducerTests.swift" \
+    -o "$state_test_dir/state-reducer-tests"
+"$state_test_dir/state-reducer-tests"
 
 step "running Rust unit tests offline"
 mise exec rust@stable -- cargo test \
