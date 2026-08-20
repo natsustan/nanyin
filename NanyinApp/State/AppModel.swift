@@ -234,18 +234,18 @@ final class AppModel {
         defer {
             if epoch == accountEpoch { likedProbeTask = nil }
         }
-        await refreshAPIClient(for: epoch)
         guard epoch == accountEpoch,
               authState == .loggedIn,
-              !likedSnapshotComplete,
-              let api else { return }
+              !likedSnapshotComplete else { return }
 
         var retryAttempt = 0
         while epoch == accountEpoch, !likedSnapshotComplete, !pendingLikeProbeIDs.isEmpty {
             let ids = Array(pendingLikeProbeIDs.prefix(50))
             pendingLikeProbeIDs.subtract(ids)
             do {
-                let flags = try await api.likedContains(ids: ids)
+                let flags = try await withAPIAuthRetry(for: epoch) { api in
+                    try await api.likedContains(ids: ids)
+                }
                 guard epoch == accountEpoch,
                       authState == .loggedIn,
                       !likedSnapshotComplete else { return }
@@ -259,6 +259,13 @@ final class AppModel {
                     }
                 }
                 retryAttempt = 0
+            } catch SpotifyClient.APIError.needsAuth {
+                guard epoch == accountEpoch,
+                      !likedSnapshotComplete,
+                      !Task.isCancelled else { return }
+                pendingLikeProbeIDs.formUnion(ids)
+                dlog("likedContains remained unauthorized after token refresh")
+                return
             } catch {
                 guard epoch == accountEpoch,
                       !likedSnapshotComplete,
