@@ -926,12 +926,9 @@ final class AppModel {
                 }
             }
             do {
-                await refreshAPIClient(for: account)
-                guard account == accountEpoch,
-                      epoch == queueEpoch,
-                      authState == .loggedIn,
-                      let api else { return }
-                let result = try await api.playerQueue()
+                let result = try await withAPIAuthRetry(for: account) { api in
+                    try await api.playerQueue()
+                }
                 guard account == accountEpoch,
                       epoch == queueEpoch,
                       authState == .loggedIn else { return }

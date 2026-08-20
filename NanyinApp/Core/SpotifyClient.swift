@@ -435,21 +435,32 @@ struct SpotifyClient {
 
     /// Saves tracks to Liked Songs (PUT /v1/me/tracks).
     func saveTracks(ids: [String]) async throws {
-        let body = try JSONEncoder().encode(SaveTracksBody(ids: ids))
-        let (_, response) = try await URLSession.shared.data(for: request(path: "/v1/me/tracks", method: "PUT", body: body))
-        try throwIfNotOK(response)
+        try await mutateSavedTracks(ids: ids, method: "PUT")
     }
 
     /// Removes tracks from Liked Songs (DELETE /v1/me/tracks).
     func removeTracks(ids: [String]) async throws {
-        let body = try JSONEncoder().encode(SaveTracksBody(ids: ids))
-        let (_, response) = try await URLSession.shared.data(for: request(path: "/v1/me/tracks", method: "DELETE", body: body))
-        try throwIfNotOK(response)
+        try await mutateSavedTracks(ids: ids, method: "DELETE")
     }
 
-    private func throwIfNotOK(_ response: URLResponse) throws {
-        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        guard (200..<300).contains(status) else {
+    private func mutateSavedTracks(ids: [String], method: String, retries: Int = 2) async throws {
+        let body = try JSONEncoder().encode(SaveTracksBody(ids: ids))
+        let req = request(path: "/v1/me/tracks", method: method, body: body)
+        var attempt = 0
+
+        while true {
+            let (_, response) = try await URLSession.shared.data(for: req)
+            let httpResponse = response as? HTTPURLResponse
+            let status = httpResponse?.statusCode ?? 0
+            if (200..<300).contains(status) { return }
+            if status == 429, attempt < retries {
+                let retryAfter = Double(httpResponse?.value(forHTTPHeaderField: "Retry-After") ?? "") ?? 2.0
+                let wait = min(max(retryAfter, 1.0), 30.0)
+                dlog("web api 429 on \(method) /v1/me/tracks, retrying in \(wait)s")
+                try await Task.sleep(for: .seconds(wait))
+                attempt += 1
+                continue
+            }
             if status == 401 { throw APIError.needsAuth }
             throw APIError.http(status, "")
         }
