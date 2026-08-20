@@ -1,6 +1,6 @@
 # nanyin — Roadmap
 
-> Status: M0 ✅ · M1 ✅ · hardening ✅ · M3 ✅ · M2 2.1/2.2/2.3/2.4/2.5 ✅ (2.6 paused in watch window) · M4.1 ✅ · M4.2 ✅ · M4.3 implemented (offline checks ✅, live verification pending)
+> Status: M0 ✅ · M1 ✅ · hardening ✅ · M3 ✅ · M2 2.1/2.2/2.3/2.4/2.5 ✅ (2.6 paused in watch window) · M4.1 ✅ · M4.2 ✅ · M4.3 ✅
 > Last updated: 2026-08-20
 
 ## Completed
@@ -139,6 +139,19 @@ vertical `ScrollView`; card = square cover + hover play circle (green,
 Spotify-grid style) + hover minus badge for removal; click opens the album
 page. Live-verified the row/list layout earlier the same day (106-album
 library, correct count); grid layout verified live right after.
+
+Live verification 2026-08-20 (write path, via UI automation + OCR):
+106-album library paginates (server total drives sidebar count); remove from
+the album header flipped the control to + SAVE ALBUM, dropped the count to
+105, removed the card from the grid, and a forced refresh confirmed the
+server agreed (105 albums); re-saving flipped it back to ✓ SAVED, count 106,
+and after refresh the album returned at the TOP of Recently Added (newest
+first). Override lifecycle cleared exactly on server confirmation. Zero 429s
+/ dealer errors the whole session (one benign hm://collection dealer parse
+warning). Rapid-toggle ordering and failed-write rollback remain covered by
+the deterministic reducer suite (forcing a live server failure isn't worth
+the risk-control exposure); cross-client convergence relies on the same
+forced-refresh path verified above.
 
 Goal: make album-first listening a complete library flow. A user can save an
 album from its detail page, find it immediately in Saved Albums, and start the
