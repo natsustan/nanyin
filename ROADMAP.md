@@ -1,6 +1,6 @@
 # nanyin — Roadmap
 
-> Status: M0 ✅ · M1 ✅ · hardening ✅ · M2 ✅ · M3 ✅ · M4.1 ✅ · M4.2 ✅ · M4.3 ✅ · M4.4 ✅ · M4.5 ✅ (offline)
+> Status: M0 ✅ · M1 ✅ · hardening ✅ · M2 ✅ · M3 ✅ · M4.1 ✅ · M4.2 ✅ · M4.3 ✅ · M4.4 ✅ · M4.5 ✅ (offline) · next: M4.6
 > Last updated: 2026-08-21
 
 ## Completed
@@ -45,17 +45,17 @@ Perf notes:
 
 ---
 
-## M2 — Playback completeness (next)
+## M2 — Playback completeness ✅
 
 Goal: "usable as the daily driver" — everything the transport bar implies works.
 
 | # | Item | Notes | Est |
 |---|------|-------|-----|
-| 2.1 | Media keys + MPNowPlayingInfoCenter | MPRemoteCommandCenter: play/pause/next/prev/seek/position; NowPlayingInfo: title/artist/artwork/duration/position. Artwork via NSURLSession → NSImage | 0.5d |
-| 2.2 | Shuffle / repeat | `spirc.shuffle(bool)`, `spirc.repeat(bool)`, `spirc.repeat_track(bool)` — FFI surface already exists in librespot; add 3 exports + PlayerBar toggles; reflect state from PlayerEvent::ShuffleChanged/RepeatChanged | 0.5d |
+| 2.1 | Media keys + MPNowPlayingInfoCenter | ✅ done 2026-08-17. MPRemoteCommandCenter: play/pause/next/prev/seek/position; NowPlayingInfo: title/artist/artwork/duration/position. Artwork via NSURLSession → NSImage | 0.5d |
+| 2.2 | Shuffle / repeat | ✅ done 2026-08-17. `spirc.shuffle(bool)`, `spirc.repeat(bool)`, `spirc.repeat_track(bool)` exported through FFI with PlayerBar toggles; state reflects PlayerEvent::ShuffleChanged/RepeatChanged | 0.5d |
 | 2.3 | Queue view | ✅ done 2026-08-18. Queue page (sidebar + player-bar button): Now Playing + Next Up + Recently Played. Data from `GET /v1/me/player/queue` (server-capped ~20 items), refreshed on track change / add-to-queue / page open; recently-played tracked locally. Add-to-queue round-trip verified live (row context menu → track jumps to front of Next Up). **Dead end recorded:** dealer cluster pushes are NOT available to third-party clients — the dealer websocket rejects client `SUBSCRIBE` frames (`Unsupported message type` close; verified empirically). librespot's spirc cluster listener is effectively dead code on the current server; remote control still works because commands arrive as dealer *requests*. | 1d |
 | 2.4 | End-of-track auto-advance edge | ✅ done 2026-08-18 — verified after penalty window lifted | 0.5d |
-| 2.5 | Track row context menu | Play next / add to queue (needs 2.3), copy song link | 0.25d |
+| 2.5 | Track row context menu | ✅ done 2026-08-17. Play next / add to queue and copy song link | 0.25d |
 | 2.6 | Seek reliability | ✅ done 2026-08-21 — drag-seek while paused and position interpolation after seek behave correctly in normal use | 0.25d |
 
 Exit criteria: media keys + lock screen controls work; shuffle/repeat round-trip
@@ -107,7 +107,7 @@ Note: ncspot client id keeps /v1/search working (production-approved app).
 | 4.3 | Saved Albums / album library | ✅ done 2026-08-20. First-class album library: aggregate page, album save/remove, album-first playback, sorting/filtering, and cross-client reconciliation. Saved albums and Liked Songs remain separate concepts | 2–2.75d |
 | 4.4 | Personalized Home | ✅ done 2026-08-20. Recently Played, Top Tracks, Top Artists, and Your Library from public Web API endpoints; independent section loading and cache/failure handling | 1d |
 | 4.5 | Playlist create/add | ✅ done 2026-08-21 (offline). `+` beside the sidebar `PLAYLISTS` title opens New Playlist; track context menus add to owned playlists. Uses `/v1/me/playlists` + `/v1/playlists/{id}/items`. Live verification pending explicit approval | 0.5d |
-| 4.6 | Playlist search/filter | Client-side filter row in detail view | 0.25d |
+| 4.6 | Playlist search/filter | **Next.** Client-side filter row in detail view | 0.25d |
 | 4.7 | Keyboard navigation | ↑↓ already free via List; Enter = play; Space = play/pause (global) | 0.25d |
 | 4.8 | Window: mini-player | Collapsed player-bar-only mode (classic Winamp-ish) | 0.5d |
 
