@@ -1,6 +1,6 @@
 # nanyin — Roadmap
 
-> Status: M0 ✅ · M1 ✅ · hardening ✅ · M2 ✅ · M3 ✅ · M4.1 ✅ · M4.2 ✅ · M4.3 ✅ · M4.4 ✅
+> Status: M0 ✅ · M1 ✅ · hardening ✅ · M2 ✅ · M3 ✅ · M4.1 ✅ · M4.2 ✅ · M4.3 ✅ · M4.4 ✅ · M4.5 ✅ (offline)
 > Last updated: 2026-08-21
 
 ## Completed
@@ -106,7 +106,7 @@ Note: ncspot client id keeps /v1/search working (production-approved app).
 | 4.2 | Likes round-trip | ✅ done 2026-08-19. Heart toggle in track rows (hover-ghost, liked-solid green; context-menu entry) + player bar; `likedContains` seeds per-context (50-id cap), `toggleLike` optimistic with revert-on-failure (incl. one needsAuth retry); liked page cache + sidebar count maintained. Verified live both directions (unlike from liked page → server `[false]`, save from search → `[true]`). Note: server `contains` lags its own PUT/DELETE — never read-back-validate a just-toggled id. | 0.5d |
 | 4.3 | Saved Albums / album library | ✅ done 2026-08-20. First-class album library: aggregate page, album save/remove, album-first playback, sorting/filtering, and cross-client reconciliation. Saved albums and Liked Songs remain separate concepts | 2–2.75d |
 | 4.4 | Personalized Home | ✅ done 2026-08-20. Recently Played, Top Tracks, Top Artists, and Your Library from public Web API endpoints; independent section loading and cache/failure handling | 1d |
-| 4.5 | Playlist create/add | **Next.** `+` to the right of the sidebar `PLAYLISTS` title opens New Playlist; track context menu adds to an owned playlist. Use `/v1/users/{id}/playlists` + `/v1/playlists/{id}/items` (scopes already granted) | 0.5d |
+| 4.5 | Playlist create/add | ✅ done 2026-08-21 (offline). `+` beside the sidebar `PLAYLISTS` title opens New Playlist; track context menus add to owned playlists. Uses `/v1/me/playlists` + `/v1/playlists/{id}/items`. Live verification pending explicit approval | 0.5d |
 | 4.6 | Playlist search/filter | Client-side filter row in detail view | 0.25d |
 | 4.7 | Keyboard navigation | ↑↓ already free via List; Enter = play; Space = play/pause (global) | 0.25d |
 | 4.8 | Window: mini-player | Collapsed player-bar-only mode (classic Winamp-ish) | 0.5d |
@@ -296,6 +296,50 @@ user-top-read were already granted).
 Live verification (real listening history rendering, card navigation,
 playback from cards) still pending explicit approval.
 
+### M4.5 — New Playlist and Add to Playlist ✅ (2026-08-21, offline)
+
+All four slices landed offline; `script/agent_check.sh` green (deterministic
+reducer/decode tests + full app build). Live create/add/server-refresh
+verification still requires explicit approval.
+
+- **Data foundation:** `PlaylistInfo` gained `ownerId` (retained at load —
+  owned-playlist filtering needs no extra request; `trackCount` became a
+  `var` so confirmed adds can bump it). `SpotifyClient` gained a generic
+  `mutate` transport accepting the endpoints' 2xx successes with bounded
+  Retry-After on 429 and typed 401, plus `createPlaylist` (POST
+  `/v1/me/playlists`, `public: false`, returns the decoded created
+  playlist via static `decodeCreatedPlaylist`) and `addTrackToPlaylist`
+  (POST `/v1/playlists/{id}/items`, never the legacy `/tracks` route).
+  **Trap (live 2026-08-21):** the create body MUST carry an explicit
+  `"description": ""` — omitting the key makes Spotify store the literal
+  string `null` as the description, visible in the official client.
+  NullSpot sends `description ?? ""` for the same reason; covered by
+  `testCreateBodyCarriesExplicitEmptyDescription`.
+- **Staleness reconciliation:** new pure `PlaylistLibraryMerge` reducer.
+  Confirmed local mutations carry a monotonic serial, but snapshots confirm
+  them by content because Spotify reads may briefly lag successful writes.
+  Creates retire when their id appears; adds retire when the count reaches
+  the confirmed local count. Missing writes survive two stale snapshots,
+  then server truth wins so remote deletes/count decreases are not masked.
+  Existing snapshot rows are never replaced by older create responses.
+- **New Playlist UI:** one stable `PLAYLISTS` title row with an always-visible
+  `+` (accessibility label + tooltip `New Playlist`, keyboard-focusable) —
+  present while loading and empty; the list itself gained explicit
+  loading / empty / failed states. The sheet (name only, focused on open,
+  trimmed, Return submits, Esc cancels) disables both Create and dismissal
+  while in flight, shows a retryable inline error that keeps the entered
+  name, and on success inserts the playlist into the sidebar immediately,
+  dismisses, and opens its empty detail page. All create/add results are
+  fenced by account epoch — sign-out wins over late completions.
+- **Add to Playlist:** `Add to Playlist` submenu in track-row context menus
+  (List rows, Home top-tracks rows, artist top-tracks rows — all share
+  `TrackRow`) listing only playlists the current user owns; one add per
+  click (per-target in-flight set guards duplicates), sidebar count and
+  open-target detail page update only after the server confirms, appending
+  every confirmed occurrence because Spotify playlists permit duplicate
+  tracks. Track rows use occurrence identity so duplicates render and play
+  at the correct index. `Add to Queue` stays a separate item.
+
 ### M4.5 — New Playlist and Add to Playlist plan
 
 Goal: make playlist creation discoverable from the library sidebar, then let a
@@ -342,7 +386,7 @@ API and state model:
 - Add a Web API mutation helper that accepts the endpoint's normal 200/201/204
   success statuses while preserving the existing bounded 429 handling and
   typed 401 behavior.
-- Create with `POST /v1/users/{userId}/playlists` and JSON
+- Create with `POST /v1/me/playlists` and JSON
   `{ "name": name, "public": false }`. Decode and return the created playlist
   rather than synthesizing an id or waiting for a full library refresh.
 - Add tracks with `POST /v1/playlists/{playlistId}/items` and JSON

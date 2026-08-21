@@ -45,6 +45,18 @@ private enum StateReducerTests {
         testArtistContextPrefersMatchingTrackArtist()
         testRecentCardsDedupeAndCap()
         testContextRefIDRejectsMismatchedKind()
+
+        testCreatedPlaylistDecodesWithOwnership()
+        testPlaylistSummaryPrefersItemsTotal()
+        testCreateBodyCarriesExplicitEmptyDescription()
+        testCreateMutationInsertsAtSidebarTop()
+        testStaleRefreshCannotDropCreatedPlaylist()
+        testStaleRefreshCannotRevertAddCount()
+        testRefreshIncludingAddDoesNotDoubleCount()
+        testRefreshRetiresVisibleCreateWithoutReplacingSnapshot()
+        testStaleProtectionExpiresToServerTruth()
+        testCreateThenAddBeforeStaleRefreshKeepsBoth()
+        testAddMutationSkipsMissingPlaylist()
         print("State reducer tests passed")
     }
 
@@ -861,6 +873,222 @@ private enum StateReducerTests {
         expect(HomeFeed.contextRefID("spotify:artist:", kind: .artist) == nil, "empty id is rejected")
         expect(HomeFeed.contextKind("album") == .album && HomeFeed.contextKind("playlist") == .playlist, "known context types map")
         expect(HomeFeed.contextKind("show") == nil && HomeFeed.contextKind(nil) == nil, "unknown context types map to nothing")
+    }
+
+    // MARK: - Playlist writes (M4.5)
+
+    private static func playlist(
+        _ id: String,
+        name: String = "Playlist",
+        count: Int = 0,
+        owner: String? = "user1"
+    ) -> SpotifyClient.PlaylistInfo {
+        SpotifyClient.PlaylistInfo(
+            id: id, name: name, trackCount: count, artworkURL: nil, ownerId: owner
+        )
+    }
+
+    private static func testCreatedPlaylistDecodesWithOwnership() {
+        let json = """
+        {
+          "id": "pl1", "name": "Road Trip", "public": false,
+          "snapshot_id": "abc",
+          "owner": {"id": "user1", "display_name": "Spike"},
+          "tracks": {"total": 0, "href": "x"},
+          "images": [{"url": "https://i.scdn.co/image/pl1"}]
+        }
+        """
+        let info = try! SpotifyClient.decodeCreatedPlaylist(decodeJSON(json))
+        expect(info.id == "pl1" && info.name == "Road Trip", "created playlist decodes id and name")
+        expect(info.ownerId == "user1", "created playlist carries the owner id")
+        expect(info.trackCount == 0, "a new playlist decodes with zero tracks")
+        expect(info.artworkURL != nil, "created playlist decodes artwork when present")
+
+        // Tolerant minimal payload: no owner, no tracks, no images.
+        let bare = try! SpotifyClient.decodeCreatedPlaylist(
+            decodeJSON(#"{"id": "pl2", "name": "Bare"}"#)
+        )
+        expect(
+            bare.ownerId == nil && bare.trackCount == 0 && bare.artworkURL == nil,
+            "owner-less minimal create responses decode with nil ownership"
+        )
+    }
+
+    private static func testPlaylistSummaryPrefersItemsTotal() {
+        let json = """
+        {
+          "id": "pl1", "name": "Current Shape",
+          "items": {"total": 42},
+          "tracks": {"total": 7}
+        }
+        """
+        let info = try! SpotifyClient.decodeCreatedPlaylist(decodeJSON(json))
+        expect(info.trackCount == 42, "current items.total takes precedence over deprecated tracks.total")
+    }
+
+    private static func testCreateMutationInsertsAtSidebarTop() {
+        let list = [playlist("a", count: 5)]
+        let created = playlist("new", name: "New", count: 0)
+        let result = PlaylistLibraryMerge.apply(
+            .init(serial: 1, kind: .created(created)), to: list
+        )
+        expect(result.map(\.id) == ["new", "a"], "a created playlist inserts at the sidebar top")
+
+        // Re-applying the same create is idempotent.
+        let newerServerRow = playlist("new", name: "New", count: 3)
+        let again = PlaylistLibraryMerge.apply(
+            .init(serial: 2, kind: .created(created)),
+            to: [newerServerRow, list[0]]
+        )
+        expect(again.map(\.id) == ["new", "a"], "re-applying a create must not duplicate the row")
+        expect(again[0].trackCount == 3, "a create payload must not replace a newer existing row")
+    }
+
+    private static func testStaleRefreshCannotDropCreatedPlaylist() {
+        // A read started after the write may still lag and omit it.
+        let mutations = [PlaylistLibraryMerge.ConfirmedMutation(
+            serial: 1, kind: .created(playlist("new", name: "New"))
+        )]
+        let merged = PlaylistLibraryMerge.merge(
+            snapshot: [playlist("a")], mutations: mutations
+        )
+        expect(
+            merged.playlists.map(\.id) == ["new", "a"],
+            "a stale refresh must not drop a newer created playlist"
+        )
+        expect(
+            merged.pending.count == 1,
+            "the create stays pending until a snapshot visibly includes it"
+        )
+    }
+
+    private static func testStaleRefreshCannotRevertAddCount() {
+        // Local count is 11 after the add; the stale snapshot still says 10.
+        let mutations = [PlaylistLibraryMerge.ConfirmedMutation(
+            serial: 1, kind: .trackAdded(playlistID: "a", localCount: 11)
+        )]
+        let merged = PlaylistLibraryMerge.merge(
+            snapshot: [playlist("a", count: 10)], mutations: mutations
+        )
+        expect(
+            merged.playlists.first { $0.id == "a" }?.trackCount == 11,
+            "a stale snapshot must not pull the count back below the confirmed add"
+        )
+    }
+
+    private static func testRefreshIncludingAddDoesNotDoubleCount() {
+        // The snapshot's fetch happened after the write landed server-side:
+        // its count already includes the add (and possibly other clients').
+        let mutations = [PlaylistLibraryMerge.ConfirmedMutation(
+            serial: 1, kind: .trackAdded(playlistID: "a", localCount: 11)
+        )]
+        let exact = PlaylistLibraryMerge.merge(
+            snapshot: [playlist("a", count: 11)], mutations: mutations
+        )
+        expect(
+            exact.playlists.first { $0.id == "a" }?.trackCount == 11,
+            "a snapshot that already includes the add must not double-count it"
+        )
+        expect(exact.pending.isEmpty, "a visible add retires its pending override")
+
+        let withOthers = PlaylistLibraryMerge.merge(
+            snapshot: [playlist("a", count: 13)], mutations: mutations
+        )
+        expect(
+            withOthers.playlists.first { $0.id == "a" }?.trackCount == 13,
+            "a newer server count (add + other clients) must win"
+        )
+    }
+
+    private static func testRefreshRetiresVisibleCreateWithoutReplacingSnapshot() {
+        let pendingCreate = PlaylistLibraryMerge.ConfirmedMutation(
+            serial: 1, kind: .created(playlist("new"))
+        )
+        let merged = PlaylistLibraryMerge.merge(
+            snapshot: [playlist("new", count: 3), playlist("a")],
+            mutations: [pendingCreate]
+        )
+        expect(
+            merged.playlists.map(\.id) == ["new", "a"],
+            "the snapshot ordering is kept for baked-in mutations"
+        )
+        expect(merged.playlists[0].trackCount == 3, "the snapshot row must not be replaced by the create response")
+        expect(merged.pending.isEmpty, "a visible create retires after the refresh lands")
+    }
+
+    private static func testStaleProtectionExpiresToServerTruth() {
+        let mutation = PlaylistLibraryMerge.ConfirmedMutation(
+            serial: 1, kind: .trackAdded(playlistID: "a", localCount: 11)
+        )
+        let first = PlaylistLibraryMerge.merge(
+            snapshot: [playlist("a", count: 10)], mutations: [mutation]
+        )
+        let second = PlaylistLibraryMerge.merge(
+            snapshot: [playlist("a", count: 10)], mutations: first.pending
+        )
+        let third = PlaylistLibraryMerge.merge(
+            snapshot: [playlist("a", count: 10)], mutations: second.pending
+        )
+        expect(first.playlists[0].trackCount == 11, "the first stale snapshot keeps the confirmed count")
+        expect(second.playlists[0].trackCount == 11, "the second stale snapshot keeps the confirmed count")
+        expect(third.playlists[0].trackCount == 10, "bounded protection eventually yields to server truth")
+        expect(third.pending.isEmpty, "an expired override retires")
+    }
+
+    private static func testCreateThenAddBeforeStaleRefreshKeepsBoth() {
+        // Create + add confirm while a pre-create refresh is in flight; the
+        // arriving snapshot predates both.
+        let mutations = [
+            PlaylistLibraryMerge.ConfirmedMutation(
+                serial: 1, kind: .created(playlist("new", name: "New"))
+            ),
+            PlaylistLibraryMerge.ConfirmedMutation(
+                serial: 2, kind: .trackAdded(playlistID: "new", localCount: 1)
+            ),
+        ]
+        let merged = PlaylistLibraryMerge.merge(
+            snapshot: [playlist("a", count: 7)], mutations: mutations
+        )
+        expect(
+            merged.playlists.map(\.id) == ["new", "a"],
+            "the created playlist survives the stale refresh"
+        )
+        expect(
+            merged.playlists.first { $0.id == "new" }?.trackCount == 1,
+            "the confirmed add count survives the stale refresh"
+        )
+        expect(merged.pending.count == 2, "both mutations stay pending for the next refresh")
+    }
+
+    private static func testAddMutationSkipsMissingPlaylist() {
+        // Target deleted by another client while our add was in flight —
+        // server truth wins for existence; no crash, no resurrection.
+        let mutations = [PlaylistLibraryMerge.ConfirmedMutation(
+            serial: 1, kind: .trackAdded(playlistID: "ghost", localCount: 5)
+        )]
+        let merged = PlaylistLibraryMerge.merge(
+            snapshot: [playlist("a")], mutations: mutations
+        )
+        expect(
+            merged.playlists.map(\.id) == ["a"],
+            "an add mutation for a playlist missing from the snapshot is skipped"
+        )
+        expect(merged.pending.isEmpty, "a missing target retires its add mutation")
+    }
+
+    private static func testCreateBodyCarriesExplicitEmptyDescription() {
+        let data = try! SpotifyClient.encodeCreatePlaylistBody(name: "Road Trip")
+        let object = try! JSONSerialization.jsonObject(with: data) as! [String: Any]
+        expect(object["name"] as? String == "Road Trip", "create body carries the name")
+        expect(
+            (object["description"] as? String) == "",
+            "create body must carry an explicit empty description — omitting the key makes Spotify store the literal string \"null\""
+        )
+        expect(object["public"] as? Bool == false, "create body defaults to a private playlist")
+        expect(
+            Set(object.keys) == ["name", "description", "public"],
+            "create body sends exactly name/description/public"
+        )
     }
 
     // MARK: - Harness
