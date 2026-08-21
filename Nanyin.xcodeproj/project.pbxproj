@@ -14,6 +14,7 @@
 		1C824AEBA97FE5D6B3A80EE2 /* ArtistDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1BABB1701DC20C390270DB2 /* ArtistDetailView.swift */; };
 		2E59FDD89A41153EA44A4C6D /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD9151ECFD94AFE44E6F5E27 /* LoginView.swift */; };
 		309757210FCAB40AD7320473 /* SavedAlbumsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29DF36B3CB2F281AC7CE3E9A /* SavedAlbumsView.swift */; };
+		3CD0F98412A26065319A48E8 /* HomeFeed.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9D94ED4DB09441D529487CA /* HomeFeed.swift */; };
 		4E19435075ABA8781C392919 /* NanyinCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35BBB8602E40346141A75FC2 /* NanyinCore.swift */; };
 		546CCAB14C2F7992EBE66196 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 196502AD5E98E680CB17BD1E /* AppModel.swift */; };
 		5682C32BA41F5DA9D173E728 /* QueueView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61564C1B59DBCF7E35D071B3 /* QueueView.swift */; };
@@ -59,6 +60,7 @@
 		A304C3165403EF8BCC680B91 /* SavedAlbumCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedAlbumCache.swift; sourceTree = "<group>"; };
 		A9DA62671ECF8B9C27AA8947 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
 		AA6332196A87845CF96EBF8B /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+		B9D94ED4DB09441D529487CA /* HomeFeed.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeFeed.swift; sourceTree = "<group>"; };
 		C80E837723AE8C7766A7C226 /* PlayerBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerBar.swift; sourceTree = "<group>"; };
 		D16BE0C19B1222A7FFFA360C /* NanyinApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NanyinApp.swift; sourceTree = "<group>"; };
 		D958F31D59797780BE73F9F5 /* CredentialRevision.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialRevision.swift; sourceTree = "<group>"; };
@@ -142,6 +144,7 @@
 			isa = PBXGroup;
 			children = (
 				196502AD5E98E680CB17BD1E /* AppModel.swift */,
+				B9D94ED4DB09441D529487CA /* HomeFeed.swift */,
 				3C34F9480C980947C6DBA66E /* MembershipMutation.swift */,
 				A304C3165403EF8BCC680B91 /* SavedAlbumCache.swift */,
 			);
@@ -269,6 +272,7 @@
 				5E25110C2C6F2BB024C3BE81 /* AudioRenderer.swift in Sources */,
 				76A0FBCD808CE4272E6E9FF7 /* CredentialRevision.swift in Sources */,
 				D53EA805C18FC6BD2585A05E /* DebugLog.swift in Sources */,
+				3CD0F98412A26065319A48E8 /* HomeFeed.swift in Sources */,
 				C08063B3487CD8115D817D01 /* HomeView.swift in Sources */,
 				56EA31B8738E2B0828584E14 /* KeychainStore.swift in Sources */,
 				2E59FDD89A41153EA44A4C6D /* LoginView.swift in Sources */,
