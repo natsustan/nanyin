@@ -81,10 +81,8 @@ struct HomeView: View {
     private var content: some View {
         if !app.hasHomeData, app.isLoadingHome {
             loadingState
-        } else if !app.hasHomeData, !app.isLoadingHome, !app.homeErrors.isEmpty {
-            fullErrorState
         } else {
-            if !app.hasHomeData {
+            if !app.hasHomeData, app.homeErrors.isEmpty {
                 freshAccountHint
             }
             recentlyPlayedSection
@@ -98,7 +96,7 @@ struct HomeView: View {
     /// render — a failed block never blanks the page.
     @ViewBuilder
     private var partialErrorNotice: some View {
-        if app.hasHomeData, !app.homeErrors.isEmpty {
+        if !app.homeErrors.isEmpty {
             HStack(spacing: 10) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
@@ -129,37 +127,6 @@ struct HomeView: View {
             ProgressView()
             Text("Loading your home…")
                 .foregroundStyle(Theme.textSecondary)
-        }
-        .frame(maxWidth: .infinity, minHeight: 320)
-    }
-
-    private var fullErrorState: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "exclamationmark.triangle")
-                .font(.title)
-                .foregroundStyle(.orange)
-            Text("Couldn’t load your home")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.white)
-            Text(app.homeErrors.values.first ?? "")
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.textSecondary)
-                .multilineTextAlignment(.center)
-            Button {
-                // Nothing is loaded in this state — a non-force load
-                // requests every missing section anyway.
-                app.loadHome()
-            } label: {
-                Text("Retry")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(.black)
-                    .padding(.horizontal, 22)
-                    .padding(.vertical, 8)
-                    .background(Theme.accent)
-                    .cornerRadius(16)
-            }
-            .buttonStyle(.plain)
-            .padding(.top, 4)
         }
         .frame(maxWidth: .infinity, minHeight: 320)
     }
@@ -283,7 +250,7 @@ struct HomeView: View {
             artworkURL: nil,
             assetCover: "LikedSongsCover",
             onOpen: { app.open(.liked) },
-            onPlay: { app.playLikedSongs() },
+            onPlay: app.userId.isEmpty ? nil : { app.playLikedSongs() },
             linkURL: nil
         )
     }
