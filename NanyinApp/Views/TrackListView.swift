@@ -12,6 +12,33 @@ private enum TrackTableLayout {
     static let rowHorizontalInset: CGFloat = 24
 }
 
+/// Stable identity for one occurrence of a track. Playlists permit the same
+/// Spotify track URI more than once, so catalog identity alone is not a row
+/// identity.
+private struct TrackOccurrence: Identifiable {
+    struct ID: Hashable {
+        let uri: String
+        let occurrence: Int
+    }
+
+    let id: ID
+    let index: Int
+    let track: SpotifyClient.Track
+
+    static func rows(for tracks: [SpotifyClient.Track]) -> [TrackOccurrence] {
+        var occurrences: [String: Int] = [:]
+        return tracks.enumerated().map { index, track in
+            let occurrence = occurrences[track.uri, default: 0]
+            occurrences[track.uri] = occurrence + 1
+            return TrackOccurrence(
+                id: ID(uri: track.uri, occurrence: occurrence),
+                index: index,
+                track: track
+            )
+        }
+    }
+}
+
 /// Classic flat track table: # / TITLE+ARTIST / ALBUM / duration.
 /// Built on List (NSTableView recycling) — the native 60Hz path on macOS.
 /// Single click selects, double-click plays from the context.
@@ -20,18 +47,18 @@ struct TrackListView: View {
     let tracks: [SpotifyClient.Track]
     let contextKey: String
 
-    @State private var selectedURI: String?
+    @State private var selectedRowID: TrackOccurrence.ID?
 
     var body: some View {
-        List(selection: $selectedURI) {
+        List(selection: $selectedRowID) {
             Section {
-                ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
+                ForEach(TrackOccurrence.rows(for: tracks)) { row in
                     TrackRow(
-                        track: track,
-                        index: index,
+                        track: row.track,
+                        index: row.index,
                         contextKey: contextKey
                     )
-                    .tag(track.uri)
+                    .tag(row.id)
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
@@ -147,7 +174,7 @@ struct TrackRow: View {
         .contentShape(Rectangle())
         .contextMenu {
             Button {
-                app.play(track: track, contextKey: contextKey)
+                app.play(track: track, contextKey: contextKey, index: index)
             } label: {
                 Label("Play", systemImage: "play")
             }
@@ -158,6 +185,20 @@ struct TrackRow: View {
                 Label("Add to Queue", systemImage: "text.badge.plus")
             }
             .disabled(!app.isPlaybackReady)
+            if !app.ownedPlaylists.isEmpty {
+                Menu {
+                    ForEach(app.ownedPlaylists) { playlist in
+                        Button {
+                            app.addToPlaylist(track, playlist: playlist)
+                        } label: {
+                            Text(playlist.name)
+                        }
+                        .disabled(app.isPlaylistAddInFlight(playlist.id))
+                    }
+                } label: {
+                    Label("Add to Playlist", systemImage: "music.note.list")
+                }
+            }
             if isLikeKnown {
                 Button {
                     app.toggleLike(track)
@@ -183,7 +224,7 @@ struct TrackRow: View {
             // "reentrant operation in its NSTableView delegate" warning
             // (future assert). Hop out of the event first.
             Task { @MainActor in
-                app.play(track: track, contextKey: contextKey)
+                app.play(track: track, contextKey: contextKey, index: index)
             }
         }
         .onHover { h in

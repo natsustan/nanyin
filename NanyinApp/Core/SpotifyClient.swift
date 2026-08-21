@@ -90,8 +90,27 @@ struct SpotifyClient {
     struct PlaylistInfo: Identifiable, Hashable {
         let id: String
         let name: String
-        let trackCount: Int
+        /// Server-reported track total — bumped locally after a confirmed
+        /// add (M4.5) while Spotify's read side catches up.
+        var trackCount: Int
         let artworkURL: URL?
+        /// Owner's user id — owned playlists are the writable targets for
+        /// Add to Playlist (M4.5). Retained at load; no extra request.
+        let ownerId: String?
+
+        init(
+            id: String,
+            name: String,
+            trackCount: Int,
+            artworkURL: URL?,
+            ownerId: String? = nil
+        ) {
+            self.id = id
+            self.name = name
+            self.trackCount = trackCount
+            self.artworkURL = artworkURL
+            self.ownerId = ownerId
+        }
     }
 
     /// One entry from GET /v1/me/player/recently-played: the track plus the
@@ -187,6 +206,36 @@ struct SpotifyClient {
         }
     }
 
+    /// Generic Web API write (M4.5): accepts the endpoint's normal 2xx
+    /// successes (200/201/204), keeps the bounded Retry-After handling on
+    /// 429 and the typed 401. Returns the response body when present.
+    private func mutate(
+        path: String,
+        method: String,
+        body: Data? = nil,
+        retries: Int = 2
+    ) async throws -> Data? {
+        let req = request(path: path, method: method, body: body)
+        var attempt = 0
+        while true {
+            try Task.checkCancellation()
+            let (data, response) = try await URLSession.shared.data(for: req)
+            let httpResponse = response as? HTTPURLResponse
+            let status = httpResponse?.statusCode ?? 0
+            if (200..<300).contains(status) { return data.isEmpty ? nil : data }
+            if status == 429, attempt < retries {
+                let retryAfter = Double(httpResponse?.value(forHTTPHeaderField: "Retry-After") ?? "") ?? 2.0
+                let wait = min(max(retryAfter, 1.0), 30.0)
+                dlog("web api 429 on \(method) \(path), retrying in \(wait)s")
+                try await Task.sleep(for: .seconds(wait))
+                attempt += 1
+                continue
+            }
+            if status == 401 { throw APIError.needsAuth }
+            throw APIError.http(status, String(data: data, encoding: .utf8) ?? "")
+        }
+    }
+
     private struct ArtistDTO: Codable {
         let id: String?
         let name: String
@@ -252,8 +301,9 @@ struct SpotifyClient {
         let snapshotId: String?
         let images: [Image]?
         let owner: OwnerDTO?
-        struct TracksDTO: Codable { let total: Int? }
-        let tracks: TracksDTO?
+        struct ItemsSummaryDTO: Codable { let total: Int? }
+        let items: ItemsSummaryDTO?
+        let tracks: ItemsSummaryDTO?
 
         struct OwnerDTO: Codable {
             let id: String?
@@ -266,8 +316,18 @@ struct SpotifyClient {
         }
 
         enum CodingKeys: String, CodingKey {
-            case id, name, images, owner, tracks
+            case id, name, images, owner, items, tracks
             case snapshotId = "snapshot_id"
+        }
+
+        var toPlaylistInfo: PlaylistInfo {
+            PlaylistInfo(
+                id: id,
+                name: name,
+                trackCount: items?.total ?? tracks?.total ?? 0,
+                artworkURL: images?.first?.url,
+                ownerId: owner?.id
+            )
         }
     }
 
@@ -396,6 +456,25 @@ struct SpotifyClient {
         let ids: [String]
     }
 
+    private struct CreatePlaylistBody: Codable {
+        let name: String
+        /// Must be sent explicitly as "" — omitting the key makes Spotify
+        /// store the literal string "null" as the description (observed
+        /// live 2026-08-21; NullSpot sends `description ?? ""` for the
+        /// same reason).
+        let description: String
+        let isPublic: Bool
+
+        enum CodingKeys: String, CodingKey {
+            case name, description
+            case isPublic = "public"
+        }
+    }
+
+    private struct PlaylistItemsBody: Codable {
+        let uris: [String]
+    }
+
     // MARK: - Endpoints
 
     func currentUser() async throws -> UserProfile {
@@ -437,14 +516,7 @@ struct SpotifyClient {
                 query: ["limit": "\(limit)", "offset": "\(offset)"]
             )
             for p in page.items ?? [] {
-                result.append(
-                    PlaylistInfo(
-                        id: p.id,
-                        name: p.name,
-                        trackCount: p.tracks?.total ?? 0,
-                        artworkURL: p.images?.first?.url
-                    )
-                )
+                result.append(p.toPlaylistInfo)
             }
             offset += limit
             if offset >= page.total { break }
@@ -705,6 +777,43 @@ struct SpotifyClient {
             if status == 401 { throw APIError.needsAuth }
             throw APIError.http(status, "")
         }
+    }
+
+    // MARK: - Playlist writes (M4.5)
+
+    /// Creates a private playlist for the current user and returns the
+    /// created playlist decoded from the response (POST
+    /// /v1/me/playlists) — no synthesized ids, no library refresh required.
+    func createPlaylist(name: String) async throws -> PlaylistInfo {
+        let body = try Self.encodeCreatePlaylistBody(name: name)
+        guard let data = try await mutate(
+            path: "/v1/me/playlists",
+            method: "POST",
+            body: body
+        ) else {
+            throw APIError.http(0, "create playlist returned no body")
+        }
+        return try Self.decodeCreatedPlaylist(data)
+    }
+
+    /// Static encode entry point (shared with the state tests so the
+    /// create-body shape — explicit empty description, private — stays
+    /// covered).
+    static func encodeCreatePlaylistBody(name: String) throws -> Data {
+        try JSONEncoder().encode(CreatePlaylistBody(name: name, description: "", isPublic: false))
+    }
+
+    /// Static decode entry point (shared with the state tests so the
+    /// create-playlist response parsing stays pure and covered).
+    static func decodeCreatedPlaylist(_ data: Data) throws -> PlaylistInfo {
+        try JSONDecoder().decode(PlaylistDTO.self, from: data).toPlaylistInfo
+    }
+
+    /// Appends one track to a playlist (POST /v1/playlists/{id}/items —
+    /// not the legacy /tracks route).
+    func addTrackToPlaylist(playlistId: String, uri: String) async throws {
+        let body = try JSONEncoder().encode(PlaylistItemsBody(uris: [uri]))
+        _ = try await mutate(path: "/v1/playlists/\(playlistId)/items", method: "POST", body: body)
     }
 
     /// Track + artist search in one request (ncspot client id keeps
