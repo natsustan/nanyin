@@ -34,6 +34,24 @@ private enum StateReducerTests {
         testNewlySavedAlbumRollbackRestoresAtTop()
         testRollbackUsesNewerCanonicalOrder()
         testExpiryMarkingForcesFullReconciliation()
+
+        testPlaybackStallDetectorClassifiesDownloaderStall()
+        testPlaybackStallDetectorClassifiesDecoderStall()
+        testPlaybackStallDetectorClassifiesPCMStall()
+        testPlaybackStallDetectorClassifiesRendererStall()
+        testPlaybackStallDetectorIgnoresPausedAndProgressingPlayback()
+        testPlaybackStallDetectorIgnoresInterruptedObservation()
+        testPlaybackStallDetectorRecoversOnlyOncePerPlayRequest()
+        testPlaybackStallRecoveryRequiresActualProgress()
+
+        testPendingPlayIntentReplaysOnlyOnce()
+        testPendingPlayIntentExpires()
+        testPendingPlayIntentRejectsAnotherAccountEpoch()
+        testPendingPlayIntentKeepsOriginalContextCall()
+        testPendingPlayIntentMatchesPlayingEvent()
+
+        testReconnectDefersWhileAudioIsProgressing()
+        testReconnectDoesNotDeferWhenPlaybackNeedsControlPlane()
         print("State reducer tests passed")
     }
 
@@ -639,6 +657,336 @@ private enum StateReducerTests {
 
         cache.markNeedsReconciliation()
         expect(cache.needsFullReconciliation, "expiry marking must force full re-paging")
+    }
+
+    // MARK: - PlaybackStallDetector
+
+    private static func playbackSnapshot(
+        request: UInt64 = 0,
+        decoder: UInt64 = 0,
+        pcm: UInt64 = 0,
+        waiters: UInt64 = 0,
+        accepted: UInt64 = 0,
+        callbacks: UInt64 = 0,
+        rendered: UInt64 = 0,
+        position: UInt32 = 42_000
+    ) -> PlaybackPipelineSnapshot {
+        PlaybackPipelineSnapshot(
+            core: CorePlaybackProgress(
+                playRequestID: request,
+                decoderPackets: decoder,
+                pcmWrites: pcm,
+                downloadWaiters: waiters,
+                confirmedPositionMs: position
+            ),
+            renderer: RendererPlaybackProgress(
+                acceptedSamples: accepted,
+                renderCallbacks: callbacks,
+                renderedSamples: rendered
+            )
+        )
+    }
+
+    private static func detectStall(
+        from baseline: PlaybackPipelineSnapshot,
+        to current: PlaybackPipelineSnapshot
+    ) -> PlaybackStallDetector.Recovery? {
+        var detector = PlaybackStallDetector(stallThresholdMs: 10)
+        expect(
+            detector.observe(
+                baseline, generation: 1, nowMs: 0, expectsPlayback: true
+            ) == nil,
+            "the first progress sample must establish a baseline"
+        )
+        return detector.observe(
+            current, generation: 1, nowMs: 10, expectsPlayback: true
+        )
+    }
+
+    private static func testPlaybackStallDetectorClassifiesDownloaderStall() {
+        let recovery = detectStall(
+            from: playbackSnapshot(callbacks: 1),
+            to: playbackSnapshot(waiters: 1, callbacks: 2)
+        )
+        expect(recovery?.stage == .downloader, "a blocked range read must be a downloader stall")
+        expect(recovery?.positionMs == 42_000, "recovery must use confirmed decoder position")
+    }
+
+    private static func testPlaybackStallDetectorClassifiesDecoderStall() {
+        let recovery = detectStall(
+            from: playbackSnapshot(callbacks: 1),
+            to: playbackSnapshot(callbacks: 2)
+        )
+        expect(recovery?.stage == .decoder, "no decoder progress outside a range wait must be a decoder stall")
+    }
+
+    private static func testPlaybackStallDetectorClassifiesPCMStall() {
+        let recovery = detectStall(
+            from: playbackSnapshot(callbacks: 1),
+            to: playbackSnapshot(decoder: 1, callbacks: 2)
+        )
+        expect(recovery?.stage == .pcm, "decoded packets without PCM writes must be a PCM stall")
+    }
+
+    private static func testPlaybackStallDetectorClassifiesRendererStall() {
+        let stoppedCallback = detectStall(
+            from: playbackSnapshot(callbacks: 1),
+            to: playbackSnapshot(decoder: 1, pcm: 1, accepted: 1, callbacks: 1)
+        )
+        expect(stoppedCallback?.stage == .renderer, "a stopped render callback must be a renderer stall")
+
+        let stoppedConsumption = detectStall(
+            from: playbackSnapshot(callbacks: 1),
+            to: playbackSnapshot(decoder: 1, pcm: 1, accepted: 1, callbacks: 2)
+        )
+        expect(stoppedConsumption?.stage == .renderer, "unconsumed accepted PCM must be a renderer stall")
+    }
+
+    private static func testPlaybackStallDetectorIgnoresPausedAndProgressingPlayback() {
+        var detector = PlaybackStallDetector(stallThresholdMs: 10)
+        let baseline = playbackSnapshot(callbacks: 1)
+        _ = detector.observe(baseline, generation: 1, nowMs: 0, expectsPlayback: true)
+        expect(
+            detector.observe(
+                baseline, generation: 1, nowMs: 20, expectsPlayback: false
+            ) == nil,
+            "paused playback must disarm stall detection"
+        )
+        expect(
+            detector.observe(
+                playbackSnapshot(rendered: 1),
+                generation: 1,
+                nowMs: 40,
+                expectsPlayback: true
+            ) == nil,
+            "rendered PCM must establish a fresh grace period"
+        )
+    }
+
+    private static func testPlaybackStallDetectorIgnoresInterruptedObservation() {
+        var detector = PlaybackStallDetector(
+            stallThresholdMs: 10,
+            maxObservationGapMs: 20
+        )
+        let baseline = playbackSnapshot(callbacks: 1)
+        _ = detector.observe(baseline, generation: 1, nowMs: 0, expectsPlayback: true)
+        expect(
+            detector.observe(
+                playbackSnapshot(callbacks: 2),
+                generation: 1,
+                nowMs: 30,
+                expectsPlayback: true
+            ) == nil,
+            "sleep or a suspended watchdog must start a fresh grace period"
+        )
+    }
+
+    private static func testPlaybackStallDetectorRecoversOnlyOncePerPlayRequest() {
+        var detector = PlaybackStallDetector(stallThresholdMs: 10)
+        let baseline = playbackSnapshot(callbacks: 1)
+        let stalled = playbackSnapshot(waiters: 1, callbacks: 2)
+        _ = detector.observe(baseline, generation: 1, nowMs: 0, expectsPlayback: true)
+        expect(
+            detector.observe(
+                stalled, generation: 1, nowMs: 10, expectsPlayback: true
+            ) != nil,
+            "the first stall must request local recovery"
+        )
+        expect(
+            detector.observe(
+                stalled, generation: 1, nowMs: 20, expectsPlayback: true
+            ) == nil,
+            "one play request must never create a recovery storm"
+        )
+
+        let replacement = playbackSnapshot(request: 2, callbacks: 2)
+        _ = detector.observe(replacement, generation: 1, nowMs: 30, expectsPlayback: true)
+        expect(
+            detector.observe(
+                playbackSnapshot(request: 2, waiters: 1, callbacks: 3),
+                generation: 1,
+                nowMs: 40,
+                expectsPlayback: true
+            ) != nil,
+            "a new play request must receive an independent recovery budget"
+        )
+
+        _ = detector.observe(baseline, generation: 2, nowMs: 50, expectsPlayback: true)
+        expect(
+            detector.observe(
+                stalled, generation: 2, nowMs: 60, expectsPlayback: true
+            ) != nil,
+            "a replacement generation must not inherit an old recovery budget"
+        )
+    }
+
+    private static func testPlaybackStallRecoveryRequiresActualProgress() {
+        let baseline = playbackSnapshot(rendered: 10, position: 42_000)
+        expect(
+            !PlaybackStallDetector.recoveryMadeProgress(
+                from: baseline,
+                to: playbackSnapshot(rendered: 10, position: 42_000)
+            ),
+            "an accepted seek without audio or decoder progress must escalate"
+        )
+        expect(
+            PlaybackStallDetector.recoveryMadeProgress(
+                from: baseline,
+                to: playbackSnapshot(rendered: 11, position: 42_000)
+            ),
+            "rendered PCM must confirm local recovery"
+        )
+        expect(
+            PlaybackStallDetector.recoveryMadeProgress(
+                from: baseline,
+                to: playbackSnapshot(rendered: 10, position: 42_001)
+            ),
+            "confirmed decoder position must confirm local recovery"
+        )
+    }
+
+    // MARK: - PendingPlayIntent
+
+    private static func testPendingPlayIntentReplaysOnlyOnce() {
+        var intent = pendingPlayIntent()
+        expect(
+            intent.markReplayedIfEligible(
+                accountEpoch: 7,
+                previousPlayRequestID: 20
+            ),
+            "an unconfirmed current intent must receive one replay"
+        )
+        expect(
+            !intent.markReplayedIfEligible(
+                accountEpoch: 7,
+                previousPlayRequestID: 21
+            ),
+            "an intent must never replay more than once"
+        )
+    }
+
+    private static func testPendingPlayIntentExpires() {
+        let createdAt = ContinuousClock.now
+        var intent = pendingPlayIntent(createdAt: createdAt)
+        expect(
+            !intent.markReplayedIfEligible(
+                accountEpoch: 7,
+                previousPlayRequestID: 20,
+                now: createdAt.advanced(by: .seconds(61))
+            ),
+            "a stale intent must not replay after its 60-second lifetime"
+        )
+    }
+
+    private static func testPendingPlayIntentRejectsAnotherAccountEpoch() {
+        var intent = pendingPlayIntent()
+        expect(
+            !intent.markReplayedIfEligible(
+                accountEpoch: 8,
+                previousPlayRequestID: 20
+            ),
+            "sign-out or account replacement must fence a late replay"
+        )
+    }
+
+    private static func testPendingPlayIntentKeepsOriginalContextCall() {
+        let intent = pendingPlayIntent()
+        expect(
+            intent.call == .context(uri: "spotify:playlist:abc", index: 12),
+            "replay must retain the original server-resolved context and index"
+        )
+        expect(
+            intent.trackURI == "spotify:track:def",
+            "the best-effort confirmation URI must survive reconnect"
+        )
+    }
+
+    private static func testPendingPlayIntentMatchesPlayingEvent() {
+        let trackIntent = pendingPlayIntent()
+        expect(
+            trackIntent.isConfirmed(
+                byPlayingURI: "spotify:track:def",
+                playRequestID: 11
+            ),
+            "Playing for the requested track must confirm the pending intent"
+        )
+        expect(
+            !trackIntent.isConfirmed(
+                byPlayingURI: "spotify:track:old",
+                playRequestID: 11
+            ),
+            "Playing from an older stream must not confirm a different requested track"
+        )
+        expect(
+            !trackIntent.isConfirmed(
+                byPlayingURI: "spotify:track:def",
+                playRequestID: 10
+            ),
+            "a delayed Playing event from the previous request must not confirm a new intent"
+        )
+
+        let albumIntent = PendingPlayIntent(
+            call: .context(uri: "spotify:album:abc", index: 0),
+            trackURI: nil,
+            accountEpoch: 7,
+            previousPlayRequestID: 10
+        )
+        expect(
+            !albumIntent.isConfirmed(
+                byPlayingURI: "spotify:track:old",
+                playRequestID: 10
+            ),
+            "an unknown context track must reject Playing from the previous request"
+        )
+        expect(
+            albumIntent.isConfirmed(
+                byPlayingURI: "spotify:track:any",
+                playRequestID: 11
+            ),
+            "an unknown context track must accept Playing from its new request"
+        )
+    }
+
+    private static func pendingPlayIntent(
+        createdAt: ContinuousClock.Instant = .now
+    ) -> PendingPlayIntent {
+        PendingPlayIntent(
+            call: .context(uri: "spotify:playlist:abc", index: 12),
+            trackURI: "spotify:track:def",
+            accountEpoch: 7,
+            previousPlayRequestID: 10,
+            createdAt: createdAt
+        )
+    }
+
+    // MARK: - PlaybackReconnectPolicy
+
+    private static func testReconnectDefersWhileAudioIsProgressing() {
+        expect(
+            PlaybackReconnectPolicy.shouldDeferRebuild(
+                isPlaying: true,
+                isBuffering: false,
+                hasPendingPlay: false
+            ),
+            "a control-plane outage must not rebuild a player with progressing audio"
+        )
+    }
+
+    private static func testReconnectDoesNotDeferWhenPlaybackNeedsControlPlane() {
+        for state in [
+            (isPlaying: false, isBuffering: false, hasPendingPlay: false),
+            (isPlaying: true, isBuffering: true, hasPendingPlay: false),
+            (isPlaying: true, isBuffering: false, hasPendingPlay: true),
+        ] {
+            expect(
+                !PlaybackReconnectPolicy.shouldDeferRebuild(
+                    isPlaying: state.isPlaying,
+                    isBuffering: state.isBuffering,
+                    hasPendingPlay: state.hasPendingPlay
+                ),
+                "paused, buffering, and pending-play states must rebuild the control plane"
+            )
+        }
     }
 
     // MARK: - Harness

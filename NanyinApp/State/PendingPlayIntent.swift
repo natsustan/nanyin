@@ -1,0 +1,51 @@
+import Foundation
+
+/// A server-resolved play command that was submitted but has not yet been
+/// confirmed by a Playing event.
+struct PendingPlayIntent: Equatable {
+    enum Call: Equatable {
+        case context(uri: String, index: Int)
+    }
+
+    let call: Call
+    let trackURI: String?
+    let accountEpoch: Int
+    let createdAt: ContinuousClock.Instant
+    private(set) var previousPlayRequestID: UInt64
+    private(set) var replayed: Bool
+
+    init(
+        call: Call,
+        trackURI: String?,
+        accountEpoch: Int,
+        previousPlayRequestID: UInt64,
+        createdAt: ContinuousClock.Instant = .now
+    ) {
+        self.call = call
+        self.trackURI = trackURI
+        self.accountEpoch = accountEpoch
+        self.previousPlayRequestID = previousPlayRequestID
+        self.createdAt = createdAt
+        replayed = false
+    }
+
+    mutating func markReplayedIfEligible(
+        accountEpoch: Int,
+        previousPlayRequestID: UInt64,
+        now: ContinuousClock.Instant = .now,
+        lifetime: Duration = .seconds(60)
+    ) -> Bool {
+        guard !replayed,
+              self.accountEpoch == accountEpoch,
+              createdAt.duration(to: now) <= lifetime else { return false }
+        replayed = true
+        self.previousPlayRequestID = previousPlayRequestID
+        return true
+    }
+
+    func isConfirmed(byPlayingURI uri: String, playRequestID: UInt64) -> Bool {
+        playRequestID != CorePlaybackProgress.noPlayRequest
+            && playRequestID != previousPlayRequestID
+            && (trackURI == nil || trackURI == uri)
+    }
+}

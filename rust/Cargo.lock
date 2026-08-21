@@ -1507,6 +1507,7 @@ name = "nanyin-core"
 version = "0.1.0"
 dependencies = [
  "env_logger",
+ "librespot-audio",
  "librespot-connect",
  "librespot-core",
  "librespot-metadata",
