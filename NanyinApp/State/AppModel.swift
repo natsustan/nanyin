@@ -1041,6 +1041,134 @@ final class AppModel {
         }
     }
 
+    // MARK: - Home (personalized)
+
+    enum HomeSection: String, CaseIterable, Identifiable {
+        case recentlyPlayed
+        case topTracks
+        case topArtists
+
+        var id: String { rawValue }
+    }
+
+    /// Track-list context key the home top-tracks rows play through — a
+    /// bounded ad-hoc window, same path as search results (no server
+    /// context URI exists for /v1/me/top/tracks).
+    static let homeTopTracksContextKey = "homeTop"
+
+    private(set) var homeRecentlyPlayed: [HomeFeed.Card] = []
+    private(set) var homeTopTracks: [SpotifyClient.Track] = []
+    private(set) var homeTopArtists: [SpotifyClient.Artist] = []
+    private(set) var isLoadingHome = false
+    /// Per-section failures — one block failing never clears the others.
+    private(set) var homeErrors: [HomeSection: String] = [:]
+    /// Raw history kept so Recently Played cards can be re-derived once the
+    /// playlist list (names/covers for playlist contexts) finishes loading.
+    private var homeHistory: [SpotifyClient.PlayHistoryItem] = []
+    /// Sections that have loaded this login — revisit auto-loads only the
+    /// missing ones; manual refresh bypasses this cache entirely.
+    private var homeLoadedSections: Set<HomeSection> = []
+    private var homeSectionsInFlight: Set<HomeSection> = []
+    /// Per-section request generation: a section publishes only while its own
+    /// generation is current, so re-entering home (restarting failed sections)
+    /// never discards a sibling section's still-in-flight result — only a
+    /// force refresh or sign-out supersedes it.
+    private var homeSectionGenerations: [HomeSection: Int] = [:]
+
+    var hasHomeData: Bool {
+        !homeRecentlyPlayed.isEmpty || !homeTopTracks.isEmpty || !homeTopArtists.isEmpty
+    }
+
+    /// Loads the personalized home sections from public Web API endpoints
+    /// (recently-played, top/tracks, top/artists — not recommendation feeds).
+    /// Sections load independently and publish independently: a failure in
+    /// one leaves the others' content intact. Cached per section until the
+    /// account epoch changes; `force` re-requests everything.
+    func loadHome(force: Bool = false) {
+        guard authState == .loggedIn else { return }
+        let pending = force
+            ? HomeSection.allCases
+            : HomeSection.allCases.filter { !homeLoadedSections.contains($0) && !homeSectionsInFlight.contains($0) }
+        guard !pending.isEmpty else { return }
+
+        homeErrors = [:]
+        for section in pending {
+            // A force refresh keeps stale content visible, but the section is
+            // no longer considered loaded until this request succeeds. If it
+            // fails, a normal retry must request it again.
+            homeLoadedSections.remove(section)
+            homeSectionGenerations[section, default: 0] += 1
+            homeSectionsInFlight.insert(section)
+        }
+        isLoadingHome = true
+        let epoch = accountEpoch
+
+        for section in pending {
+            let generation = homeSectionGenerations[section]!
+            switch section {
+            case .recentlyPlayed:
+                runHomeSection(section, epoch: epoch, generation: generation) { api in
+                    try await api.recentlyPlayed(limit: 20)
+                } publish: { [weak self] history in
+                    guard let self else { return }
+                    homeHistory = history
+                    homeRecentlyPlayed = HomeFeed.recentlyPlayedCards(from: history, playlists: playlists)
+                }
+            case .topTracks:
+                runHomeSection(section, epoch: epoch, generation: generation) { api in
+                    try await api.topTracks(timeRange: .shortTerm, limit: 10)
+                } publish: { [weak self] tracks in
+                    guard let self else { return }
+                    homeTopTracks = tracks
+                    tracksByContext[Self.homeTopTracksContextKey] = tracks
+                }
+            case .topArtists:
+                runHomeSection(section, epoch: epoch, generation: generation) { api in
+                    try await api.topArtists(timeRange: .mediumTerm, limit: 10)
+                } publish: { [weak self] artists in
+                    guard let self else { return }
+                    homeTopArtists = artists
+                }
+            }
+        }
+    }
+
+    /// One section's request/publish cycle, fenced by account epoch AND the
+    /// section's own generation so results from a superseded load (or a
+    /// signed-out account) can never write back. Token retry goes through
+    /// withAPIAuthRetry like every other Web API call — playback tokens are
+    /// never touched.
+    private func runHomeSection<T>(
+        _ section: HomeSection,
+        epoch: Int,
+        generation: Int,
+        operation: @escaping (SpotifyClient) async throws -> T,
+        publish: @escaping (T) -> Void
+    ) {
+        Task {
+            defer {
+                if epoch == accountEpoch, homeSectionGenerations[section] == generation {
+                    homeSectionsInFlight.remove(section)
+                    if homeSectionsInFlight.isEmpty {
+                        isLoadingHome = false
+                    }
+                }
+            }
+            do {
+                let result = try await withAPIAuthRetry(for: epoch, operation: operation)
+                guard epoch == accountEpoch, homeSectionGenerations[section] == generation else { return }
+                publish(result)
+                homeLoadedSections.insert(section)
+            } catch is CancellationError {
+                // Epoch/generation superseded — drop quietly.
+            } catch {
+                guard epoch == accountEpoch, homeSectionGenerations[section] == generation else { return }
+                homeErrors[section] = error.localizedDescription
+                dlog("home \(section) failed: \(error)")
+            }
+        }
+    }
+
     /// Player-bar like: the playing track may not be in any loaded context —
     /// build a minimal Track so the same toggle path applies.
     func toggleLikePlaying() {
@@ -1254,6 +1382,15 @@ final class AppModel {
         savedAlbumsRefreshPending = false
         lastSavedAlbumsRefresh = .distantPast
         savedAlbumsError = nil
+        homeRecentlyPlayed = []
+        homeTopTracks = []
+        homeTopArtists = []
+        homeErrors = [:]
+        homeHistory = []
+        homeLoadedSections = []
+        homeSectionsInFlight = []
+        homeSectionGenerations = [:]
+        isLoadingHome = false
         playbackAccessToken = ""
         webAccessToken = ""
         webTokenExpiry = .distantPast
@@ -1326,6 +1463,14 @@ final class AppModel {
                 let loadedPlaylists = try await api.playlists()
                 guard epoch == accountEpoch, authState == .loggedIn else { return }
                 playlists = loadedPlaylists
+                // Recently-played playlist contexts resolve names/covers
+                // from this list — re-derive the strip if home loaded first.
+                if !homeHistory.isEmpty {
+                    homeRecentlyPlayed = HomeFeed.recentlyPlayedCards(
+                        from: homeHistory,
+                        playlists: loadedPlaylists
+                    )
+                }
                 dlog("playlists loaded: \(startedAt.duration(to: .now))")
             } catch {
                 dlog("library load failed: \(error)")
@@ -1831,16 +1976,15 @@ final class AppModel {
         }
     }
 
-    /// Whole-album playback via the server-resolved context — never uploads
-    /// a track-URI list (M4.3 roadmap rule; large context uploads get
-    /// 429-rejected silently).
-    func playAlbum(id: String) {
+    /// Whole-context playback via a server-resolved context URI (album,
+    /// playlist, liked collection) — never uploads a track-URI list (M4.3
+    /// roadmap rule; large context uploads get 429-rejected silently).
+    private func playServerContext(_ contextURI: String) {
         guard isPlaybackReady else { return }
         cancelPlaybackWatchdog()
-        let uri = "spotify:album:\(id)"
         isBuffering = true
-        let rc = Core.playContext(uri, startIndex: 0)
-        dlog("playAlbum(\(uri)) rc=\(rc)")
+        let rc = Core.playContext(contextURI, startIndex: 0)
+        dlog("playContext(\(contextURI)) rc=\(rc)")
         if rc != 0 {
             isBuffering = false
             return
@@ -1848,10 +1992,30 @@ final class AppModel {
         playbackWatchdog = Task {
             try? await Task.sleep(for: .seconds(8))
             guard !Task.isCancelled, isBuffering else { return }
-            dlog("album context load stalled — clearing buffering state")
+            dlog("context load stalled — clearing buffering state")
             isBuffering = false
             playbackWatchdog = nil
         }
+    }
+
+    func playAlbum(id: String) {
+        playServerContext("spotify:album:\(id)")
+    }
+
+    /// Whole-playlist playback (home cards / library tiles).
+    func playPlaylist(id: String) {
+        playServerContext("spotify:playlist:\(id)")
+    }
+
+    /// Artist radio playback from a server-resolved artist context.
+    func playArtist(id: String) {
+        playServerContext("spotify:artist:\(id)")
+    }
+
+    /// Liked Songs context playback — needs the login5 user id.
+    func playLikedSongs() {
+        guard !userId.isEmpty else { return }
+        playServerContext("spotify:user:\(userId):collection")
     }
 
     private func cancelPlaybackWatchdog() {

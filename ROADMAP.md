@@ -1,6 +1,6 @@
 # nanyin — Roadmap
 
-> Status: M0 ✅ · M1 ✅ · hardening ✅ · M3 ✅ · M2 2.1/2.2/2.3/2.4/2.5 ✅ (2.6 paused in watch window) · M4.1 ✅ · M4.2 ✅ · M4.3 ✅
+> Status: M0 ✅ · M1 ✅ · hardening ✅ · M3 ✅ · M2 2.1/2.2/2.3/2.4/2.5 ✅ (2.6 paused in watch window) · M4.1 ✅ · M4.2 ✅ · M4.3 ✅ · M4.4 ✅
 > Last updated: 2026-08-20
 
 ## Completed
@@ -257,6 +257,43 @@ Acceptance criteria:
 Follow-ups, not part of M4.3 MVP: album results in Search, a Home-page Recently
 Saved Albums shelf, an optional compact list view alongside the grid, and bulk
 library actions.
+
+### M4.4 — Personalized Home ✅ (2026-08-20)
+
+Home replaced the M0 URI-paste screen with a personalized page built only from
+public Web API endpoints: Recently Played (`GET /v1/me/player/recently-played`),
+Top Tracks (`GET /v1/me/top/tracks?time_range=short_term`), Top Artists
+(`GET /v1/me/top/artists?time_range=medium_term`), plus a Your Library shelf
+derived from existing liked/saved-album/playlist state. No recommendation
+feeds, no private endpoints, no new scopes (user-read-recently-played and
+user-top-read were already granted).
+
+- `SpotifyClient`: `recentlyPlayed/topTracks/topArtists` with static decode
+  entry points + limit clamping (1…50) — decode logic is pure and covered by
+  `Tests/StateReducerTests.swift`.
+- `HomeFeed` (new, pure): play-history → context cards. Playlist contexts
+  resolve names/covers against `/v1/me/playlists`; editorial mixes (Daily Mix
+  etc., absent from that list) and unknown contexts fall back to the track's
+  album so a card never renders nameless. Cards dedupe by context and cap at
+  10.
+- `AppModel.loadHome(force:)`: three sections load independently and publish
+  independently — one failing never clears the others. Memory cache per
+  section for the login session; failed sections auto-retry on next entry;
+  manual refresh re-requests everything; per-section request generations +
+  account-epoch fencing keep stale results from publishing after a refresh or
+  sign-out. All traffic goes through `withAPIAuthRetry` (Web token only).
+- Home UI: greeting + refresh button, horizontal Recently Played cards
+  (album/playlist/artist hover-play via `playServerContext` — never track-URI uploads), ≤10 top
+  tracks as plain rows (ad-hoc windowed context, same as search), circular
+  Top Artists tiles, Your Library grid (Liked Songs + saved albums +
+  playlists) with loading / empty / partial-error / full-error states.
+  Single vertical scroll region; hover state stays card-local.
+- The M0 paste-a-track-URI box lives on in Search: pasting a track link/URL
+  swaps the page to a direct play card (`app.playURI`) instead of a text
+  search.
+
+Live verification (real listening history rendering, card navigation,
+playback from cards) still pending explicit approval.
 
 ## M5 — Distribution
 

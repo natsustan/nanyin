@@ -22,6 +22,16 @@ struct SearchView: View {
         query.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// The old M0 home "paste a track URI" box lives on here: a pasted track
+    /// link/URL switches the page to a direct play affordance instead of a
+    /// text search. Accepts locale-prefixed URLs
+    /// (open.spotify.com/intl-zh/track/…) — same tail-id rule as trackId(from:).
+    static func pastedTrackLinkID(_ raw: String) -> String? {
+        let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard t.hasPrefix("spotify:track:") || t.contains("/track/") else { return nil }
+        return SpotifyClient.trackId(from: t)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             searchField
@@ -48,7 +58,11 @@ struct SearchView: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 15))
                 .focused($focused)
-                .onSubmit { app.search(query) }
+                .onSubmit {
+                    if Self.pastedTrackLinkID(query) == nil {
+                        app.search(query)
+                    }
+                }
                 .onKeyPress(.escape) {
                     if query.isEmpty {
                         focused = false
@@ -81,7 +95,9 @@ struct SearchView: View {
         .padding(.bottom, 20)
         .onChange(of: query) { _, new in
             app.searchQuery = new
-            app.searchDebounced(new)
+            if Self.pastedTrackLinkID(new) == nil {
+                app.searchDebounced(new)
+            }
         }
     }
 
@@ -95,7 +111,9 @@ struct SearchView: View {
 
     @ViewBuilder
     private var content: some View {
-        if let error = app.tracksError["search"] {
+        if Self.pastedTrackLinkID(query) != nil {
+            linkPlayCard
+        } else if let error = app.tracksError["search"] {
             messageState(icon: Image(systemName: "exclamationmark.triangle"), text: error, tint: .orange)
         } else if trimmedQuery.isEmpty {
             messageState(
@@ -139,6 +157,48 @@ struct SearchView: View {
         .padding(.horizontal, 28)
         .padding(.top, 18)
         .padding(.bottom, 6)
+    }
+
+    /// Direct play affordance for a pasted track link (URI box successor).
+    private var linkPlayCard: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "link.circle.fill")
+                .font(.system(size: 40))
+                .foregroundStyle(Theme.textSecondary)
+            Text("Track Link")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.white)
+            Text("Paste any Spotify track link or URI (https://open.spotify.com/track/… or spotify:track:…) and play it directly.")
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.textSecondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 380)
+            Button {
+                app.playURI(query)
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 11, weight: .bold))
+                    Text("PLAY")
+                        .font(.system(size: 12, weight: .bold))
+                        .tracking(0.8)
+                }
+                .foregroundStyle(.black)
+                .padding(.horizontal, 22)
+                .padding(.vertical, 9)
+                .background(app.isPlaybackReady ? Theme.accent : Theme.accent.opacity(0.4))
+                .cornerRadius(20)
+            }
+            .buttonStyle(.plain)
+            .disabled(!app.isPlaybackReady)
+            .padding(.top, 2)
+            if let note = app.connectionNote {
+                Text(note)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.orange)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func messageState(

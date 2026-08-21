@@ -94,6 +94,22 @@ struct SpotifyClient {
         let artworkURL: URL?
     }
 
+    /// One entry from GET /v1/me/player/recently-played: the track plus the
+    /// context (album / playlist / artist) it was played from. The context
+    /// carries only a URI and type string — no name or artwork.
+    struct PlayHistoryItem {
+        let track: Track
+        let contextURI: String?
+        let contextType: String?
+    }
+
+    /// Listening-affinity window for /v1/me/top/* endpoints.
+    enum TopTimeRange: String {
+        case shortTerm = "short_term" // ~4 weeks
+        case mediumTerm = "medium_term" // ~6 months
+        case longTerm = "long_term"
+    }
+
     struct UserProfile: Codable {
         let id: String
         let displayName: String?
@@ -136,6 +152,12 @@ struct SpotifyClient {
     }
 
     private func get<T: Decodable>(_ path: String, query: [String: String] = [:], retries: Int = 2) async throws -> T {
+        try JSONDecoder().decode(T.self, from: try await fetch(path, query: query, retries: retries))
+    }
+
+    /// GET returning the raw body — endpoints with testable static decoders
+    /// (personalized home) fetch through this so decode logic stays pure.
+    private func fetch(_ path: String, query: [String: String] = [:], retries: Int = 2) async throws -> Data {
         var components = URLComponents(string: "https://api.spotify.com\(path)")!
         if !query.isEmpty {
             components.queryItems = query.map { .init(name: $0.key, value: $0.value) }
@@ -149,7 +171,7 @@ struct SpotifyClient {
             let (data, response) = try await URLSession.shared.data(for: req)
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             if status == 200 {
-                return try JSONDecoder().decode(T.self, from: data)
+                return data
             }
             // 429: honor Retry-After, retry a bounded number of times (cliamp pattern).
             if status == 429, attempt < retries {
@@ -350,6 +372,26 @@ struct SpotifyClient {
         }
     }
 
+    private struct PlayHistoryDTO: Codable {
+        struct Item: Codable {
+            struct Context: Codable {
+                let uri: String?
+                let type: String?
+            }
+            let track: TrackDTO?
+            let context: Context?
+        }
+        let items: [Item]
+    }
+
+    private struct TopTracksPageDTO: Codable {
+        let items: [TrackDTO]
+    }
+
+    private struct TopArtistsPageDTO: Codable {
+        let items: [ArtistDTO]
+    }
+
     private struct SaveTracksBody: Codable {
         let ids: [String]
     }
@@ -459,6 +501,76 @@ struct SpotifyClient {
             offset += pageSize
         }
         return result
+    }
+
+    // MARK: - Personalized home
+
+    /// Clamps a page size into the endpoint's valid 1…50 range.
+    static func clampedLimit(_ limit: Int) -> Int {
+        min(max(limit, 1), 50)
+    }
+
+    /// Static decode entry points (shared with the state reducer tests so
+    /// response parsing stays pure and covered).
+    static func decodeRecentlyPlayed(_ data: Data) throws -> [PlayHistoryItem] {
+        let dto = try JSONDecoder().decode(PlayHistoryDTO.self, from: data)
+        return dto.items.compactMap { item in
+            guard let track = item.track?.toTrack else { return nil }
+            return PlayHistoryItem(
+                track: track,
+                contextURI: item.context?.uri,
+                contextType: item.context?.type
+            )
+        }
+    }
+
+    static func decodeTopTracks(_ data: Data) throws -> [Track] {
+        let dto = try JSONDecoder().decode(TopTracksPageDTO.self, from: data)
+        return dto.items.compactMap(\.toTrack)
+    }
+
+    static func decodeTopArtists(_ data: Data) throws -> [Artist] {
+        let dto = try JSONDecoder().decode(TopArtistsPageDTO.self, from: data)
+        return dto.items.compactMap(\.toArtist)
+    }
+
+    /// Recently played history (GET /v1/me/player/recently-played). One page
+    /// is enough for the home strip; the endpoint is cursor-based, so limit
+    /// only controls how far back the server looks (max 50).
+    func recentlyPlayed(limit: Int = 20) async throws -> [PlayHistoryItem] {
+        try Self.decodeRecentlyPlayed(
+            try await fetch(
+                "/v1/me/player/recently-played",
+                query: ["limit": "\(Self.clampedLimit(limit))"]
+            )
+        )
+    }
+
+    /// The user's most-played tracks (GET /v1/me/top/tracks).
+    func topTracks(timeRange: TopTimeRange = .shortTerm, limit: Int = 10) async throws -> [Track] {
+        try Self.decodeTopTracks(
+            try await fetch(
+                "/v1/me/top/tracks",
+                query: [
+                    "time_range": timeRange.rawValue,
+                    "limit": "\(Self.clampedLimit(limit))",
+                ]
+            )
+        )
+    }
+
+    /// The user's most-played artists (GET /v1/me/top/artists). Full artist
+    /// objects — portraits included, no extra profile round trip.
+    func topArtists(timeRange: TopTimeRange = .mediumTerm, limit: Int = 10) async throws -> [Artist] {
+        try Self.decodeTopArtists(
+            try await fetch(
+                "/v1/me/top/artists",
+                query: [
+                    "time_range": timeRange.rawValue,
+                    "limit": "\(Self.clampedLimit(limit))",
+                ]
+            )
+        )
     }
 
     // MARK: - Likes round-trip (M4.2)
