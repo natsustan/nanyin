@@ -1,7 +1,7 @@
 # nanyin — Roadmap
 
-> Status: M0 ✅ · M1 ✅ · hardening ✅ · M3 ✅ · M2 2.1/2.2/2.3/2.4/2.5 ✅ (2.6 paused in watch window) · M4.1 ✅ · M4.2 ✅ · M4.3 ✅ · M4.4 ✅
-> Last updated: 2026-08-20
+> Status: M0 ✅ · M1 ✅ · hardening ✅ · M2 ✅ · M3 ✅ · M4.1 ✅ · M4.2 ✅ · M4.3 ✅ · M4.4 ✅
+> Last updated: 2026-08-21
 
 ## Completed
 
@@ -56,7 +56,7 @@ Goal: "usable as the daily driver" — everything the transport bar implies work
 | 2.3 | Queue view | ✅ done 2026-08-18. Queue page (sidebar + player-bar button): Now Playing + Next Up + Recently Played. Data from `GET /v1/me/player/queue` (server-capped ~20 items), refreshed on track change / add-to-queue / page open; recently-played tracked locally. Add-to-queue round-trip verified live (row context menu → track jumps to front of Next Up). **Dead end recorded:** dealer cluster pushes are NOT available to third-party clients — the dealer websocket rejects client `SUBSCRIBE` frames (`Unsupported message type` close; verified empirically). librespot's spirc cluster listener is effectively dead code on the current server; remote control still works because commands arrive as dealer *requests*. | 1d |
 | 2.4 | End-of-track auto-advance edge | ✅ done 2026-08-18 — verified after penalty window lifted | 0.5d |
 | 2.5 | Track row context menu | Play next / add to queue (needs 2.3), copy song link | 0.25d |
-| 2.6 | Seek reliability | Drag-seek while paused; position interpolation after seek (player emits Seeked) | 0.25d |
+| 2.6 | Seek reliability | ✅ done 2026-08-21 — drag-seek while paused and position interpolation after seek behave correctly in normal use | 0.25d |
 
 Exit criteria: media keys + lock screen controls work; shuffle/repeat round-trip
 with the phone's Spotify app state; queue visible and manipulable; a 3-hour
@@ -104,11 +104,12 @@ Note: ncspot client id keeps /v1/search working (production-approved app).
 |---|------|-------|
 | 4.1 | Album / artist pages | ✅ done 2026-08-18. Clickable artist/album names in track rows (per-artist buttons, multi-artist tracks each clickable). The compact player bar intentionally shows only the title and artist, with the artist linking to the artist page; it does not display the album name. Id-less external starts fall back to `/v1/tracks` metadata fetch for artist navigation. Also fixed pre-existing `withAlbum` bug: album name was overwriting the track title on album pages | 1d |
 | 4.2 | Likes round-trip | ✅ done 2026-08-19. Heart toggle in track rows (hover-ghost, liked-solid green; context-menu entry) + player bar; `likedContains` seeds per-context (50-id cap), `toggleLike` optimistic with revert-on-failure (incl. one needsAuth retry); liked page cache + sidebar count maintained. Verified live both directions (unlike from liked page → server `[false]`, save from search → `[true]`). Note: server `contains` lags its own PUT/DELETE — never read-back-validate a just-toggled id. | 0.5d |
-| 4.3 | Saved Albums / album library | **Next.** First-class album library: aggregate page, album save/remove, album-first playback, sorting/filtering, and cross-client reconciliation. Saved albums and Liked Songs remain separate concepts | 2–2.75d |
-| 4.4 | Playlist create/add | `+` in sidebar, context menu "Add to playlist"; `/v1/users/{id}/playlists` + `/v1/playlists/{id}/tracks` (scopes already granted) | 0.5d |
-| 4.5 | Playlist search/filter | Client-side filter row in detail view | 0.25d |
-| 4.6 | Keyboard navigation | ↑↓ already free via List; Enter = play; Space = play/pause (global) | 0.25d |
-| 4.7 | Window: mini-player | Collapsed player-bar-only mode (classic Winamp-ish) | 0.5d |
+| 4.3 | Saved Albums / album library | ✅ done 2026-08-20. First-class album library: aggregate page, album save/remove, album-first playback, sorting/filtering, and cross-client reconciliation. Saved albums and Liked Songs remain separate concepts | 2–2.75d |
+| 4.4 | Personalized Home | ✅ done 2026-08-20. Recently Played, Top Tracks, Top Artists, and Your Library from public Web API endpoints; independent section loading and cache/failure handling | 1d |
+| 4.5 | Playlist create/add | **Next.** `+` to the right of the sidebar `PLAYLISTS` title opens New Playlist; track context menu adds to an owned playlist. Use `/v1/users/{id}/playlists` + `/v1/playlists/{id}/items` (scopes already granted) | 0.5d |
+| 4.6 | Playlist search/filter | Client-side filter row in detail view | 0.25d |
+| 4.7 | Keyboard navigation | ↑↓ already free via List; Enter = play; Space = play/pause (global) | 0.25d |
+| 4.8 | Window: mini-player | Collapsed player-bar-only mode (classic Winamp-ish) | 0.5d |
 
 ### M4.3 — Album Library product plan
 
@@ -294,6 +295,90 @@ user-top-read were already granted).
 
 Live verification (real listening history rendering, card navigation,
 playback from cards) still pending explicit approval.
+
+### M4.5 — New Playlist and Add to Playlist plan
+
+Goal: make playlist creation discoverable from the library sidebar, then let a
+track be added to an owned playlist without leaving its current page.
+
+Primary UI:
+
+```text
+PLAYLISTS                                  [+]
+Discover Weekly                             30
+Daily Mix 1                                 50
+
+┌──────────────────── New Playlist ────────────────────┐
+│ Name                                                  │
+│ [My playlist_______________________________________]  │
+│                                                       │
+│                              [Cancel]  [Create]        │
+└───────────────────────────────────────────────────────┘
+```
+
+- Replace the conditional `PLAYLISTS`/`Loading playlists…` label with one
+  stable title row. Put a plain `+` button at the title's right edge with the
+  accessibility label and tooltip `New Playlist`; keep it visible when the
+  library is loading or empty.
+- Clicking `+` opens a focused New Playlist sheet. Name is the only MVP field;
+  trim surrounding whitespace, disable Create for an empty name, submit with
+  Return, and create a private playlist by default. Cancel makes no request.
+- While Create is in flight, disable both duplicate submission and dismissal.
+  Show a retryable inline error in the sheet. On success, insert the returned
+  playlist into the sidebar immediately, dismiss the sheet, and navigate to
+  its empty detail page.
+- Give the playlist list explicit loading and empty states instead of treating
+  an empty response as perpetual loading. The `+` action remains available in
+  both states.
+- Add an `Add to Playlist` submenu to track-row context menus after creation is
+  complete. List only playlists the current user owns in the MVP; selecting
+  one adds that track once per click, updates its sidebar count after success,
+  and refreshes an already-open target playlist. Keep `Add to Queue` separate.
+
+API and state model:
+
+- Retain playlist ownership in `PlaylistInfo` so write targets can be filtered
+  without another request. A newly created playlist is editable immediately.
+- Add a Web API mutation helper that accepts the endpoint's normal 200/201/204
+  success statuses while preserving the existing bounded 429 handling and
+  typed 401 behavior.
+- Create with `POST /v1/users/{userId}/playlists` and JSON
+  `{ "name": name, "public": false }`. Decode and return the created playlist
+  rather than synthesizing an id or waiting for a full library refresh.
+- Add tracks with `POST /v1/playlists/{playlistId}/items` and JSON
+  `{ "uris": [track.uri] }`. Do not use the legacy `/tracks` route.
+- Route both writes through `withAPIAuthRetry` using only the Web API token.
+  Fence results by account epoch so a late completion cannot repopulate state
+  after sign-out or an account change.
+- Keep one playlist refresh path as the server reconciliation source. A stale
+  refresh started before a successful create/add must not overwrite the newer
+  local result; use a request generation or merge the confirmed mutation into
+  the arriving snapshot.
+
+Delivery slices:
+
+1. **Create API/state:** ownership metadata, mutation transport,
+   `createPlaylist`, account-epoch/request-generation guards, and list refresh.
+2. **New Playlist UI:** stable title row with right-aligned `+`, creation sheet,
+   keyboard behavior, loading/empty/error states, and success navigation.
+3. **Add to Playlist:** owned-playlist submenu, add-item write, count/detail
+   reconciliation, and bounded per-target in-flight state to prevent accidental
+   duplicate clicks.
+4. **Verification:** offline decode/state tests and `script/agent_check.sh`;
+   live create/add/server-refresh verification only after explicit approval.
+
+Acceptance criteria:
+
+- `+` is always visible to the right of `PLAYLISTS` and is keyboard- and
+  VoiceOver-accessible.
+- A valid name creates exactly one private playlist, shows it immediately, and
+  opens its empty detail page; cancellation and invalid names make no request.
+- API failure leaves the entered name intact and permits retry without adding
+  a phantom sidebar entry.
+- `Add to Playlist` exposes only writable MVP targets; success survives a full
+  refresh and updates an open target without duplicating existing loaded rows.
+- Sign-out or account replacement wins over every late create/add/refresh
+  completion.
 
 ## M5 — Distribution
 
