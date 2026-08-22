@@ -34,6 +34,12 @@ enum LocalPlaybackRestoreState: Equatable {
     case idle(LocalPlaybackSnapshot)
     case starting(LocalPlaybackSnapshot)
 
+    enum PlayingDisposition: Equatable {
+        case ignore
+        case confirmRestore
+        case discardRestore
+    }
+
     var snapshot: LocalPlaybackSnapshot {
         switch self {
         case let .idle(snapshot), let .starting(snapshot): snapshot
@@ -43,6 +49,49 @@ enum LocalPlaybackRestoreState: Equatable {
     var isStarting: Bool {
         if case .starting = self { return true }
         return false
+    }
+
+    func playingDisposition(
+        isCurrentRequest: Bool,
+        confirmsRestore: Bool
+    ) -> PlayingDisposition {
+        guard isCurrentRequest else { return .ignore }
+        if isStarting, confirmsRestore { return .confirmRestore }
+        return .discardRestore
+    }
+}
+
+enum LocalPlaybackOwnership: Equatable {
+    case current(requestID: UInt64)
+    case expectingSuccessor(previousRequestID: UInt64)
+
+    var currentRequestID: UInt64? {
+        switch self {
+        case let .current(requestID), let .expectingSuccessor(requestID):
+            requestID
+        }
+    }
+
+    func expectingSuccessor(after requestID: UInt64) -> LocalPlaybackOwnership {
+        guard requestID != CorePlaybackProgress.noPlayRequest else { return self }
+        switch self {
+        case let .current(currentRequestID) where currentRequestID == requestID:
+            return .expectingSuccessor(previousRequestID: currentRequestID)
+        case let .expectingSuccessor(previousRequestID) where previousRequestID == requestID:
+            return self
+        default:
+            return self
+        }
+    }
+
+    func confirmingPlaying(requestID: UInt64) -> LocalPlaybackOwnership? {
+        guard requestID != CorePlaybackProgress.noPlayRequest else { return nil }
+        switch self {
+        case let .current(currentRequestID):
+            return currentRequestID == requestID ? self : nil
+        case let .expectingSuccessor(previousRequestID):
+            return previousRequestID == requestID ? nil : .current(requestID: requestID)
+        }
     }
 }
 

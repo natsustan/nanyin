@@ -146,7 +146,7 @@ final class AppModel {
 
     private(set) var nowPlaying: NowPlaying?
     private var localPlaybackRestore: LocalPlaybackRestoreState?
-    private var localPlaybackRequestID: UInt64?
+    private var localPlaybackOwnership: LocalPlaybackOwnership?
     private(set) var playbackConnectionState: PlaybackConnectionState = .connecting
 
     var isPlaybackReady: Bool {
@@ -1600,7 +1600,7 @@ final class AppModel {
         userId = ""
         nowPlaying = nil
         localPlaybackRestore = nil
-        localPlaybackRequestID = nil
+        localPlaybackOwnership = nil
         isPlaying = false
         isBuffering = false
         durationMs = 0
@@ -1667,8 +1667,7 @@ final class AppModel {
         guard authState == .loggedIn,
               !userId.isEmpty,
               let nowPlaying,
-              let localPlaybackRequestID,
-              localPlaybackRequestID == Core.playbackProgress.playRequestID else { return }
+              localPlaybackOwnership?.currentRequestID == Core.playbackProgress.playRequestID else { return }
         LocalPlaybackStore.save(LocalPlaybackSnapshot(
             accountID: userId,
             uri: nowPlaying.uri,
@@ -2181,7 +2180,7 @@ final class AppModel {
         cancelPendingPlayForUserCommand()
         guard isPlaybackReady else { return }
         discardLocalPlaybackRestore()
-        localPlaybackRequestID = nil
+        localPlaybackOwnership = nil
         cancelAudioStallWatchdog()
         if pendingQueueHistory == nil, let nowPlaying, nowPlaying.uri != track.uri {
             pendingQueueHistory = (nowPlaying, durationMs)
@@ -2284,7 +2283,7 @@ final class AppModel {
         cancelPendingPlayForUserCommand()
         guard isPlaybackReady else { return }
         discardLocalPlaybackRestore()
-        localPlaybackRequestID = nil
+        localPlaybackOwnership = nil
         cancelAudioStallWatchdog()
         isBuffering = true
         let previousPlayRequestID = Core.playbackProgress.playRequestID
@@ -2515,34 +2514,54 @@ final class AppModel {
     }
 
     private func handle(_ event: Core.Event, generation: UInt64) {
+        var discardedLocalRestore = false
         // Keep startup restoration strictly local. While its explicit play is
-        // starting, only the matching new Playing event may enter live state;
-        // queued events from the inactive session remain ignored.
+        // starting, only a current Playing event may enter live state. A
+        // different current request is an external takeover; stale queued
+        // events from the inactive session remain ignored.
         if let restore = localPlaybackRestore {
-            guard restore.isStarting,
-                  case let .playing(uri, _, playRequestID) = event,
-                  playRequestID == Core.playbackProgress.playRequestID,
-                  pendingPlayIntent?.isConfirmed(
-                      byPlayingURI: uri,
-                      playRequestID: playRequestID
-                  ) == true else { return }
-            localPlaybackRestore = nil
+            guard case let .playing(uri, _, playRequestID) = event else { return }
+            let isCurrentRequest = playRequestID != CorePlaybackProgress.noPlayRequest
+                && playRequestID == Core.playbackProgress.playRequestID
+            let confirmsRestore = pendingPlayIntent?.isConfirmed(
+                byPlayingURI: uri,
+                playRequestID: playRequestID
+            ) == true
+            switch restore.playingDisposition(
+                isCurrentRequest: isCurrentRequest,
+                confirmsRestore: confirmsRestore
+            ) {
+            case .ignore:
+                return
+            case .confirmRestore:
+                localPlaybackRestore = nil
+            case .discardRestore:
+                discardLocalPlaybackRestore()
+                localPlaybackOwnership = nil
+                discardedLocalRestore = true
+                durationMs = Core.durationMs
+                fetchMetadata(uri: uri, playbackGeneration: generation)
+            }
         }
         switch event {
         case let .playing(uri, _, playRequestID):
-            guard playRequestID == Core.playbackProgress.playRequestID else { return }
-            let hadPendingPlay = pendingPlayIntent != nil
-            let confirmsPendingPlay = pendingPlayIntent?.isConfirmed(
-                byPlayingURI: uri,
-                playRequestID: playRequestID
-            ) ?? true
+            guard playRequestID != CorePlaybackProgress.noPlayRequest,
+                  playRequestID == Core.playbackProgress.playRequestID else { return }
+            let hadPendingPlay = !discardedLocalRestore && pendingPlayIntent != nil
+            let confirmsPendingPlay = discardedLocalRestore
+                || pendingPlayIntent?.isConfirmed(
+                    byPlayingURI: uri,
+                    playRequestID: playRequestID
+                ) == true
+                || pendingPlayIntent == nil
             if confirmsPendingPlay {
                 cancelPlaybackWatchdog()
                 clearPendingPlayIntent()
                 if hadPendingPlay {
-                    localPlaybackRequestID = playRequestID
-                } else if localPlaybackRequestID != playRequestID {
-                    localPlaybackRequestID = nil
+                    localPlaybackOwnership = .current(requestID: playRequestID)
+                } else {
+                    localPlaybackOwnership = localPlaybackOwnership?
+                        .confirmingPlaying(requestID: playRequestID)
                 }
             }
             isPlaying = true
@@ -2629,8 +2648,10 @@ final class AppModel {
             case (false, true): repeatMode = .one
             case (false, false): repeatMode = .off
             }
-        case .endOfTrack:
+        case let .endOfTrack(playRequestID):
             cancelAudioStallWatchdog()
+            localPlaybackOwnership = localPlaybackOwnership?
+                .expectingSuccessor(after: playRequestID)
             resumeDeferredReconnectIfNeeded()
             break // Spirc auto-advances within the context
         }
@@ -2865,7 +2886,7 @@ final class AppModel {
         cancelPendingPlayForUserCommand()
         guard isPlaybackReady else { return }
         discardLocalPlaybackRestore()
-        localPlaybackRequestID = nil
+        localPlaybackOwnership = nil
         cancelAudioStallWatchdog()
         var uri = input.trimmingCharacters(in: .whitespacesAndNewlines)
         if !uri.hasPrefix("spotify:"), let id = SpotifyClient.trackId(from: uri) {
@@ -2984,7 +3005,11 @@ final class AppModel {
         guard isPlaybackReady, localPlaybackRestore == nil else { return }
         discardLocalPlaybackRestore()
         cancelAudioStallWatchdog()
-        _ = Core.next()
+        let requestID = Core.playbackProgress.playRequestID
+        if Core.next() == 0 {
+            localPlaybackOwnership = localPlaybackOwnership?
+                .expectingSuccessor(after: requestID)
+        }
     }
 
     func prev() {
@@ -2992,7 +3017,11 @@ final class AppModel {
         guard isPlaybackReady, localPlaybackRestore == nil else { return }
         discardLocalPlaybackRestore()
         cancelAudioStallWatchdog()
-        _ = Core.prev()
+        let requestID = Core.playbackProgress.playRequestID
+        if Core.prev() == 0 {
+            localPlaybackOwnership = localPlaybackOwnership?
+                .expectingSuccessor(after: requestID)
+        }
     }
 
 }

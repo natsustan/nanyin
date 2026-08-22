@@ -782,9 +782,14 @@ fn handle_player_event(
                 "play_request_id": play_request_id,
             }), callback_generation);
         }
-        PlayerEvent::EndOfTrack { .. } => {
+        PlayerEvent::EndOfTrack {
+            play_request_id, ..
+        } => {
             stop_position_clock();
-            emit_state(json!({ "event": "end_of_track" }), callback_generation);
+            emit_state(json!({
+                "event": "end_of_track",
+                "play_request_id": play_request_id,
+            }), callback_generation);
         }
         PlayerEvent::ShuffleChanged { shuffle } => {
             emit_state(

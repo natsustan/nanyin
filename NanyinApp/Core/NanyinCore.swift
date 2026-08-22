@@ -34,7 +34,7 @@ enum Core {
         )
         case shuffleChanged(Bool)
         case repeatChanged(context: Bool, track: Bool)
-        case endOfTrack
+        case endOfTrack(playRequestID: UInt64)
     }
 
     nonisolated(unsafe) static var onEvent: (@MainActor (UInt64, Event) -> Void)?
@@ -120,7 +120,7 @@ enum Core {
                 coverURL: object["cover_url"] as? String,
                 playRequestID: playRequestID
             )
-        case "end_of_track": event = .endOfTrack
+        case "end_of_track": event = .endOfTrack(playRequestID: playRequestID)
         case "shuffle_changed": event = .shuffleChanged(object["shuffle"] as? Bool ?? false)
         case "repeat_changed":
             event = .repeatChanged(

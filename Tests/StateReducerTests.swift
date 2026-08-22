@@ -16,6 +16,9 @@ private enum StateReducerTests {
         testLocalPlaybackSnapshotRejectsAnotherAccount()
         testLocalPlaybackPositionClampsToDuration()
         testLocalPlaybackRestoreStateKeepsSnapshotWhileStarting()
+        testIdleLocalPlaybackRestoreAcceptsCurrentExternalPlayback()
+        testLocalPlaybackOwnershipTransfersToExpectedSuccessor()
+        testLocalPlaybackOwnershipRejectsUnexpectedReplacement()
 
         testSaveOverrideInsertsAtTopAndBumpsCount()
         testRemoveOverrideDropsConfirmedRowAndCount()
@@ -783,6 +786,72 @@ private enum StateReducerTests {
         expect(
             starting.snapshot == snapshot,
             "starting playback must retain the snapshot until Playing confirms it"
+        )
+    }
+
+    private static func testIdleLocalPlaybackRestoreAcceptsCurrentExternalPlayback() {
+        let restore = LocalPlaybackRestoreState.idle(localPlaybackSnapshot())
+
+        expect(
+            restore.playingDisposition(
+                isCurrentRequest: true,
+                confirmsRestore: false
+            ) == .discardRestore,
+            "current external playback must replace an idle local snapshot"
+        )
+        expect(
+            restore.playingDisposition(
+                isCurrentRequest: false,
+                confirmsRestore: false
+            ) == .ignore,
+            "a stale Playing event must not replace an idle local snapshot"
+        )
+    }
+
+    private static func testLocalPlaybackOwnershipTransfersToExpectedSuccessor() {
+        let ownership = LocalPlaybackOwnership.current(requestID: 10)
+            .expectingSuccessor(after: 10)
+
+        expect(
+            ownership.currentRequestID == 10,
+            "the current track must remain snapshot-eligible while its successor is loading"
+        )
+        expect(
+            ownership.confirmingPlaying(requestID: 11) == .current(requestID: 11),
+            "skip and auto-advance must transfer snapshot ownership to the confirmed successor"
+        )
+        expect(
+            ownership.confirmingPlaying(
+                requestID: CorePlaybackProgress.noPlayRequest
+            ) == nil,
+            "an event without a play request must never acquire snapshot ownership"
+        )
+    }
+
+    private static func testLocalPlaybackOwnershipRejectsUnexpectedReplacement() {
+        let ownership = LocalPlaybackOwnership.current(requestID: 10)
+
+        expect(
+            ownership.expectingSuccessor(after: 9) == ownership,
+            "a stale EndOfTrack event must not authorize an ownership transfer"
+        )
+        expect(
+            ownership.confirmingPlaying(requestID: 11) == nil,
+            "an unexpected external request must not inherit local snapshot ownership"
+        )
+    }
+
+    private static func localPlaybackSnapshot() -> LocalPlaybackSnapshot {
+        LocalPlaybackSnapshot(
+            accountID: "account-a",
+            uri: "spotify:track:abc",
+            title: "Song",
+            artist: "Artist",
+            album: "Album",
+            albumId: nil,
+            artworkURL: nil,
+            durationMs: 100,
+            positionMs: 50
         )
     }
 
