@@ -104,6 +104,7 @@ struct PlaylistDetailView: View {
             VStack(spacing: 12) {
                 if app.isLoadingTracks(contextKey: contextKey) {
                     ProgressView()
+                        .tint(theme.colors.accent)
                     Text("Loading tracks…")
                         .foregroundStyle(theme.colors.secondaryText)
                 } else {

@@ -51,6 +51,7 @@
 		B7A8F5C27CE3E0B4CE496DE0 /* ChromeStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4C7D21A04EED9DB1C9CFE42 /* ChromeStyle.swift */; };
 		C08063B3487CD8115D817D01 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6332196A87845CF96EBF8B /* HomeView.swift */; };
 		C0DD952271D2CECFD543B0CF /* MembershipMutation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C34F9480C980947C6DBA66E /* MembershipMutation.swift */; };
+		C2DA3211CF3D7570D06BD6FE /* ThemeVisualFixture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 459B108E232139E1EFF71B79 /* ThemeVisualFixture.swift */; };
 		C480BDD897799A7CF14CBCCC /* NowPlayingManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5362EA9DE5C94A675FC10A2A /* NowPlayingManager.swift */; };
 		CEE4F338C3A35800937BF7B7 /* ClassicChromePreviewHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = F79877AF87B61E7E6245030C /* ClassicChromePreviewHarness.swift */; };
 		D53EA805C18FC6BD2585A05E /* DebugLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EF680835CEF2B531A47F6E0 /* DebugLog.swift */; };
@@ -85,6 +86,7 @@
 		40227EC50BC3F11ADCDBF6EA /* PendingPlayIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingPlayIntent.swift; sourceTree = "<group>"; };
 		403D18D55DD1CEF30C7EA2F9 /* ClassicShellGeometryFixture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClassicShellGeometryFixture.swift; sourceTree = "<group>"; };
 		407D7A1D4B2A09E284C8A895 /* Nanyin.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Nanyin.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		459B108E232139E1EFF71B79 /* ThemeVisualFixture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeVisualFixture.swift; sourceTree = "<group>"; };
 		46CBA0966AF2014CCAB3C2D3 /* PlaybackReconnectPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackReconnectPolicy.swift; sourceTree = "<group>"; };
 		5362EA9DE5C94A675FC10A2A /* NowPlayingManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingManager.swift; sourceTree = "<group>"; };
 		5441652B68A21A528AED8EEE /* ClassicToolbarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClassicToolbarView.swift; sourceTree = "<group>"; };
@@ -211,6 +213,7 @@
 				2639140FEC134E04BA4815ED /* SidebarView.swift */,
 				6AE5477026638A4B5FD55C57 /* Theme.swift */,
 				F44F7DCE76E9710B8B7CCF3C /* ThemeSettingsView.swift */,
+				459B108E232139E1EFF71B79 /* ThemeVisualFixture.swift */,
 				0ABCA0BD4B3997AAFAD3B222 /* TrackListView.swift */,
 			);
 			path = Views;
@@ -440,6 +443,7 @@
 				EF615432E21E71D8FDC83A84 /* SpotifyConfig.swift in Sources */,
 				B65B50DEC7B998D60E808DE4 /* Theme.swift in Sources */,
 				4EC4005CBB59A6B4F9BF51CD /* ThemeSettingsView.swift in Sources */,
+				C2DA3211CF3D7570D06BD6FE /* ThemeVisualFixture.swift in Sources */,
 				07B63577FDF07C65ECB1C8F8 /* TrackListView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

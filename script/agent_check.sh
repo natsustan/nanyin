@@ -141,6 +141,28 @@ rg -q 'collectionGridMinimum' "$ROOT_DIR/NanyinApp/Views/HomeView.swift" \
 rg -q 'collectionGridMinimum' "$ROOT_DIR/NanyinApp/Views/SavedAlbumsView.swift" \
     || fail "Saved Albums grid is not theme-density aware"
 
+step "checking offline visual calibration fixture"
+VISUAL_FIXTURE="$ROOT_DIR/NanyinApp/Views/ThemeVisualFixture.swift"
+[[ -f "$VISUAL_FIXTURE" ]] || fail "offline theme visual fixture is missing"
+rg -q 'ThemeVisualStateMatrix' "$VISUAL_FIXTURE" \
+    || fail "offline theme state matrix is missing"
+! rg -q 'AppModel|SpotifyClient|KeychainStore|SpotifyAuth|NanyinCore' "$VISUAL_FIXTURE" \
+    || fail "offline visual fixture depends on runtime or credential state"
+for state in Default Hovered Pressed Disabled Selected Current Empty Loading Error 'Long text'; do
+    rg -q "$state" "$VISUAL_FIXTURE" \
+        || fail "offline visual fixture is missing state: $state"
+done
+for scale in 'displayScale, 1' 'displayScale, 2'; do
+    rg -q "$scale" "$VISUAL_FIXTURE" \
+        || fail "offline visual fixture is missing backing-scale preview: $scale"
+done
+rg -q 'accessibilityReduceMotion' "$ROOT_DIR/NanyinApp/Views/ArtworkView.swift" \
+    || fail "artwork transitions do not honor Reduce Motion"
+rg -q 'accessibilityReduceMotion' "$ROOT_DIR/NanyinApp/Views/TrackListView.swift" \
+    || fail "track current-playing animation does not honor Reduce Motion"
+rg -q 'accessibilityReduceMotion' "$ROOT_DIR/NanyinApp/Views/QueueView.swift" \
+    || fail "queue current-playing animation does not honor Reduce Motion"
+
 command -v mise >/dev/null 2>&1 || fail "mise is required"
 command -v xcrun >/dev/null 2>&1 || fail "Xcode command-line tools are required"
 

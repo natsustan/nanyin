@@ -156,6 +156,7 @@ struct SavedAlbumsView: View {
         } else if !app.hasSavedAlbumsData {
             VStack(spacing: 12) {
                 ProgressView()
+                    .tint(theme.colors.accent)
                 Text("Loading saved albums…")
                     .font(theme.typography.secondary)
                     .foregroundStyle(theme.colors.secondaryText)
@@ -170,6 +171,7 @@ struct SavedAlbumsView: View {
                     .foregroundStyle(theme.colors.secondaryText)
                 Button("Clear filter") { filterText = "" }
                     .buttonStyle(.link)
+                    .tint(theme.colors.accent)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
@@ -261,6 +263,7 @@ struct SavedAlbumsView: View {
                 app.refreshSavedAlbums(force: true)
             }
             .buttonStyle(.link)
+            .tint(theme.colors.accent)
         }
         .padding(.horizontal, theme.metrics.cardPadding)
         .padding(.vertical, theme.metrics.fieldVerticalPadding)

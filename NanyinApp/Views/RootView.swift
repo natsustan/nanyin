@@ -14,6 +14,7 @@ struct RootView: View {
         case .checking, .signingOut:
             VStack(spacing: 12) {
                 ProgressView()
+                    .tint(theme.colors.accent)
                 Text(app.authState == .signingOut ? "Signing out…" : "Restoring session…")
                     .foregroundStyle(theme.colors.secondaryText)
             }

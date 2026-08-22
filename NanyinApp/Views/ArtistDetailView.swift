@@ -74,6 +74,7 @@ struct ArtistDetailView: View {
             VStack(spacing: 12) {
                 if app.isLoadingTracks(contextKey: contextKey) {
                     ProgressView()
+                        .tint(theme.colors.accent)
                     Text("Loading top tracks…")
                         .foregroundStyle(theme.colors.secondaryText)
                 } else {

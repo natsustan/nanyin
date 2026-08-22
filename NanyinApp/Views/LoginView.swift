@@ -71,6 +71,7 @@ struct LoginView: View {
         case .signingIn:
             VStack(spacing: 10) {
                 ProgressView()
+                    .tint(theme.colors.accent)
                 Text("Complete the sign-in in your browser…")
                     .font(.callout)
                     .foregroundStyle(theme.colors.secondaryText)

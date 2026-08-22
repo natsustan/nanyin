@@ -41,6 +41,7 @@ struct NewPlaylistSheet: View {
                 if app.isCreatingPlaylist {
                     ProgressView()
                         .controlSize(.small)
+                        .tint(theme.colors.accent)
                 }
                 Spacer()
                 if theme.id == .classic2010 {
@@ -100,11 +101,13 @@ struct NewPlaylistSheet: View {
             }
             .keyboardShortcut(.cancelAction)
             .disabled(app.isCreatingPlaylist)
+            .tint(theme.colors.accent)
             Button("Create") {
                 app.createPlaylist(named: name)
             }
             .keyboardShortcut(.defaultAction)
             .disabled(trimmedName.isEmpty || app.isCreatingPlaylist)
+            .tint(theme.colors.accent)
         }
     }
 

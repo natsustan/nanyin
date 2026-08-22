@@ -70,6 +70,7 @@ struct HomeView: View {
             if app.isLoadingHome {
                 ProgressView()
                     .controlSize(.small)
+                    .tint(theme.colors.accent)
             }
             RefreshButton(action: { app.loadHome(force: true) })
                 .disabled(app.isLoadingHome)
@@ -111,6 +112,7 @@ struct HomeView: View {
                     app.loadHome()
                 }
                 .buttonStyle(.link)
+                .tint(theme.colors.accent)
             }
             .padding(.horizontal, theme.metrics.bannerHorizontalPadding)
             .padding(.vertical, theme.metrics.bannerVerticalPadding)
@@ -126,6 +128,7 @@ struct HomeView: View {
     private var loadingState: some View {
         VStack(spacing: 12) {
             ProgressView()
+                .tint(theme.colors.accent)
             Text("Loading your home…")
                 .foregroundStyle(theme.colors.secondaryText)
         }

@@ -590,6 +590,7 @@ private struct TrackContextMenu: View {
 /// The classic three-bar equalizer animation for the playing row.
 private struct EqIndicator: View {
     @Environment(\.appTheme) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var animate = false
 
     var body: some View {
@@ -606,11 +607,13 @@ private struct EqIndicator: View {
         RoundedRectangle(cornerRadius: 1)
             .fill(theme.colors.accent)
             .frame(width: 3, height: 12)
-            .scaleEffect(y: animate ? phase : 0.8, anchor: .bottom)
+            .scaleEffect(y: reduceMotion ? 1 : (animate ? phase : 0.8), anchor: .bottom)
             .animation(
-                animate
-                    ? .easeInOut(duration: 0.35).repeatForever(autoreverses: true).delay(delay)
-                    : .default,
+                reduceMotion
+                    ? nil
+                    : (animate
+                        ? .easeInOut(duration: 0.35).repeatForever(autoreverses: true).delay(delay)
+                        : .default),
                 value: animate
             )
     }

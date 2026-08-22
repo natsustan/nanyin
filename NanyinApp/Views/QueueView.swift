@@ -110,6 +110,7 @@ struct QueueView: View {
                         Spacer()
                         ProgressView()
                             .controlSize(.small)
+                            .tint(theme.colors.accent)
                         Spacer()
                     }
                     .listRowInsets(EdgeInsets())
@@ -311,6 +312,7 @@ private struct QueueRow: View {
 /// Three-bar equalizer (fixed phases — no randomElement per render).
 private struct EqBars: View {
     @Environment(\.appTheme) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var animate = false
 
     var body: some View {
@@ -327,11 +329,13 @@ private struct EqBars: View {
         RoundedRectangle(cornerRadius: 1)
             .fill(theme.colors.accent)
             .frame(width: 3, height: 12)
-            .scaleEffect(y: animate ? phase : 0.8, anchor: .bottom)
+            .scaleEffect(y: reduceMotion ? 1 : (animate ? phase : 0.8), anchor: .bottom)
             .animation(
-                animate
-                    ? .easeInOut(duration: 0.35).repeatForever(autoreverses: true).delay(delay)
-                    : .default,
+                reduceMotion
+                    ? nil
+                    : (animate
+                        ? .easeInOut(duration: 0.35).repeatForever(autoreverses: true).delay(delay)
+                        : .default),
                 value: animate
             )
     }

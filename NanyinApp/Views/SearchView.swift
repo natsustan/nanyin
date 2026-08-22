@@ -94,6 +94,7 @@ struct SearchView: View {
             if app.isSearching {
                 ProgressView()
                     .controlSize(.small)
+                    .tint(theme.colors.accent)
             } else if !query.isEmpty {
                 Button(action: clearQuery) {
                     Image(systemName: "xmark.circle.fill")
@@ -147,6 +148,7 @@ struct SearchView: View {
             if app.isSearching {
                 VStack(spacing: 12) {
                     ProgressView()
+                        .tint(theme.colors.accent)
                     Text("Searching…")
                         .foregroundStyle(theme.colors.secondaryText)
                 }
