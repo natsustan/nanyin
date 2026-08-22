@@ -1668,6 +1668,7 @@ final class AppModel {
         )
         isPlaying = false
         isBuffering = false
+        pushNowPlayingInfo()
     }
 
     private func persistLocalPlaybackSnapshot() {
@@ -2987,11 +2988,11 @@ final class AppModel {
     }
 
     func seek(to fraction: Double) {
-        guard isPlaybackReady else { return }
+        guard isPlaybackReady, localPlaybackRestore?.isStarting != true else { return }
         let positionMs = UInt32(fraction * Double(max(durationMs, 1)))
         if let restore = localPlaybackRestore {
             let updated = restore.snapshot.withPosition(positionMs)
-            localPlaybackRestore = restore.isStarting ? .starting(updated) : .idle(updated)
+            localPlaybackRestore = .idle(updated)
             LocalPlaybackStore.save(updated)
         } else {
             LocalPlaybackStore.clear()
