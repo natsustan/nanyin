@@ -14,8 +14,9 @@ private enum StateReducerTests {
 
         testLocalPlaybackSnapshotRoundTrips()
         testLocalPlaybackSnapshotRejectsAnotherAccount()
-        testLocalPlaybackPositionClampsToDuration()
+        testCompletedLocalPlaybackRestartsFromBeginning()
         testLocalPlaybackRestoreStateKeepsSnapshotWhileStarting()
+        testLateSnapshotDoesNotOverwriteLivePlayback()
         testIdleLocalPlaybackRestoreAcceptsCurrentExternalPlayback()
         testLocalPlaybackOwnershipTransfersToExpectedSuccessor()
         testLocalPlaybackOwnershipRejectsUnexpectedReplacement()
@@ -721,7 +722,7 @@ private enum StateReducerTests {
         )
     }
 
-    private static func testLocalPlaybackPositionClampsToDuration() {
+    private static func testCompletedLocalPlaybackRestartsFromBeginning() {
         let snapshot = LocalPlaybackSnapshot(
             accountID: "account-a",
             uri: "spotify:track:abc",
@@ -730,12 +731,20 @@ private enum StateReducerTests {
             album: "Album",
             albumId: nil,
             artworkURL: nil,
-            durationMs: 100,
-            positionMs: 150
+            durationMs: 180_000,
+            positionMs: 180_000
         )
         expect(
-            snapshot.playablePositionMs == 100,
-            "restored playback must not seek past the track duration"
+            snapshot.playablePositionMs == 0,
+            "completed playback must restart instead of seeking to the end"
+        )
+        expect(
+            snapshot.withPosition(176_000).playablePositionMs == 0,
+            "near-complete playback must restart instead of ending immediately"
+        )
+        expect(
+            snapshot.withPosition(42_000).playablePositionMs == 42_000,
+            "playback with meaningful time remaining must resume its saved position"
         )
     }
 
@@ -786,6 +795,30 @@ private enum StateReducerTests {
         expect(
             starting.snapshot == snapshot,
             "starting playback must retain the snapshot until Playing confirms it"
+        )
+    }
+
+    private static func testLateSnapshotDoesNotOverwriteLivePlayback() {
+        expect(
+            LocalPlaybackRestoreState.canApplySnapshot(
+                hasNowPlaying: false,
+                playRequestID: CorePlaybackProgress.noPlayRequest
+            ),
+            "startup may restore a snapshot before live playback is accepted"
+        )
+        expect(
+            !LocalPlaybackRestoreState.canApplySnapshot(
+                hasNowPlaying: true,
+                playRequestID: 10
+            ),
+            "a late snapshot must not overwrite accepted live playback"
+        )
+        expect(
+            !LocalPlaybackRestoreState.canApplySnapshot(
+                hasNowPlaying: false,
+                playRequestID: 10
+            ),
+            "an active core request must fence snapshot restoration before metadata arrives"
         )
     }
 

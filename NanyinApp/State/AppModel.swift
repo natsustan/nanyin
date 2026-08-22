@@ -1648,6 +1648,13 @@ final class AppModel {
 
     private func restoreLocalPlaybackSnapshot(for accountID: String) {
         guard let snapshot = LocalPlaybackStore.load(for: accountID) else { return }
+        guard LocalPlaybackRestoreState.canApplySnapshot(
+            hasNowPlaying: nowPlaying != nil,
+            playRequestID: Core.playbackProgress.playRequestID
+        ) else {
+            LocalPlaybackStore.clear()
+            return
+        }
         localPlaybackRestore = .idle(snapshot)
         durationMs = snapshot.durationMs
         nowPlaying = NowPlaying(
@@ -2907,6 +2914,7 @@ final class AppModel {
     }
 
     func togglePlay() {
+        guard localPlaybackRestore?.isStarting != true else { return }
         cancelPendingPlayForUserCommand()
         guard isPlaybackReady else { return }
         if localPlaybackRestore == nil {
@@ -2915,7 +2923,6 @@ final class AppModel {
         if isPlaying {
             _ = Core.pause()
         } else if let restore = localPlaybackRestore,
-                  !restore.isStarting,
                   case let snapshot = restore.snapshot,
                   snapshot.uri == nowPlaying?.uri {
             let previousPlayRequestID = Core.playbackProgress.playRequestID

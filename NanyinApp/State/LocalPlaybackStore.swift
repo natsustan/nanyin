@@ -1,6 +1,8 @@
 import Foundation
 
 struct LocalPlaybackSnapshot: Codable, Equatable {
+    private static let restartThresholdMs: UInt32 = 5_000
+
     let accountID: String
     let uri: String
     let title: String
@@ -12,7 +14,10 @@ struct LocalPlaybackSnapshot: Codable, Equatable {
     let positionMs: UInt32
 
     var playablePositionMs: UInt32 {
-        durationMs == 0 ? positionMs : min(positionMs, durationMs)
+        guard durationMs > 0 else { return positionMs }
+        let positionMs = min(positionMs, durationMs)
+        let thresholdMs = min(Self.restartThresholdMs, durationMs)
+        return durationMs - positionMs <= thresholdMs ? 0 : positionMs
     }
 
     func withPosition(_ positionMs: UInt32) -> LocalPlaybackSnapshot {
@@ -49,6 +54,13 @@ enum LocalPlaybackRestoreState: Equatable {
     var isStarting: Bool {
         if case .starting = self { return true }
         return false
+    }
+
+    static func canApplySnapshot(
+        hasNowPlaying: Bool,
+        playRequestID: UInt64
+    ) -> Bool {
+        !hasNowPlaying && playRequestID == CorePlaybackProgress.noPlayRequest
     }
 
     func playingDisposition(
