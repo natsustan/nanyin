@@ -200,6 +200,152 @@ final class AppModel {
     private(set) var playlists: [SpotifyClient.PlaylistInfo] = []
     private(set) var likedCount = 0
 
+    // MARK: - Playlist writes (M4.5)
+
+    /// Sidebar playlist list states: the first /v1/me/playlists load either
+    /// landed (possibly empty) or failed — never perpetual loading.
+    private(set) var hasLoadedPlaylists = false
+    private(set) var playlistsLoadFailed = false
+
+    /// New Playlist sheet state. `isCreatingPlaylist` blocks duplicate
+    /// submission and dismissal while the request is in flight.
+    private(set) var isShowingNewPlaylistSheet = false
+    private(set) var isCreatingPlaylist = false
+    private(set) var playlistCreationError: String?
+
+    /// Serials preserve confirmed playlist mutation order while snapshots
+    /// reconcile them by content (see PlaylistLibraryMerge).
+    private var playlistMutationSerial = 0
+    private var confirmedPlaylistMutations: [PlaylistLibraryMerge.ConfirmedMutation] = []
+    /// One in-flight add per target playlist — an accidental duplicate
+    /// click cannot double-add while the first request runs.
+    private var playlistAddInFlight: Set<String> = []
+
+    /// Playlists the current user owns — the writable MVP targets for
+    /// Add to Playlist. Needs no extra request; ownership rides along in
+    /// PlaylistInfo.
+    var ownedPlaylists: [SpotifyClient.PlaylistInfo] {
+        guard !userId.isEmpty else { return [] }
+        return playlists.filter { $0.ownerId == userId }
+    }
+
+    func isPlaylistAddInFlight(_ playlistId: String) -> Bool {
+        playlistAddInFlight.contains(playlistId)
+    }
+
+    func showNewPlaylistSheet() {
+        guard authState == .loggedIn else { return }
+        playlistCreationError = nil
+        isShowingNewPlaylistSheet = true
+    }
+
+    /// Cancel makes no request and is blocked while a creation is in flight.
+    func cancelNewPlaylistSheet() {
+        guard !isCreatingPlaylist else { return }
+        isShowingNewPlaylistSheet = false
+        playlistCreationError = nil
+    }
+
+    /// Creates exactly one private playlist. On success the returned
+    /// playlist is inserted at the top of the sidebar, the sheet dismisses,
+    /// and navigation opens its empty detail page. A failure keeps the
+    /// entered name (sheet text is view-local) and permits an inline retry;
+    /// no phantom sidebar entry is added.
+    func createPlaylist(named rawName: String) {
+        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard authState == .loggedIn,
+              !isCreatingPlaylist,
+              !name.isEmpty else { return }
+        isCreatingPlaylist = true
+        playlistCreationError = nil
+        let epoch = accountEpoch
+        Task {
+            defer {
+                if epoch == accountEpoch { isCreatingPlaylist = false }
+            }
+            do {
+                let created = try await withAPIAuthRetry(for: epoch) { api in
+                    try await api.createPlaylist(name: name)
+                }
+                // Sign-out or an account change wins over the late result.
+                guard epoch == accountEpoch, authState == .loggedIn else { return }
+                recordConfirmedPlaylistMutation(.created(created))
+                isShowingNewPlaylistSheet = false
+                open(.playlist(id: created.id, name: created.name))
+            } catch is CancellationError {
+                // Epoch superseded — nothing to publish.
+            } catch {
+                guard epoch == accountEpoch, authState == .loggedIn else { return }
+                playlistCreationError = error.localizedDescription
+                dlog("playlist create failed: \(error)")
+            }
+        }
+    }
+
+    /// Adds a track to an owned playlist — one add per click, and only
+    /// after the server confirms do the sidebar count and an already-loaded
+    /// target page update. Spotify permits duplicate playlist entries, so a
+    /// successful add always appends another row.
+    func addToPlaylist(_ track: SpotifyClient.Track, playlist: SpotifyClient.PlaylistInfo) {
+        guard authState == .loggedIn,
+              !isPlaylistAddInFlight(playlist.id) else { return }
+        playlistAddInFlight.insert(playlist.id)
+        let epoch = accountEpoch
+        let playlistId = playlist.id
+        Task {
+            defer {
+                if epoch == accountEpoch { playlistAddInFlight.remove(playlistId) }
+            }
+            do {
+                try await withAPIAuthRetry(for: epoch) { api in
+                    try await api.addTrackToPlaylist(playlistId: playlistId, uri: track.uri)
+                }
+                guard epoch == accountEpoch, authState == .loggedIn else { return }
+                recordConfirmedPlaylistMutation(.trackAdded(
+                    playlistID: playlistId,
+                    localCount: (playlists.first { $0.id == playlistId }?.trackCount ?? 0) + 1
+                ))
+                if tracksByContext[playlistId] != nil {
+                    tracksByContext[playlistId]?.append(track)
+                }
+            } catch is CancellationError {
+                // Epoch superseded — nothing to publish.
+            } catch {
+                guard epoch == accountEpoch, authState == .loggedIn else { return }
+                dlog("add to playlist \(playlistId) failed: \(error)")
+            }
+        }
+    }
+
+    /// Records a confirmed write and applies it to the visible list; the
+    /// recorded mutation keeps a lagging refresh from reverting it.
+    private func recordConfirmedPlaylistMutation(
+        _ kind: PlaylistLibraryMerge.ConfirmedMutation.Kind
+    ) {
+        playlistMutationSerial += 1
+        let mutation = PlaylistLibraryMerge.ConfirmedMutation(
+            serial: playlistMutationSerial,
+            kind: kind
+        )
+        confirmedPlaylistMutations.append(mutation)
+        playlists = PlaylistLibraryMerge.apply(mutation, to: playlists)
+        hasLoadedPlaylists = true
+        playlistsLoadFailed = false
+    }
+
+    /// Publishes a playlist-list snapshot, retaining confirmed writes while
+    /// Spotify's read side may still lag their successful responses.
+    private func applyPlaylistsSnapshot(_ snapshot: [SpotifyClient.PlaylistInfo]) {
+        let merged = PlaylistLibraryMerge.merge(
+            snapshot: snapshot,
+            mutations: confirmedPlaylistMutations
+        )
+        playlists = merged.playlists
+        confirmedPlaylistMutations = merged.pending
+        hasLoadedPlaylists = true
+        playlistsLoadFailed = false
+    }
+
     // MARK: - Likes (M4.2)
 
     /// Liked state per track id, overlaid by in-app toggles.
@@ -995,6 +1141,10 @@ final class AppModel {
                         complete: false
                     )
                     clearSettledAlbumOverrides(prefixConfirmed)
+                    ArtworkCache.shared.replacePrefetch(
+                        urls: prefix.albums.compactMap { $0.album.artworkURL },
+                        in: .savedAlbums
+                    )
                 }
 
                 let snapshot = try await withAPIAuthRetry(for: epoch) { api in
@@ -1025,6 +1175,10 @@ final class AppModel {
                     complete: true
                 )
                 clearSettledAlbumOverrides(confirmed)
+                ArtworkCache.shared.replacePrefetch(
+                    urls: snapshot.0.compactMap { $0.album.artworkURL },
+                    in: .savedAlbums
+                )
             } catch {
                 guard epoch == accountEpoch else { return }
                 savedAlbumsError = error.localizedDescription
@@ -1044,6 +1198,149 @@ final class AppModel {
 
         try await withAPIAuthRetry(for: epoch) { api in
             try await mutate(using: api)
+        }
+    }
+
+    // MARK: - Home (personalized)
+
+    enum HomeSection: String, CaseIterable, Identifiable {
+        case recentlyPlayed
+        case topTracks
+        case topArtists
+
+        var id: String { rawValue }
+    }
+
+    /// Track-list context key the home top-tracks rows play through — a
+    /// bounded ad-hoc window, same path as search results (no server
+    /// context URI exists for /v1/me/top/tracks).
+    static let homeTopTracksContextKey = "homeTop"
+
+    private(set) var homeRecentlyPlayed: [HomeFeed.Card] = []
+    private(set) var homeTopTracks: [SpotifyClient.Track] = []
+    private(set) var homeTopArtists: [SpotifyClient.Artist] = []
+    private(set) var isLoadingHome = false
+    /// Per-section failures — one block failing never clears the others.
+    private(set) var homeErrors: [HomeSection: String] = [:]
+    /// Raw history kept so Recently Played cards can be re-derived once the
+    /// playlist list (names/covers for playlist contexts) finishes loading.
+    private var homeHistory: [SpotifyClient.PlayHistoryItem] = []
+    /// Sections that have loaded this login — revisit auto-loads only the
+    /// missing ones; manual refresh bypasses this cache entirely.
+    private var homeLoadedSections: Set<HomeSection> = []
+    private var homeSectionsInFlight: Set<HomeSection> = []
+    /// Per-section request generation: a section publishes only while its own
+    /// generation is current, so re-entering home (restarting failed sections)
+    /// never discards a sibling section's still-in-flight result — only a
+    /// force refresh or sign-out supersedes it.
+    private var homeSectionGenerations: [HomeSection: Int] = [:]
+
+    var hasHomeData: Bool {
+        !homeRecentlyPlayed.isEmpty || !homeTopTracks.isEmpty || !homeTopArtists.isEmpty
+    }
+
+    /// Loads the personalized home sections from public Web API endpoints
+    /// (recently-played, top/tracks, top/artists — not recommendation feeds).
+    /// Sections load independently and publish independently: a failure in
+    /// one leaves the others' content intact. Cached per section until the
+    /// account epoch changes; `force` re-requests everything.
+    func loadHome(force: Bool = false) {
+        guard authState == .loggedIn else { return }
+        let pending = force
+            ? HomeSection.allCases
+            : HomeSection.allCases.filter { !homeLoadedSections.contains($0) && !homeSectionsInFlight.contains($0) }
+        guard !pending.isEmpty else { return }
+
+        homeErrors = [:]
+        for section in pending {
+            // A force refresh keeps stale content visible, but the section is
+            // no longer considered loaded until this request succeeds. If it
+            // fails, a normal retry must request it again.
+            homeLoadedSections.remove(section)
+            homeSectionGenerations[section, default: 0] += 1
+            homeSectionsInFlight.insert(section)
+        }
+        isLoadingHome = true
+        let epoch = accountEpoch
+
+        for section in pending {
+            let generation = homeSectionGenerations[section]!
+            switch section {
+            case .recentlyPlayed:
+                runHomeSection(section, epoch: epoch, generation: generation) { api in
+                    try await api.recentlyPlayed(limit: 20)
+                } publish: { [weak self] history in
+                    guard let self else { return }
+                    homeHistory = history
+                    publishHomeRecentlyPlayed()
+                }
+            case .topTracks:
+                runHomeSection(section, epoch: epoch, generation: generation) { api in
+                    try await api.topTracks(timeRange: .shortTerm, limit: 10)
+                } publish: { [weak self] tracks in
+                    guard let self else { return }
+                    homeTopTracks = tracks
+                    tracksByContext[Self.homeTopTracksContextKey] = tracks
+                }
+            case .topArtists:
+                runHomeSection(section, epoch: epoch, generation: generation) { api in
+                    try await api.topArtists(timeRange: .mediumTerm, limit: 10)
+                } publish: { [weak self] artists in
+                    guard let self else { return }
+                    homeTopArtists = artists
+                    ArtworkCache.shared.replacePrefetch(
+                        urls: artists.compactMap { $0.artworkURL },
+                        in: .homeTopArtists
+                    )
+                }
+            }
+        }
+    }
+
+    private func publishHomeRecentlyPlayed() {
+        homeRecentlyPlayed = HomeFeed.recentlyPlayedCards(
+            from: homeHistory,
+            playlists: playlists
+        )
+        ArtworkCache.shared.replacePrefetch(
+            urls: homeRecentlyPlayed.compactMap { $0.artworkURL },
+            in: .homeRecentlyPlayed
+        )
+    }
+
+    /// One section's request/publish cycle, fenced by account epoch AND the
+    /// section's own generation so results from a superseded load (or a
+    /// signed-out account) can never write back. Token retry goes through
+    /// withAPIAuthRetry like every other Web API call — playback tokens are
+    /// never touched.
+    private func runHomeSection<T>(
+        _ section: HomeSection,
+        epoch: Int,
+        generation: Int,
+        operation: @escaping (SpotifyClient) async throws -> T,
+        publish: @escaping (T) -> Void
+    ) {
+        Task {
+            defer {
+                if epoch == accountEpoch, homeSectionGenerations[section] == generation {
+                    homeSectionsInFlight.remove(section)
+                    if homeSectionsInFlight.isEmpty {
+                        isLoadingHome = false
+                    }
+                }
+            }
+            do {
+                let result = try await withAPIAuthRetry(for: epoch, operation: operation)
+                guard epoch == accountEpoch, homeSectionGenerations[section] == generation else { return }
+                publish(result)
+                homeLoadedSections.insert(section)
+            } catch is CancellationError {
+                // Epoch/generation superseded — drop quietly.
+            } catch {
+                guard epoch == accountEpoch, homeSectionGenerations[section] == generation else { return }
+                homeErrors[section] = error.localizedDescription
+                dlog("home \(section) failed: \(error)")
+            }
         }
     }
 
@@ -1218,6 +1515,7 @@ final class AppModel {
         clearPendingPlayIntent()
         cancelAudioStallWatchdog()
         accountEpoch += 1
+        ArtworkCache.shared.cancelPrefetches()
         playbackGeneration &+= 1
         activePlaybackGeneration = nil
         deferredReconnectGeneration = nil
@@ -1251,6 +1549,14 @@ final class AppModel {
         history.removeAll()
         forwardStack.removeAll()
         playlists.removeAll()
+        hasLoadedPlaylists = false
+        playlistsLoadFailed = false
+        isShowingNewPlaylistSheet = false
+        isCreatingPlaylist = false
+        playlistCreationError = nil
+        playlistMutationSerial = 0
+        confirmedPlaylistMutations = []
+        playlistAddInFlight = []
         tracksByContext.removeAll()
         albumsByArtist.removeAll()
         artistsByID.removeAll()
@@ -1268,6 +1574,15 @@ final class AppModel {
         savedAlbumsRefreshPending = false
         lastSavedAlbumsRefresh = .distantPast
         savedAlbumsError = nil
+        homeRecentlyPlayed = []
+        homeTopTracks = []
+        homeTopArtists = []
+        homeErrors = [:]
+        homeHistory = []
+        homeLoadedSections = []
+        homeSectionsInFlight = []
+        homeSectionGenerations = [:]
+        isLoadingHome = false
         playbackAccessToken = ""
         webAccessToken = ""
         webTokenExpiry = .distantPast
@@ -1321,10 +1636,12 @@ final class AppModel {
 
     private func restoreUserAndLibrary(for epoch: Int) {
         Task {
-            guard epoch == accountEpoch, authState == .loggedIn, let api else { return }
+            guard epoch == accountEpoch, authState == .loggedIn else { return }
             let startedAt = ContinuousClock.now
             do {
-                let profile = try await api.currentUser()
+                let profile = try await withAPIAuthRetry(for: epoch) { api in
+                    try await api.currentUser()
+                }
                 guard epoch == accountEpoch, authState == .loggedIn else { return }
                 userDisplayName = profile.displayName ?? profile.id
                 userId = profile.id
@@ -1339,9 +1656,20 @@ final class AppModel {
             do {
                 let loadedPlaylists = try await api.playlists()
                 guard epoch == accountEpoch, authState == .loggedIn else { return }
-                playlists = loadedPlaylists
+                applyPlaylistsSnapshot(loadedPlaylists)
+                ArtworkCache.shared.replacePrefetch(
+                    urls: loadedPlaylists.compactMap { $0.artworkURL },
+                    in: .library
+                )
+                // Recently-played playlist contexts resolve names/covers
+                // from this list — re-derive the strip if home loaded first.
+                if !homeHistory.isEmpty {
+                    publishHomeRecentlyPlayed()
+                }
                 dlog("playlists loaded: \(startedAt.duration(to: .now))")
             } catch {
+                guard epoch == accountEpoch, authState == .loggedIn else { return }
+                playlistsLoadFailed = true
                 dlog("library load failed: \(error)")
             }
             guard epoch == accountEpoch, authState == .loggedIn else { return }
@@ -1552,6 +1880,10 @@ final class AppModel {
                       authState == .loggedIn else { return }
                 queueCurrent = result.current
                 queueUpcoming = result.upcoming.map { QueueItem(track: $0) }
+                ArtworkCache.shared.replacePrefetch(
+                    urls: result.upcoming.compactMap { $0.artworkURL },
+                    in: .queue
+                )
             } catch {
                 dlog("queue refresh failed: \(error)")
             }
@@ -1667,7 +1999,7 @@ final class AppModel {
                         // top-tracks endpoint fails, so the artist page can
                         // still show Albums/Singles alongside the error.
                         if let releases = try? await albums, epoch == loadEpoch {
-                            albumsByArtist[key] = releases
+                            publishDiscography(releases, contextKey: key)
                             dlog("discography \(key) → \(releases.count) releases (top tracks failed)")
                         }
                         throw error
@@ -1686,7 +2018,7 @@ final class AppModel {
                 guard epoch == loadEpoch else { return }
                 tracksByContext[key] = tracks
                 if let discography {
-                    albumsByArtist[key] = discography
+                    publishDiscography(discography, contextKey: key)
                     dlog("discography \(key) → \(discography.count) releases")
                 }
             } catch {
@@ -1695,6 +2027,17 @@ final class AppModel {
                 dlog("tracks load failed: \(error)")
             }
         }
+    }
+
+    private func publishDiscography(
+        _ releases: [SpotifyClient.AlbumInfo],
+        contextKey: String
+    ) {
+        albumsByArtist[contextKey] = releases
+        ArtworkCache.shared.replacePrefetch(
+            urls: releases.compactMap { $0.artworkURL },
+            in: .detail
+        )
     }
 
     /// Loads a full artist profile when a navigation source did not include
@@ -1784,7 +2127,7 @@ final class AppModel {
     /// playlist = spotify:playlist:<id>) — uploading thousands of URIs into
     /// Connect state gets 429-rejected. Falls back to a bounded track window
     /// if the context path doesn't start audio in time.
-    func play(track: SpotifyClient.Track, contextKey: String) {
+    func play(track: SpotifyClient.Track, contextKey: String, index preferredIndex: Int? = nil) {
         cancelPendingPlayForUserCommand()
         guard isPlaybackReady else { return }
         cancelAudioStallWatchdog()
@@ -1795,7 +2138,9 @@ final class AppModel {
         isBuffering = true
         let previousPlayRequestID = Core.playbackProgress.playRequestID
 
-        let index = tracksByContext[contextKey]?.firstIndex(where: { $0.uri == track.uri }) ?? 0
+        let index = preferredIndex
+            ?? tracksByContext[contextKey]?.firstIndex(where: { $0.uri == track.uri })
+            ?? 0
         let contextURI: String?
         switch page {
         case .liked:
@@ -1860,24 +2205,23 @@ final class AppModel {
         }
     }
 
-    /// Whole-album playback via the server-resolved context — never uploads
-    /// a track-URI list (M4.3 roadmap rule; large context uploads get
-    /// 429-rejected silently).
-    func playAlbum(id: String) {
+    /// Whole-context playback via a server-resolved context URI (album,
+    /// playlist, liked collection) — never uploads a track-URI list (M4.3
+    /// roadmap rule; large context uploads get 429-rejected silently).
+    private func playServerContext(_ contextURI: String) {
         cancelPendingPlayForUserCommand()
         guard isPlaybackReady else { return }
         cancelAudioStallWatchdog()
-        let uri = "spotify:album:\(id)"
         isBuffering = true
         let previousPlayRequestID = Core.playbackProgress.playRequestID
-        let rc = Core.playContext(uri, startIndex: 0)
-        dlog("playAlbum(\(uri)) rc=\(rc)")
+        let rc = Core.playContext(contextURI, startIndex: 0)
+        dlog("playContext(\(contextURI)) rc=\(rc)")
         if rc != 0 {
             isBuffering = false
             return
         }
         setPendingPlayIntent(
-            call: .context(uri: uri, index: 0),
+            call: .context(uri: contextURI, index: 0),
             trackURI: nil,
             previousPlayRequestID: previousPlayRequestID
         )
@@ -1885,15 +2229,35 @@ final class AppModel {
             try? await Task.sleep(for: .seconds(8))
             guard !Task.isCancelled, isBuffering else { return }
             guard playbackConnectionState == .ready else {
-                dlog("album context load stalled during reconnect — preserving pending play")
+                dlog("context load stalled during reconnect — preserving pending play")
                 playbackWatchdog = nil
                 return
             }
-            dlog("album context load stalled — clearing buffering state")
+            dlog("context load stalled — clearing buffering state")
             isBuffering = false
             playbackWatchdog = nil
             clearPendingPlayIntent()
         }
+    }
+
+    func playAlbum(id: String) {
+        playServerContext("spotify:album:\(id)")
+    }
+
+    /// Whole-playlist playback (home cards / library tiles).
+    func playPlaylist(id: String) {
+        playServerContext("spotify:playlist:\(id)")
+    }
+
+    /// Artist radio playback from a server-resolved artist context.
+    func playArtist(id: String) {
+        playServerContext("spotify:artist:\(id)")
+    }
+
+    /// Liked Songs context playback — needs the login5 user id.
+    func playLikedSongs() {
+        guard !userId.isEmpty else { return }
+        playServerContext("spotify:user:\(userId):collection")
     }
 
     private func setPendingPlayIntent(

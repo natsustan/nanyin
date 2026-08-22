@@ -158,16 +158,8 @@ struct ArtistDetailView: View {
 
     @ViewBuilder
     private var portrait: some View {
-        Group {
-            if let url = resolvedArtworkURL {
-                AsyncImage(url: url) { image in
-                    image.resizable().scaledToFill()
-                } placeholder: {
-                    placeholderPortrait
-                }
-            } else {
-                placeholderPortrait
-            }
+        ArtworkView(url: resolvedArtworkURL, size: 140) {
+            placeholderPortrait
         }
         .clipShape(Circle())
     }
@@ -199,7 +191,7 @@ struct ArtistDetailView: View {
                 .padding(.horizontal, 28)
             // Horizontal strip above the vertical List — perpendicular axes,
             // so the single-scroll-region rule (no same-axis nesting) holds.
-            // LazyHStack keeps AsyncImages lazy for long discographies.
+            // LazyHStack keeps cards lazy for long discographies.
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 12) {
                     ForEach(items) { album in
@@ -308,16 +300,8 @@ private struct AlbumCard: View {
 
     @ViewBuilder
     private var cover: some View {
-        Group {
-            if let url = album.artworkURL {
-                AsyncImage(url: url) { image in
-                    image.resizable().scaledToFill()
-                } placeholder: {
-                    placeholderCover
-                }
-            } else {
-                placeholderCover
-            }
+        ArtworkView(url: album.artworkURL, size: 112) {
+            placeholderCover
         }
         .frame(width: 112, height: 112)
         .clipShape(RoundedRectangle(cornerRadius: 6))

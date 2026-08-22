@@ -188,14 +188,10 @@ struct PlaylistDetailView: View {
             Image(coverAssetName)
                 .resizable()
                 .scaledToFill()
-        } else if let url = coverURL {
-            AsyncImage(url: url) { image in
-                image.resizable().scaledToFill()
-            } placeholder: {
+        } else {
+            ArtworkView(url: coverURL, size: 140) {
                 placeholderCover
             }
-        } else {
-            placeholderCover
         }
     }
 
