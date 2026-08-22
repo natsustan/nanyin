@@ -30,7 +30,7 @@ use once_cell::sync::Lazy;
 use serde_json::json;
 use tokio::sync::mpsc;
 
-use proxy_sink::mk_proxy_sink;
+use proxy_sink::{mk_proxy_sink, pcm_writes};
 
 // ============================================================================
 // Error codes (shared convention with Swift side)
@@ -112,13 +112,19 @@ static PLAYER_LIFECYCLE: Mutex<()> = Mutex::new(());
 static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
 /// Invalidates completion monitors from sessions replaced by a rebuild.
 static PLAYER_GENERATION: AtomicU64 = AtomicU64::new(0);
+/// Swift generation paired atomically with the active Rust player generation.
+static CALLBACK_GENERATION: AtomicU64 = AtomicU64::new(0);
 /// Coalesces Spirc and session failure signals for the active generation.
 static DISCONNECT_NOTIFIED: AtomicBool = AtomicBool::new(false);
 
 static IS_PLAYING: AtomicBool = AtomicBool::new(false);
 static POSITION: Mutex<PlaybackPosition> = Mutex::new(PlaybackPosition::empty());
+static CONFIRMED_POSITION_MS: AtomicU32 = AtomicU32::new(0);
 static DURATION_MS: AtomicU32 = AtomicU32::new(0);
 static CURRENT_URI: Mutex<Option<String>> = Mutex::new(None);
+const NO_PLAY_REQUEST: u64 = u64::MAX;
+static CURRENT_PLAY_REQUEST_ID: AtomicU64 = AtomicU64::new(NO_PLAY_REQUEST);
+static DECODER_PACKETS: AtomicU64 = AtomicU64::new(0);
 
 static LAST_ERROR: Mutex<Option<String>> = Mutex::new(None);
 
@@ -144,20 +150,22 @@ pub extern "C" fn nanyin_last_error() -> *mut c_char {
 // Callbacks
 // ============================================================================
 
-type PlaybackStateCallback = extern "C" fn(*const c_char);
-type SessionEventCallback = extern "C" fn();
+type PlaybackStateCallback = extern "C" fn(*const c_char, u64);
+type SessionEventCallback = extern "C" fn(u64);
 
 static PLAYBACK_STATE_CB: Mutex<Option<PlaybackStateCallback>> = Mutex::new(None);
 static SESSION_CONNECTED_CB: Mutex<Option<SessionEventCallback>> = Mutex::new(None);
 static SESSION_DISCONNECTED_CB: Mutex<Option<SessionEventCallback>> = Mutex::new(None);
 
 #[no_mangle]
-pub extern "C" fn nanyin_register_audio_data_callback(cb: extern "C" fn(*const f32, usize)) {
+pub extern "C" fn nanyin_register_audio_data_callback(
+    cb: extern "C" fn(*const f32, usize, u64),
+) {
     proxy_sink::register_audio_data_callback(cb);
 }
 
 #[no_mangle]
-pub extern "C" fn nanyin_register_audio_control_callback(cb: extern "C" fn(u8)) {
+pub extern "C" fn nanyin_register_audio_control_callback(cb: extern "C" fn(u8, u64)) {
     proxy_sink::register_audio_control_callback(cb);
 }
 
@@ -176,26 +184,26 @@ pub extern "C" fn nanyin_register_session_disconnected_callback(cb: SessionEvent
     *SESSION_DISCONNECTED_CB.lock().unwrap() = Some(cb);
 }
 
-fn emit_state(value: serde_json::Value) {
+fn emit_state(value: serde_json::Value, callback_generation: u64) {
     let cb = { *PLAYBACK_STATE_CB.lock().unwrap() };
     if let Some(callback) = cb {
         if let Ok(c_str) = CString::new(value.to_string()) {
-            callback(c_str.as_ptr());
+            callback(c_str.as_ptr(), callback_generation);
         }
     }
 }
 
-fn notify_connected() {
+fn notify_connected(callback_generation: u64) {
     let cb = { *SESSION_CONNECTED_CB.lock().unwrap() };
     if let Some(callback) = cb {
-        callback();
+        callback(callback_generation);
     }
 }
 
-fn notify_disconnected() {
+fn notify_disconnected(callback_generation: u64) {
     let cb = { *SESSION_DISCONNECTED_CB.lock().unwrap() };
     if let Some(callback) = cb {
-        callback();
+        callback(callback_generation);
     }
 }
 
@@ -251,6 +259,11 @@ fn update_position(position_ms: u32) {
         .update(position_ms, Instant::now());
 }
 
+fn confirm_position(position_ms: u32) {
+    CONFIRMED_POSITION_MS.store(position_ms, Ordering::Relaxed);
+    update_position(position_ms);
+}
+
 /// Stops interpolation without losing elapsed time since the last player event.
 fn stop_position_clock() {
     let mut position = POSITION.lock().unwrap();
@@ -284,7 +297,11 @@ fn dirs_home_cache() -> Option<std::path::PathBuf> {
 /// Initializes session + player + Spirc with the given OAuth access token.
 /// Must be called before playback commands.
 #[no_mangle]
-pub extern "C" fn nanyin_init_player(access_token: *const c_char, device_id: *const c_char) -> i32 {
+pub extern "C" fn nanyin_init_player(
+    access_token: *const c_char,
+    device_id: *const c_char,
+    callback_generation: u64,
+) -> i32 {
     let _ = env_logger::try_init();
     eprintln!("nanyin_core: init_player called");
 
@@ -340,13 +357,16 @@ pub extern "C" fn nanyin_init_player(access_token: *const c_char, device_id: *co
                 || session.as_ref().is_some_and(|s| s.is_invalid())
         };
         if !needs_init {
+            CALLBACK_GENERATION.store(callback_generation, Ordering::SeqCst);
             eprintln!("nanyin_core: init_player: already initialized");
             return 0;
         }
 
         let generation = PLAYER_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+        CALLBACK_GENERATION.store(callback_generation, Ordering::SeqCst);
         SHUTTING_DOWN.store(false, Ordering::SeqCst);
         DISCONNECT_NOTIFIED.store(false, Ordering::SeqCst);
+        CURRENT_PLAY_REQUEST_ID.store(NO_PLAY_REQUEST, Ordering::Relaxed);
         let spirc = SPIRC.lock().unwrap().take();
         let session = SESSION.lock().unwrap().take();
         PLAYER.lock().unwrap().take();
@@ -360,7 +380,12 @@ pub extern "C" fn nanyin_init_player(access_token: *const c_char, device_id: *co
         session.shutdown();
     }
 
-    let result = RUNTIME.block_on(init_player_async(&token, &device, generation));
+    let result = RUNTIME.block_on(init_player_async(
+        &token,
+        &device,
+        generation,
+        callback_generation,
+    ));
 
     match result {
         Ok(()) => {
@@ -379,6 +404,7 @@ async fn init_player_async(
     access_token: &str,
     device_id: &str,
     generation: u64,
+    callback_generation: u64,
 ) -> Result<(), PlayerInitFailure> {
     eprintln!("nanyin_core: init_player_async starting (device {device_id})");
 
@@ -415,6 +441,7 @@ async fn init_player_async(
         bitrate: Bitrate::Bitrate320,
         gapless: true,
         normalisation: true,
+        position_update_interval: Some(Duration::from_secs(1)),
         ..Default::default()
     };
     let audio_format = AudioFormat::default();
@@ -423,14 +450,16 @@ async fn init_player_async(
         player_config,
         session.clone(),
         mixer.get_soft_volume(),
-        move || mk_proxy_sink(None, audio_format),
+        move || mk_proxy_sink(None, audio_format, generation),
     );
 
     // Player event listener → global state + Swift callbacks.
     let mut events: librespot_playback::player::PlayerEventChannel = player.get_player_event_channel();
     RUNTIME.spawn(async move {
         while let Some(event) = events.recv().await {
-            if !with_current_player_generation(generation, || handle_player_event(event)) {
+            if !with_current_player_generation(generation, |callback_generation| {
+                handle_player_event(event, generation, callback_generation)
+            }) {
                 return;
             }
         }
@@ -490,10 +519,10 @@ async fn init_player_async(
         if let Err(join_err) = spirc_handle.await {
             eprintln!("nanyin_core: spirc task panicked: {join_err}");
         }
-        let should_notify = {
+        let callback_generation = {
             let _lifecycle = PLAYER_LIFECYCLE.lock().unwrap();
             if PLAYER_GENERATION.load(Ordering::SeqCst) != generation {
-                false
+                None
             } else {
                 let mut slot = SPIRC.lock().unwrap();
                 if slot
@@ -505,16 +534,17 @@ async fn init_player_async(
                     DISCONNECT_NOTIFIED
                         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
                         .is_ok()
+                        .then(|| CALLBACK_GENERATION.load(Ordering::SeqCst))
                 } else {
-                    false
+                    None
                 }
             }
         };
-        if !should_notify {
+        let Some(callback_generation) = callback_generation else {
             return;
-        }
+        };
         eprintln!("nanyin_core: spirc task ended — session unusable, notifying");
-        notify_disconnected();
+        notify_disconnected(callback_generation);
     });
 
     // Watch the session; when it drops (idle timeout, network loss, revoke),
@@ -533,28 +563,29 @@ async fn init_player_async(
             }
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
-        let should_notify = {
+        let callback_generation = {
             let _lifecycle = PLAYER_LIFECYCLE.lock().unwrap();
             if PLAYER_GENERATION.load(Ordering::SeqCst) != generation
                 || SHUTTING_DOWN.load(Ordering::SeqCst)
             {
-                false
+                None
             } else {
                 stop_position_clock();
                 DISCONNECT_NOTIFIED
                     .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
                     .is_ok()
+                    .then(|| CALLBACK_GENERATION.load(Ordering::SeqCst))
             }
         };
-        if !should_notify {
+        let Some(callback_generation) = callback_generation else {
             return;
-        }
+        };
         log::debug!("session disconnected");
-        notify_disconnected();
+        notify_disconnected(callback_generation);
     });
 
     log::debug!("nanyin: session + spirc ready (device {device_id})");
-    notify_connected();
+    notify_connected(callback_generation);
     Ok(())
 }
 
@@ -571,6 +602,8 @@ pub extern "C" fn nanyin_shutdown() -> i32 {
         (spirc, session)
     };
     IS_PLAYING.store(false, Ordering::SeqCst);
+    CURRENT_PLAY_REQUEST_ID.store(NO_PLAY_REQUEST, Ordering::Relaxed);
+    CONFIRMED_POSITION_MS.store(0, Ordering::Relaxed);
     *CURRENT_URI.lock().unwrap() = None;
     DURATION_MS.store(0, Ordering::SeqCst);
     update_position(0);
@@ -587,11 +620,37 @@ pub extern "C" fn nanyin_shutdown() -> i32 {
     Ok::<(), ()>(()).map_or(-1, |()| 0)
 }
 
-fn handle_player_event(event: librespot_playback::player::PlayerEvent) {
+fn handle_player_event(
+    event: librespot_playback::player::PlayerEvent,
+    player_generation: u64,
+    callback_generation: u64,
+) {
     use librespot_playback::player::PlayerEvent;
 
+    if let PlayerEvent::PlayRequestIdChanged { play_request_id } = &event {
+        CURRENT_PLAY_REQUEST_ID.store(*play_request_id, Ordering::Relaxed);
+    }
+    let event_play_request_id = event.get_play_request_id().or_else(|| match &event {
+        PlayerEvent::PositionChanged {
+            play_request_id, ..
+        } => Some(*play_request_id),
+        _ => None,
+    });
+    if !accepts_play_request(
+        CURRENT_PLAY_REQUEST_ID.load(Ordering::Relaxed),
+        event_play_request_id,
+    ) {
+        return;
+    }
+    if matches!(event, PlayerEvent::PositionChanged { .. }) {
+        DECODER_PACKETS.fetch_add(1, Ordering::Relaxed);
+    }
+
     // Compact one-line event log (AudioItem dumps were unreadable noise).
-    if !matches!(event, PlayerEvent::PositionCorrection { .. }) {
+    if !matches!(
+        event,
+        PlayerEvent::PositionCorrection { .. } | PlayerEvent::PositionChanged { .. }
+    ) {
         let short = match &event {
             PlayerEvent::Playing { track_id, .. } => format!("Playing {track_id}"),
             PlayerEvent::Paused { track_id, .. } => format!("Paused {track_id}"),
@@ -618,53 +677,77 @@ fn handle_player_event(event: librespot_playback::player::PlayerEvent) {
             // previous track's timestamp while nothing is audible.
             IS_PLAYING.store(false, Ordering::SeqCst);
             *CURRENT_URI.lock().unwrap() = Some(track_id.to_string());
-            update_position(position_ms);
+            confirm_position(position_ms);
             emit_state(json!({
                 "event": "loading",
                 "track_uri": track_id.to_string(),
                 "position_ms": position_ms,
-            }));
+            }), callback_generation);
         }
-        PlayerEvent::Playing { track_id, position_ms, .. } => {
+        PlayerEvent::Playing {
+            play_request_id,
+            track_id,
+            position_ms,
+        } => {
             IS_PLAYING.store(true, Ordering::SeqCst);
             *CURRENT_URI.lock().unwrap() = Some(track_id.to_string());
-            update_position(position_ms);
+            confirm_position(position_ms);
             emit_state(json!({
                 "event": "playing",
                 "track_uri": track_id.to_string(),
                 "position_ms": position_ms,
-            }));
+                "play_request_id": play_request_id,
+            }), callback_generation);
         }
-        PlayerEvent::Paused { track_id, position_ms, .. } => {
+        PlayerEvent::Paused {
+            play_request_id,
+            track_id,
+            position_ms,
+        } => {
             IS_PLAYING.store(false, Ordering::SeqCst);
-            update_position(position_ms);
+            confirm_position(position_ms);
             emit_state(json!({
                 "event": "paused",
                 "track_uri": track_id.to_string(),
                 "position_ms": position_ms,
-            }));
+                "play_request_id": play_request_id,
+            }), callback_generation);
         }
-        PlayerEvent::Stopped { track_id, .. } => {
+        PlayerEvent::Stopped {
+            play_request_id,
+            track_id,
+        } => {
             stop_position_clock();
             emit_state(json!({
                 "event": "stopped",
                 "track_uri": track_id.to_string(),
-            }));
+                "play_request_id": play_request_id,
+            }), callback_generation);
         }
         PlayerEvent::Seeked { position_ms, .. }
         | PlayerEvent::PositionCorrection { position_ms, .. } => {
-            update_position(position_ms);
+            if matches!(event, PlayerEvent::Seeked { .. }) {
+                // Flush again after the decoder has applied the seek. The
+                // command-side flush exists to release a blocked sink writer.
+                proxy_sink::ProxySink::clear_buffer(player_generation);
+            }
+            confirm_position(position_ms);
             emit_state(json!({
                 "event": "position",
                 "position_ms": position_ms,
-            }));
+            }), callback_generation);
+        }
+        PlayerEvent::PositionChanged { position_ms, .. } => {
+            // This 1 Hz decoder metric stays inside the core so it does not
+            // invalidate app-wide Swift observation state.
+            confirm_position(position_ms);
         }
         PlayerEvent::TrackChanged { audio_item } => {
             let uri = audio_item.track_id.to_string();
             let duration = audio_item.duration_ms;
             *CURRENT_URI.lock().unwrap() = Some(uri.clone());
             DURATION_MS.store(duration, Ordering::SeqCst);
-            update_position(0);
+            confirm_position(0);
 
             // Full metadata comes with the event — no extra Web API round trip.
             // covers[0] is the LARGE variant (Spotify orders by size).
@@ -690,32 +773,39 @@ fn handle_player_event(event: librespot_playback::player::PlayerEvent) {
                 "artists": artists,
                 "album": album,
                 "cover_url": cover,
-            }));
+            }), callback_generation);
         }
         PlayerEvent::EndOfTrack { .. } => {
             stop_position_clock();
-            emit_state(json!({ "event": "end_of_track" }));
+            emit_state(json!({ "event": "end_of_track" }), callback_generation);
         }
         PlayerEvent::ShuffleChanged { shuffle } => {
-            emit_state(json!({ "event": "shuffle_changed", "shuffle": shuffle }));
+            emit_state(
+                json!({ "event": "shuffle_changed", "shuffle": shuffle }),
+                callback_generation,
+            );
         }
         PlayerEvent::RepeatChanged { context, track } => {
             emit_state(json!({
                 "event": "repeat_changed",
                 "repeat_context": context,
                 "repeat_track": track,
-            }));
+            }), callback_generation);
         }
         _ => {}
     }
 }
 
-fn with_current_player_generation(generation: u64, action: impl FnOnce()) -> bool {
+fn accepts_play_request(current: u64, event: Option<u64>) -> bool {
+    current == NO_PLAY_REQUEST || event.is_none_or(|event| event == current)
+}
+
+fn with_current_player_generation(generation: u64, action: impl FnOnce(u64)) -> bool {
     let _lifecycle = PLAYER_LIFECYCLE.lock().unwrap();
     if PLAYER_GENERATION.load(Ordering::SeqCst) != generation {
         return false;
     }
-    action();
+    action(CALLBACK_GENERATION.load(Ordering::SeqCst));
     true
 }
 
@@ -730,6 +820,11 @@ fn require_spirc() -> Result<Arc<Spirc>, i32> {
         Some(spirc) => Ok(spirc.clone()),
         None => Err(-2),
     }
+}
+
+fn require_spirc_generation() -> Result<(Arc<Spirc>, u64), i32> {
+    let _lifecycle = PLAYER_LIFECYCLE.lock().unwrap();
+    require_spirc().map(|spirc| (spirc, PLAYER_GENERATION.load(Ordering::SeqCst)))
 }
 
 /// Plays the given track URIs (JSON array, e.g. ["spotify:track:..."]),
@@ -883,7 +978,10 @@ pub extern "C" fn nanyin_stop() -> i32 {
 
 #[no_mangle]
 pub extern "C" fn nanyin_seek(position_ms: u32) -> i32 {
-    require_spirc().map_or_else(|c| c, |s| {
+    require_spirc_generation().map_or_else(|c| c, |(s, generation)| {
+        // Release a decoder blocked behind a full/stale renderer ring before
+        // queueing the context-preserving seek on the existing Spirc player.
+        proxy_sink::ProxySink::clear_buffer(generation);
         s.set_position_ms(position_ms).map_or(-1, |_| {
             update_position(position_ms);
             0
@@ -961,8 +1059,7 @@ fn interpolated_position_ms(
 }
 
 /// Current playback position in ms, interpolated while playing and capped at
-/// the current track duration. Playing/paused/disconnected events own the
-/// clock state; librespot does not emit periodic position events.
+/// the current track duration. Player events own the clock state.
 #[no_mangle]
 pub extern "C" fn nanyin_get_position_ms() -> u32 {
     POSITION.lock().unwrap().get_at(
@@ -975,6 +1072,31 @@ pub extern "C" fn nanyin_get_position_ms() -> u32 {
 #[no_mangle]
 pub extern "C" fn nanyin_get_duration_ms() -> u32 {
     DURATION_MS.load(Ordering::SeqCst)
+}
+
+#[no_mangle]
+pub extern "C" fn nanyin_get_play_request_id() -> u64 {
+    CURRENT_PLAY_REQUEST_ID.load(Ordering::Relaxed)
+}
+
+#[no_mangle]
+pub extern "C" fn nanyin_get_decoder_packets() -> u64 {
+    DECODER_PACKETS.load(Ordering::Relaxed)
+}
+
+#[no_mangle]
+pub extern "C" fn nanyin_get_pcm_writes() -> u64 {
+    pcm_writes()
+}
+
+#[no_mangle]
+pub extern "C" fn nanyin_get_download_waiters() -> u64 {
+    librespot_audio::active_stream_read_waits() as u64
+}
+
+#[no_mangle]
+pub extern "C" fn nanyin_get_confirmed_position_ms() -> u32 {
+    CONFIRMED_POSITION_MS.load(Ordering::Relaxed)
 }
 
 /// Frees a C string allocated by this library.
@@ -992,10 +1114,11 @@ fn _unused(m: mpsc::UnboundedSender<()>) {}
 #[cfg(test)]
 mod tests {
     use super::{
-        interpolated_position_ms, nanyin_init_player, with_current_player_generation,
-        AccessPointAuthenticationError, ErrorCode, PlaybackPosition, PlayerInitFailure,
-        PlayerInitFailureKind, PLAYER_GENERATION, PLAYER_INIT_CREDENTIALS_REJECTED,
-        PLAYER_INIT_FAILED, PLAYER_LIFECYCLE,
+        accepts_play_request, interpolated_position_ms, nanyin_init_player,
+        with_current_player_generation, AccessPointAuthenticationError, ErrorCode,
+        PlaybackPosition, PlayerInitFailure, PlayerInitFailureKind, CALLBACK_GENERATION,
+        NO_PLAY_REQUEST, PLAYER_GENERATION, PLAYER_INIT_CREDENTIALS_REJECTED, PLAYER_INIT_FAILED,
+        PLAYER_LIFECYCLE,
     };
     use librespot_core::Error;
     use std::ffi::CString;
@@ -1032,19 +1155,19 @@ mod tests {
     fn player_init_rejects_missing_or_invalid_device_ids() {
         let token = CString::new("access-token").unwrap();
         assert_eq!(
-            nanyin_init_player(token.as_ptr(), ptr::null()),
+            nanyin_init_player(token.as_ptr(), ptr::null(), 0),
             PLAYER_INIT_FAILED
         );
 
         let empty = CString::new("").unwrap();
         assert_eq!(
-            nanyin_init_player(token.as_ptr(), empty.as_ptr()),
+            nanyin_init_player(token.as_ptr(), empty.as_ptr(), 0),
             PLAYER_INIT_FAILED
         );
 
         let invalid_utf8 = [0xff_u8, 0];
         assert_eq!(
-            nanyin_init_player(token.as_ptr(), invalid_utf8.as_ptr().cast()),
+            nanyin_init_player(token.as_ptr(), invalid_utf8.as_ptr().cast(), 0),
             PLAYER_INIT_FAILED
         );
     }
@@ -1053,12 +1176,14 @@ mod tests {
     fn player_event_generation_check_is_atomic_with_rebuilds() {
         let generation = {
             let _lifecycle = PLAYER_LIFECYCLE.lock().unwrap();
+            CALLBACK_GENERATION.store(42, Ordering::SeqCst);
             PLAYER_GENERATION.fetch_add(1, Ordering::SeqCst) + 1
         };
         let (event_entered_tx, event_entered_rx) = mpsc::channel();
         let (release_event_tx, release_event_rx) = mpsc::channel();
         let event_thread = thread::spawn(move || {
-            assert!(with_current_player_generation(generation, || {
+            assert!(with_current_player_generation(generation, |callback_generation| {
+                assert_eq!(callback_generation, 42);
                 event_entered_tx.send(()).unwrap();
                 release_event_rx.recv().unwrap();
             }));
@@ -1085,9 +1210,18 @@ mod tests {
             !rebuild_during_event,
             "generation changed while the old player event was being handled"
         );
-        assert!(!with_current_player_generation(generation, || {
+        assert!(!with_current_player_generation(generation, |_| {
             panic!("stale player event was handled after rebuild");
         }));
+    }
+
+    #[test]
+    fn stale_play_request_events_are_rejected() {
+        assert!(accepts_play_request(NO_PLAY_REQUEST, Some(0)));
+        assert!(accepts_play_request(0, Some(0)));
+        assert!(accepts_play_request(2, None));
+        assert!(accepts_play_request(2, Some(2)));
+        assert!(!accepts_play_request(2, Some(1)));
     }
 
     #[test]
@@ -1102,7 +1236,7 @@ mod tests {
     }
 
     #[test]
-    fn playing_position_keeps_advancing_without_periodic_player_events() {
+    fn playing_position_advances_between_player_events() {
         assert_eq!(
             interpolated_position_ms(0, 10_000, true, 180_000),
             10_000

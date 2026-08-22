@@ -9,6 +9,7 @@ name = "nanyin_core"
 crate-type = ["staticlib"]
 
 [dependencies]
+librespot-audio = { path = "../research-repos/librespot/audio" }
 librespot-core = { path = "../research-repos/librespot/core" }
 librespot-connect = { path = "../research-repos/librespot/connect" }
 librespot-playback = { path = "../research-repos/librespot/playback" }

@@ -42,6 +42,7 @@ final class AppModel {
     private var accountEpoch = 0
     private var playbackGeneration: UInt64 = 0
     private var activePlaybackGeneration: UInt64?
+    private var deferredReconnectGeneration: UInt64?
     private var webRefreshInFlight: (epoch: Int, task: Task<SpotifyAuth.Token, Error>)?
     private var interactiveSignInTask: Task<Void, Never>?
 
@@ -112,6 +113,11 @@ final class AppModel {
     private(set) var isPlaying = false
     private(set) var isBuffering = false
     private var playbackWatchdog: Task<Void, Never>?
+    private var pendingPlayIntent: PendingPlayIntent?
+    private var pendingPlayExpiryTask: Task<Void, Never>?
+    private var pendingPlayReplayTask: Task<Void, Never>?
+    private var audioStallWatchdog: Task<Void, Never>?
+    private var audioStallDetector = PlaybackStallDetector()
     // NOTE: playback position is intentionally NOT stored here. Polling it at
     // 2Hz from the app-wide observable would invalidate every view reading
     // the model (including every track row) — PlayerBar ticks it locally.
@@ -1488,6 +1494,11 @@ final class AppModel {
     /// Clean shutdown of the Rust core (Connect goodbye) — app quit path.
     func shutdown() {
         cancelPlaybackWatchdog()
+        clearPendingPlayIntent()
+        cancelAudioStallWatchdog()
+        deferredReconnectGeneration = nil
+        playbackGeneration &+= 1
+        activePlaybackGeneration = nil
         _ = Core.shutdown()
         AudioRenderer.shared.stop()
         NowPlayingManager.shared.clear()
@@ -1501,10 +1512,13 @@ final class AppModel {
         }
         albumSaveMutationTasks.removeAll()
         cancelPlaybackWatchdog()
+        clearPendingPlayIntent()
+        cancelAudioStallWatchdog()
         accountEpoch += 1
         ArtworkCache.shared.cancelPrefetches()
         playbackGeneration &+= 1
         activePlaybackGeneration = nil
+        deferredReconnectGeneration = nil
         loadEpoch += 1
         searchEpoch += 1
         SpotifyAuth.invalidateInteractiveSignIn()
@@ -1729,6 +1743,8 @@ final class AppModel {
     }
 
     private func beginPlaybackConnection() -> UInt64 {
+        cancelAudioStallWatchdog()
+        deferredReconnectGeneration = nil
         playbackGeneration &+= 1
         activePlaybackGeneration = nil
         playbackConnectionState = .connecting
@@ -2112,13 +2128,15 @@ final class AppModel {
     /// Connect state gets 429-rejected. Falls back to a bounded track window
     /// if the context path doesn't start audio in time.
     func play(track: SpotifyClient.Track, contextKey: String, index preferredIndex: Int? = nil) {
+        cancelPendingPlayForUserCommand()
         guard isPlaybackReady else { return }
-        cancelPlaybackWatchdog()
+        cancelAudioStallWatchdog()
         if pendingQueueHistory == nil, let nowPlaying, nowPlaying.uri != track.uri {
             pendingQueueHistory = (nowPlaying, durationMs)
         }
         applyNowPlaying(track)
         isBuffering = true
+        let previousPlayRequestID = Core.playbackProgress.playRequestID
 
         let index = preferredIndex
             ?? tracksByContext[contextKey]?.firstIndex(where: { $0.uri == track.uri })
@@ -2144,6 +2162,11 @@ final class AppModel {
             let rc = Core.playContext(contextURI, startIndex: index)
             dlog("playContext(\(contextURI), index \(index)) rc=\(rc)")
             if rc == 0 {
+                setPendingPlayIntent(
+                    call: .context(uri: contextURI, index: index),
+                    trackURI: track.uri,
+                    previousPlayRequestID: previousPlayRequestID
+                )
                 scheduleContextFallback(track: track, contextKey: contextKey, index: index)
                 return
             }
@@ -2170,8 +2193,14 @@ final class AppModel {
         playbackWatchdog = Task {
             try? await Task.sleep(for: .seconds(8))
             guard !Task.isCancelled, isBuffering, nowPlaying?.uri == uri else { return }
+            guard playbackConnectionState == .ready else {
+                dlog("context load stalled during reconnect — preserving pending play")
+                playbackWatchdog = nil
+                return
+            }
             dlog("context load stalled — falling back to windowed tracks")
             playbackWatchdog = nil
+            clearPendingPlayIntent()
             playWindowed(track: track, contextKey: contextKey, index: index)
         }
     }
@@ -2180,21 +2209,34 @@ final class AppModel {
     /// playlist, liked collection) — never uploads a track-URI list (M4.3
     /// roadmap rule; large context uploads get 429-rejected silently).
     private func playServerContext(_ contextURI: String) {
+        cancelPendingPlayForUserCommand()
         guard isPlaybackReady else { return }
-        cancelPlaybackWatchdog()
+        cancelAudioStallWatchdog()
         isBuffering = true
+        let previousPlayRequestID = Core.playbackProgress.playRequestID
         let rc = Core.playContext(contextURI, startIndex: 0)
         dlog("playContext(\(contextURI)) rc=\(rc)")
         if rc != 0 {
             isBuffering = false
             return
         }
+        setPendingPlayIntent(
+            call: .context(uri: contextURI, index: 0),
+            trackURI: nil,
+            previousPlayRequestID: previousPlayRequestID
+        )
         playbackWatchdog = Task {
             try? await Task.sleep(for: .seconds(8))
             guard !Task.isCancelled, isBuffering else { return }
+            guard playbackConnectionState == .ready else {
+                dlog("context load stalled during reconnect — preserving pending play")
+                playbackWatchdog = nil
+                return
+            }
             dlog("context load stalled — clearing buffering state")
             isBuffering = false
             playbackWatchdog = nil
+            clearPendingPlayIntent()
         }
     }
 
@@ -2218,9 +2260,133 @@ final class AppModel {
         playServerContext("spotify:user:\(userId):collection")
     }
 
+    private func setPendingPlayIntent(
+        call: PendingPlayIntent.Call,
+        trackURI: String?,
+        previousPlayRequestID: UInt64
+    ) {
+        clearPendingPlayIntent()
+        let intent = PendingPlayIntent(
+            call: call,
+            trackURI: trackURI,
+            accountEpoch: accountEpoch,
+            previousPlayRequestID: previousPlayRequestID
+        )
+        pendingPlayIntent = intent
+        pendingPlayExpiryTask = Task {
+            try? await Task.sleep(for: .seconds(60))
+            guard !Task.isCancelled, pendingPlayIntent == intent else { return }
+            dlog("pending play expired without confirmation")
+            clearPendingPlayIntent()
+            isBuffering = false
+        }
+    }
+
+    private func clearPendingPlayIntent() {
+        pendingPlayIntent = nil
+        pendingPlayExpiryTask?.cancel()
+        pendingPlayExpiryTask = nil
+        pendingPlayReplayTask?.cancel()
+        pendingPlayReplayTask = nil
+    }
+
+    private func cancelPendingPlayForUserCommand() {
+        if pendingPlayIntent != nil {
+            isBuffering = false
+        }
+        cancelPlaybackWatchdog()
+        clearPendingPlayIntent()
+    }
+
     private func cancelPlaybackWatchdog() {
         playbackWatchdog?.cancel()
         playbackWatchdog = nil
+    }
+
+    private func scheduleAudioStallWatchdog(generation: UInt64) {
+        audioStallWatchdog?.cancel()
+        audioStallDetector.suspend()
+        audioStallWatchdog = Task {
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: .seconds(2))
+                } catch {
+                    return
+                }
+                guard authState == .loggedIn,
+                      activePlaybackGeneration == generation else { return }
+
+                let snapshot = PlaybackPipelineSnapshot(
+                    core: Core.playbackProgress,
+                    renderer: AudioRenderer.shared.playbackProgress
+                )
+                guard let recovery = audioStallDetector.observe(
+                    snapshot,
+                    generation: generation,
+                    nowMs: DispatchTime.now().uptimeNanoseconds / 1_000_000,
+                    expectsPlayback: isPlaying && !isBuffering
+                ) else { continue }
+
+                dlog(
+                    "audio \(recovery.stage.rawValue) stall request=\(snapshot.core.playRequestID) "
+                        + "decoder=\(snapshot.core.decoderPackets) pcm=\(snapshot.core.pcmWrites) "
+                        + "waiters=\(snapshot.core.downloadWaiters) accepted=\(snapshot.renderer.acceptedSamples) "
+                        + "callbacks=\(snapshot.renderer.renderCallbacks) rendered=\(snapshot.renderer.renderedSamples); "
+                        + "seeking to \(recovery.positionMs)ms"
+                )
+                if recovery.stage == .renderer {
+                    AudioRenderer.shared.restartForRecovery()
+                }
+                let rc = Core.seek(recovery.positionMs)
+                dlog("audio stall local recovery rc=\(rc)")
+                if rc != 0 {
+                    failAudioStallRecovery(generation: generation)
+                    return
+                }
+
+                do {
+                    try await Task.sleep(for: .seconds(12))
+                } catch {
+                    return
+                }
+                guard authState == .loggedIn,
+                      activePlaybackGeneration == generation,
+                      isPlaying, !isBuffering else { return }
+                let afterRecovery = PlaybackPipelineSnapshot(
+                    core: Core.playbackProgress,
+                    renderer: AudioRenderer.shared.playbackProgress
+                )
+                guard PlaybackStallDetector.recoveryMadeProgress(
+                    from: snapshot,
+                    to: afterRecovery
+                ) else {
+                    failAudioStallRecovery(generation: generation)
+                    return
+                }
+                dlog("audio stall local recovery confirmed")
+            }
+        }
+    }
+
+    private func failAudioStallRecovery(generation: UInt64) {
+        guard activePlaybackGeneration == generation else { return }
+        cancelAudioStallWatchdog()
+        if deferredReconnectGeneration != nil {
+            dlog("audio stall recovery failed — resuming deferred reconnect")
+            resumeDeferredReconnectIfNeeded()
+        } else {
+            dlog("audio stall recovery failed — stopping automatic recovery")
+            isBuffering = false
+            playbackConnectionState = .unavailable(
+                "Connection lost — audio pipeline stalled"
+            )
+        }
+    }
+
+    private func cancelAudioStallWatchdog() {
+        audioStallWatchdog?.cancel()
+        audioStallWatchdog = nil
+        audioStallDetector.suspend()
     }
 
     /// Retry button on failed track loads: drop the caches for the current
@@ -2237,14 +2403,18 @@ final class AppModel {
     // MARK: - Core callbacks
 
     private func installCoreCallbacks() {
-        Core.onAudioData = { samples, count in
-            AudioRenderer.shared.write(samples: samples, count: count)
+        Core.onAudioData = { samples, count, generation in
+            AudioRenderer.shared.write(
+                samples: samples,
+                count: count,
+                generation: generation
+            )
         }
-        Core.onAudioControl = { event in
+        Core.onAudioControl = { event, generation in
             switch event {
-            case 0: AudioRenderer.shared.stop()      // AUDIO_CONTROL_STOP
-            case 1: AudioRenderer.shared.start()     // AUDIO_CONTROL_START
-            case 2: AudioRenderer.shared.clear()     // AUDIO_CONTROL_CLEAR
+            case 0: AudioRenderer.shared.stop(generation: generation)
+            case 1: AudioRenderer.shared.start(generation: generation)
+            case 2: AudioRenderer.shared.clear(generation: generation)
             default: break
             }
         }
@@ -2260,23 +2430,46 @@ final class AppModel {
 
     private func handle(_ event: Core.Event, generation: UInt64) {
         switch event {
-        case .playing:
-            cancelPlaybackWatchdog()
+        case let .playing(uri, _, playRequestID):
+            let confirmsPendingPlay = pendingPlayIntent?.isConfirmed(
+                byPlayingURI: uri,
+                playRequestID: playRequestID
+            ) ?? true
+            if confirmsPendingPlay {
+                cancelPlaybackWatchdog()
+                clearPendingPlayIntent()
+            }
             isPlaying = true
-            isBuffering = false
+            isBuffering = !confirmsPendingPlay
+            if confirmsPendingPlay {
+                scheduleAudioStallWatchdog(generation: generation)
+            }
             pushNowPlayingInfo()
-        case let .paused(_, positionMs):
+        case let .paused(_, positionMs, playRequestID):
+            guard pendingPlayIntent?.isEventFromPreviousRequest(
+                playRequestID: playRequestID
+            ) != true else { return }
             cancelPlaybackWatchdog()
+            clearPendingPlayIntent()
+            cancelAudioStallWatchdog()
             isPlaying = false
             isBuffering = false
             _ = positionMs
             pushNowPlayingInfo()
-        case .stopped:
+            resumeDeferredReconnectIfNeeded()
+        case let .stopped(_, playRequestID):
+            guard pendingPlayIntent?.isEventFromPreviousRequest(
+                playRequestID: playRequestID
+            ) != true else { return }
             cancelPlaybackWatchdog()
+            clearPendingPlayIntent()
+            cancelAudioStallWatchdog()
             isPlaying = false
             isBuffering = false
             pushNowPlayingInfo()
+            resumeDeferredReconnectIfNeeded()
         case let .loading(uri, _):
+            cancelAudioStallWatchdog()
             isBuffering = true
             fetchMetadata(uri: uri, playbackGeneration: generation)
         case let .trackChanged(uri, durationMs, title, artists, album, coverURL):
@@ -2319,6 +2512,8 @@ final class AppModel {
             case (false, false): repeatMode = .off
             }
         case .endOfTrack:
+            cancelAudioStallWatchdog()
+            resumeDeferredReconnectIfNeeded()
             break // Spirc auto-advances within the context
         }
         // Queue refresh on the two events that shift it (a new track also
@@ -2377,9 +2572,26 @@ final class AppModel {
     /// aggressive refresh on every disconnect rotates tokens in a loop,
     /// which Spotify's risk control treats as abuse and revokes everything
     /// (learned the hard way: refresh token got invalidated).
-    private func reconnect(disconnectedGeneration: UInt64) {
+    private func reconnect(
+        disconnectedGeneration: UInt64,
+        preserveActiveAudio: Bool = true
+    ) {
         guard authState == .loggedIn,
               playbackGeneration == disconnectedGeneration else { return }
+        if preserveActiveAudio,
+           PlaybackReconnectPolicy.shouldDeferRebuild(
+               isPlaying: isPlaying,
+               isBuffering: isBuffering,
+               hasPendingPlay: pendingPlayIntent != nil
+           ) {
+            deferredReconnectGeneration = disconnectedGeneration
+            playbackConnectionState = .connecting
+            dlog("control plane disconnected — deferring rebuild while audio is progressing")
+            return
+        }
+        if pendingPlayIntent != nil {
+            cancelPlaybackWatchdog()
+        }
         let epoch = accountEpoch
         let accessToken = playbackAccessToken
         let generation = beginPlaybackConnection()
@@ -2408,6 +2620,7 @@ final class AppModel {
             case .connected:
                 activePlaybackGeneration = generation
                 playbackConnectionState = .ready
+                schedulePendingPlayReplay(epoch: epoch, generation: generation)
                 return
             case let .failed(code, message):
                 dlog("reconnect kept current token after init rc=\(code): \(message)")
@@ -2431,6 +2644,7 @@ final class AppModel {
                 case .connected:
                     activePlaybackGeneration = generation
                     playbackConnectionState = .ready
+                    schedulePendingPlayReplay(epoch: epoch, generation: generation)
                 case let .credentialsRejected(message), let .failed(_, message):
                     playbackConnectionState = .unavailable("Connection lost — \(message)")
                 }
@@ -2451,11 +2665,81 @@ final class AppModel {
         }
     }
 
+    private func resumeDeferredReconnectIfNeeded() {
+        guard let generation = deferredReconnectGeneration else { return }
+        deferredReconnectGeneration = nil
+        reconnect(
+            disconnectedGeneration: generation,
+            preserveActiveAudio: false
+        )
+    }
+
+    private func schedulePendingPlayReplay(epoch: Int, generation: UInt64) {
+        guard pendingPlayIntent != nil else { return }
+        pendingPlayReplayTask?.cancel()
+        pendingPlayReplayTask = Task {
+            do {
+                try await Task.sleep(for: .seconds(3))
+            } catch {
+                return
+            }
+            guard isCurrentPlayback(epoch: epoch, generation: generation),
+                  playbackConnectionState == .ready,
+                  var intent = pendingPlayIntent else { return }
+            if intent.replayed {
+                failPendingPlay(intent)
+                return
+            }
+            guard intent.markReplayedIfEligible(
+                accountEpoch: accountEpoch,
+                previousPlayRequestID: Core.playbackProgress.playRequestID
+            ) else {
+                if pendingPlayIntent == intent {
+                    clearPendingPlayIntent()
+                    isBuffering = false
+                }
+                return
+            }
+            pendingPlayIntent = intent
+
+            let rc: Int32
+            switch intent.call {
+            case let .context(uri, index):
+                rc = Core.playContext(uri, startIndex: index)
+                dlog("replay playContext(\(uri), index \(index)) rc=\(rc)")
+            }
+            guard rc == 0 else {
+                failPendingPlay(intent)
+                return
+            }
+
+            do {
+                try await Task.sleep(for: .seconds(3))
+            } catch {
+                return
+            }
+            guard isCurrentPlayback(epoch: epoch, generation: generation),
+                  pendingPlayIntent == intent else { return }
+            failPendingPlay(intent)
+        }
+    }
+
+    private func failPendingPlay(_ intent: PendingPlayIntent) {
+        guard pendingPlayIntent == intent else { return }
+        clearPendingPlayIntent()
+        cancelPlaybackWatchdog()
+        isBuffering = false
+        playbackConnectionState = .unavailable(
+            "Connection lost — playback did not start"
+        )
+    }
+
     // MARK: - Playback commands
 
     func playURI(_ input: String) {
+        cancelPendingPlayForUserCommand()
         guard isPlaybackReady else { return }
-        cancelPlaybackWatchdog()
+        cancelAudioStallWatchdog()
         var uri = input.trimmingCharacters(in: .whitespacesAndNewlines)
         if !uri.hasPrefix("spotify:"), let id = SpotifyClient.trackId(from: uri) {
             uri = "spotify:track:\(id)"
@@ -2469,6 +2753,7 @@ final class AppModel {
     }
 
     func togglePlay() {
+        cancelPendingPlayForUserCommand()
         guard isPlaybackReady else { return }
         if isPlaying {
             _ = Core.pause()
@@ -2533,14 +2818,16 @@ final class AppModel {
     }
 
     func next() {
+        cancelPendingPlayForUserCommand()
         guard isPlaybackReady else { return }
-        cancelPlaybackWatchdog()
+        cancelAudioStallWatchdog()
         _ = Core.next()
     }
 
     func prev() {
+        cancelPendingPlayForUserCommand()
         guard isPlaybackReady else { return }
-        cancelPlaybackWatchdog()
+        cancelAudioStallWatchdog()
         _ = Core.prev()
     }
 
