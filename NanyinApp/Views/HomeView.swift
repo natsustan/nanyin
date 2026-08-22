@@ -390,16 +390,8 @@ private struct RecentCard: View {
     }
 
     private var cover: some View {
-        Group {
-            if let url = card.artworkURL {
-                AsyncImage(url: url) { image in
-                    image.resizable().scaledToFill()
-                } placeholder: {
-                    placeholderCover
-                }
-            } else {
-                placeholderCover
-            }
+        ArtworkView(url: card.artworkURL, size: 134) {
+            placeholderCover
         }
         .frame(width: 134, height: 134)
         .clipShape(RoundedRectangle(cornerRadius: 6))
@@ -448,16 +440,8 @@ private struct ArtistTile: View {
             app.open(.artist(id: artist.id, name: artist.name, artworkURL: artist.artworkURL))
         } label: {
             VStack(spacing: 8) {
-                Group {
-                    if let url = artist.artworkURL {
-                        AsyncImage(url: url) { image in
-                            image.resizable().scaledToFill()
-                        } placeholder: {
-                            placeholderPortrait
-                        }
-                    } else {
-                        placeholderPortrait
-                    }
+                ArtworkView(url: artist.artworkURL, size: 88) {
+                    placeholderPortrait
                 }
                 .frame(width: 88, height: 88)
                 .clipShape(Circle())
@@ -550,14 +534,10 @@ private struct LibraryTile: View {
                 Image(assetCover)
                     .resizable()
                     .scaledToFill()
-            } else if let url = artworkURL {
-                AsyncImage(url: url) { image in
-                    image.resizable().scaledToFill()
-                } placeholder: {
+            } else {
+                ArtworkView(url: artworkURL, size: 160) {
                     placeholderCover
                 }
-            } else {
-                placeholderCover
             }
         }
         .aspectRatio(1, contentMode: .fit)

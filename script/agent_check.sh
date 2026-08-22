@@ -72,6 +72,15 @@ xcrun swiftc \
     -o "$state_test_dir/state-reducer-tests"
 "$state_test_dir/state-reducer-tests"
 
+step "running artwork cache tests"
+xcrun swiftc \
+    "$ROOT_DIR/NanyinApp/Core/ArtworkCache.swift" \
+    "$ROOT_DIR/Tests/ArtworkCacheTests.swift" \
+    -framework AppKit \
+    -framework ImageIO \
+    -o "$state_test_dir/artwork-cache-tests"
+"$state_test_dir/artwork-cache-tests"
+
 step "running Rust unit tests offline"
 mise exec rust@stable -- cargo test \
     --offline \
