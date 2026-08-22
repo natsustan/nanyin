@@ -2245,6 +2245,7 @@ final class AppModel {
             }
             // 1) Try re-init with the CURRENT access token — cheap and usually
             //    sufficient (librespot also refreshes internally via login5).
+            guard isCurrentPlayback(epoch: epoch, generation: generation) else { return }
             let result = await Core.initializePlayer(
                 accessToken: accessToken,
                 deviceId: deviceId,
