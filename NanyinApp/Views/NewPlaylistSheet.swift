@@ -11,6 +11,7 @@ import SwiftUI
 /// inline error and keep the entered name; Cancel makes no request.
 struct NewPlaylistSheet: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.appTheme) private var theme
     @State private var name = ""
     @FocusState private var nameFocused: Bool
 
@@ -21,13 +22,13 @@ struct NewPlaylistSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text("New Playlist")
-                .font(.system(size: 16, weight: .bold))
-                .foregroundStyle(.white)
+                .font(theme.typography.sheetTitle)
+                .foregroundStyle(theme.colors.primaryText)
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("Name")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Theme.textSecondary)
+                    .font(theme.typography.fieldLabel)
+                    .foregroundStyle(theme.colors.secondaryText)
                 TextField("My playlist", text: $name)
                     .textFieldStyle(.roundedBorder)
                     .focused($nameFocused)
@@ -35,8 +36,8 @@ struct NewPlaylistSheet: View {
 
             if let error = app.playlistCreationError {
                 Text(error)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.orange)
+                    .font(theme.typography.secondary)
+                    .foregroundStyle(theme.colors.warning)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -58,9 +59,9 @@ struct NewPlaylistSheet: View {
                 .disabled(trimmedName.isEmpty || app.isCreatingPlaylist)
             }
         }
-        .padding(24)
-        .frame(width: 400)
-        .background(Theme.background)
+        .padding(theme.metrics.sheetPadding)
+        .frame(width: theme.metrics.sheetWidth)
+        .background(theme.colors.contentBackground.swiftUIStyle)
         .interactiveDismissDisabled(app.isCreatingPlaylist)
         .onAppear { nameFocused = true }
     }

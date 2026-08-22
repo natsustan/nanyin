@@ -12,6 +12,7 @@ import SwiftUI
 /// Single scroll region: fixed header + one recycling List (UI perf rules).
 struct QueueView: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.appTheme) private var theme
 
     private var hasContent: Bool {
         app.queueCurrent != nil || app.nowPlaying != nil
@@ -23,45 +24,45 @@ struct QueueView: View {
             if hasContent {
                 VStack(spacing: 0) {
                     header
-                    Divider().overlay(Color(white: 0.18))
+                    Divider().overlay(theme.colors.divider)
                     list
                 }
             } else {
                 VStack(spacing: 12) {
                     Image(systemName: "music.note.list")
                         .font(.system(size: 36, weight: .light))
-                        .foregroundStyle(Theme.textSecondary.opacity(0.6))
+                        .foregroundStyle(theme.colors.secondaryText.opacity(0.6))
                     Text("Nothing in queue")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .font(theme.typography.bodyEmphasis)
+                        .foregroundStyle(theme.colors.primaryText)
                     Text("Play something — the queue follows along.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Theme.textSecondary)
+                        .font(theme.typography.secondary)
+                        .foregroundStyle(theme.colors.secondaryText)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .background(Theme.background)
+        .background(theme.colors.contentBackground.swiftUIStyle)
     }
 
     private var header: some View {
         HStack(spacing: 14) {
             Image(systemName: "list.bullet")
                 .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(theme.colors.primaryText)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Queue")
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundStyle(.white)
+                    .font(theme.typography.queueTitle)
+                    .foregroundStyle(theme.colors.primaryText)
                 Text(subtitle)
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textSecondary)
+                    .font(theme.typography.secondary)
+                    .foregroundStyle(theme.colors.secondaryText)
             }
             Spacer()
         }
-        .padding(.horizontal, 24)
-        .padding(.top, 28)
-        .padding(.bottom, 20)
+        .padding(.horizontal, theme.metrics.sectionHorizontalInset)
+        .padding(.top, theme.metrics.pageTopInset + 4)
+        .padding(.bottom, theme.metrics.pageBottomInset)
     }
 
     private var subtitle: String {
@@ -95,7 +96,7 @@ struct QueueView: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
-        .environment(\.defaultMinListRowHeight, 36)
+        .environment(\.defaultMinListRowHeight, theme.metrics.queueRowHeight)
     }
 
     @ViewBuilder
@@ -124,12 +125,12 @@ struct QueueView: View {
             }
         } header: {
             Text("NOW PLAYING")
-                .font(.system(size: 10, weight: .bold))
+                .font(theme.typography.sectionHeader)
                 .tracking(0.8)
-                .foregroundStyle(Theme.textSecondary)
-                .padding(.horizontal, 24)
-                .padding(.top, 16)
-                .padding(.bottom, 6)
+                .foregroundStyle(theme.colors.secondaryText)
+                .padding(.horizontal, theme.metrics.sectionHorizontalInset)
+                .padding(.top, theme.metrics.sectionTopPadding)
+                .padding(.bottom, theme.metrics.sectionBottomPadding)
         }
     }
 
@@ -143,18 +144,19 @@ struct QueueView: View {
             }
         } header: {
             Text(title)
-                .font(.system(size: 10, weight: .bold))
+                .font(theme.typography.sectionHeader)
                 .tracking(0.8)
-                .foregroundStyle(Theme.textSecondary)
-                .padding(.horizontal, 24)
-                .padding(.top, 16)
-                .padding(.bottom, 6)
+                .foregroundStyle(theme.colors.secondaryText)
+                .padding(.horizontal, theme.metrics.sectionHorizontalInset)
+                .padding(.top, theme.metrics.sectionTopPadding)
+                .padding(.bottom, theme.metrics.sectionBottomPadding)
         }
     }
 }
 
 /// Current-track card: artwork + title/artist + equalizer while playing.
 private struct NowPlayingRow: View {
+    @Environment(\.appTheme) private var theme
     let title: String
     let artist: String
     let artworkURL: URL?
@@ -164,16 +166,16 @@ private struct NowPlayingRow: View {
         HStack(spacing: 12) {
             artwork
                 .frame(width: 44, height: 44)
-                .cornerRadius(4)
+                .cornerRadius(theme.metrics.cornerRadius)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Theme.accent)
+                    .font(theme.typography.nowPlayingTitle)
+                    .foregroundStyle(theme.colors.accent)
                     .lineLimit(1)
                 if !artist.isEmpty {
                     Text(artist)
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.textSecondary)
+                        .font(theme.typography.secondary)
+                        .foregroundStyle(theme.colors.secondaryText)
                         .lineLimit(1)
                 }
             }
@@ -182,20 +184,21 @@ private struct NowPlayingRow: View {
                 EqBars()
             }
         }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 8)
+        .padding(.horizontal, theme.metrics.sectionHorizontalInset)
+        .padding(.vertical, theme.metrics.smallPadding)
     }
 
     @ViewBuilder
     private var artwork: some View {
         ArtworkView(url: artworkURL, size: 44) {
             ZStack {
-                Color(white: 0.14)
+                Rectangle()
+                    .fill(theme.colors.placeholderBackground.swiftUIStyle)
                 Image("MusicIcon")
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .frame(width: 18, height: 18)
-                    .foregroundStyle(Theme.textSecondary)
+                    .foregroundStyle(theme.colors.secondaryText)
             }
         }
     }
@@ -204,6 +207,7 @@ private struct NowPlayingRow: View {
 /// Compact queue row: artwork + title/artist + duration.
 private struct QueueRow: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.appTheme) private var theme
     let track: SpotifyClient.Track
     let artist: String
 
@@ -214,25 +218,29 @@ private struct QueueRow: View {
         HStack(spacing: 12) {
             artwork
                 .frame(width: 32, height: 32)
-                .cornerRadius(3)
+                .cornerRadius(theme.metrics.smallCornerRadius)
             VStack(alignment: .leading, spacing: 1) {
                 Text(track.name)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(hovering ? .white : .white.opacity(0.92))
+                    .font(theme.typography.queueRowTitle)
+                    .foregroundStyle(
+                        hovering ? theme.colors.primaryText : theme.colors.primaryText.opacity(0.92)
+                    )
                     .lineLimit(1)
                 Text(artist)
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textSecondary)
+                    .font(theme.typography.secondary)
+                    .foregroundStyle(theme.colors.secondaryText)
                     .lineLimit(1)
             }
             Spacer()
             Text(PlaybackTimeFormatter.string(fromMilliseconds: UInt32(track.durationMs)))
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(Theme.textSecondary)
+                .font(theme.typography.duration)
+                .foregroundStyle(theme.colors.secondaryText)
         }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 5)
-        .background(hovering ? Theme.hover : .clear)
+        .padding(.horizontal, theme.metrics.sectionHorizontalInset)
+        .padding(.vertical, theme.metrics.queueRowVerticalPadding)
+        .background(
+            hovering ? theme.colors.rowHover.swiftUIStyle : AnyShapeStyle(Color.clear)
+        )
         .contentShape(Rectangle())
         .contextMenu {
             Button {
@@ -258,12 +266,13 @@ private struct QueueRow: View {
     private var artwork: some View {
         ArtworkView(url: track.artworkURL, size: 32) {
             ZStack {
-                Color(white: 0.14)
+                Rectangle()
+                    .fill(theme.colors.placeholderBackground.swiftUIStyle)
                 Image("MusicIcon")
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .frame(width: 14, height: 14)
-                    .foregroundStyle(Theme.textSecondary)
+                    .foregroundStyle(theme.colors.secondaryText)
             }
         }
     }
@@ -271,6 +280,7 @@ private struct QueueRow: View {
 
 /// Three-bar equalizer (fixed phases — no randomElement per render).
 private struct EqBars: View {
+    @Environment(\.appTheme) private var theme
     @State private var animate = false
 
     var body: some View {
@@ -285,7 +295,7 @@ private struct EqBars: View {
 
     private func bar(phase: CGFloat, delay: Double) -> some View {
         RoundedRectangle(cornerRadius: 1)
-            .fill(Theme.accent)
+            .fill(theme.colors.accent)
             .frame(width: 3, height: 12)
             .scaleEffect(y: animate ? phase : 0.8, anchor: .bottom)
             .animation(

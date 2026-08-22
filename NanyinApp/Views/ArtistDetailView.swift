@@ -11,6 +11,7 @@ import SwiftUI
 /// context URI).
 struct ArtistDetailView: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.appTheme) private var theme
 
     let artistID: String
     let title: String
@@ -44,12 +45,12 @@ struct ArtistDetailView: View {
         ScrollView(.vertical) {
             VStack(spacing: 0) {
                 header
-                Divider().overlay(Color(white: 0.18))
+                Divider().overlay(theme.colors.divider)
                 trackContent
                 discography
             }
         }
-        .background(Theme.background)
+        .background(theme.colors.contentBackground.swiftUIStyle)
         .task(id: artistID) {
             if artworkURL == nil {
                 app.loadArtistProfileIfNeeded(id: artistID)
@@ -63,25 +64,25 @@ struct ArtistDetailView: View {
             VStack(spacing: 10) {
                 Image(systemName: "exclamationmark.triangle")
                     .font(.title)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(theme.colors.warning)
                 Text(error)
-                    .foregroundStyle(Theme.textSecondary)
+                    .foregroundStyle(theme.colors.secondaryText)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 28)
+            .padding(.vertical, theme.metrics.pageTopInset + 4)
         } else if tracks.isEmpty {
             VStack(spacing: 12) {
                 if app.isLoadingTracks(contextKey: contextKey) {
                     ProgressView()
                     Text("Loading top tracks…")
-                        .foregroundStyle(Theme.textSecondary)
+                        .foregroundStyle(theme.colors.secondaryText)
                 } else {
                     Text("No top tracks")
-                        .foregroundStyle(Theme.textSecondary)
+                        .foregroundStyle(theme.colors.secondaryText)
                 }
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 28)
+            .padding(.vertical, theme.metrics.pageTopInset + 4)
         } else {
             // Top tracks are only ~10 rows, so plain rows (no NSTableView
             // recycling) are fine. Horizontal card rows below use the
@@ -97,20 +98,20 @@ struct ArtistDetailView: View {
         HStack(spacing: 24) {
             portrait
                 .frame(width: 140, height: 140)
-                .shadow(color: .black.opacity(0.5), radius: 12, y: 6)
+                .shadow(color: theme.colors.shadow.opacity(0.5), radius: theme.metrics.shadowRadius + 4, y: theme.metrics.shadowYOffset + 2)
 
             VStack(alignment: .leading, spacing: 10) {
                 Text("ARTIST")
-                    .font(.system(size: 10, weight: .bold))
+                    .font(theme.typography.sectionHeader)
                     .tracking(1.2)
-                    .foregroundStyle(Theme.textSecondary)
+                    .foregroundStyle(theme.colors.secondaryText)
                 Text(title)
-                    .font(.system(size: 32, weight: .bold))
-                    .foregroundStyle(.white)
+                    .font(theme.typography.detailTitle)
+                    .foregroundStyle(theme.colors.primaryText)
                     .lineLimit(2)
                 Text(headerStats)
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.textSecondary)
+                    .font(theme.typography.metadata)
+                    .foregroundStyle(theme.colors.secondaryText)
 
                 Button {
                     if let first = tracks.first {
@@ -121,14 +122,14 @@ struct ArtistDetailView: View {
                         Image(systemName: "play.fill")
                             .font(.system(size: 11, weight: .bold))
                         Text("PLAY")
-                            .font(.system(size: 12, weight: .bold))
+                            .font(theme.typography.button)
                             .tracking(0.8)
                     }
-                    .foregroundStyle(.black)
-                    .padding(.horizontal, 22)
-                    .padding(.vertical, 9)
-                    .background(Theme.accent)
-                    .cornerRadius(20)
+                    .foregroundStyle(theme.colors.inverseText)
+                    .padding(.horizontal, theme.metrics.controlHorizontalPadding)
+                    .padding(.vertical, theme.metrics.controlVerticalPadding)
+                    .background(theme.colors.accent)
+                    .cornerRadius(theme.metrics.pillCornerRadius)
                 }
                 .buttonStyle(.plain)
                 .disabled(!app.isPlaybackReady || tracks.isEmpty)
@@ -139,10 +140,10 @@ struct ArtistDetailView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 28)
-        .padding(.top, 24)
-        .padding(.bottom, 20)
-        .background(Theme.background)
+        .padding(.horizontal, theme.metrics.pageHorizontalInset)
+        .padding(.top, theme.metrics.pageTopInset)
+        .padding(.bottom, theme.metrics.pageBottomInset)
+        .background(theme.colors.contentBackground.swiftUIStyle)
     }
 
     private var headerStats: String {
@@ -166,10 +167,11 @@ struct ArtistDetailView: View {
 
     private var placeholderPortrait: some View {
         ZStack {
-            Color(white: 0.14)
+            Rectangle()
+                .fill(theme.colors.placeholderBackground.swiftUIStyle)
             Image(systemName: "person.crop.circle.fill")
                 .font(.system(size: 44))
-                .foregroundStyle(Theme.textSecondary)
+                .foregroundStyle(theme.colors.secondaryText)
         }
     }
     // MARK: - Discography
@@ -187,8 +189,8 @@ struct ArtistDetailView: View {
     private func albumRow(title: String, items: [SpotifyClient.AlbumInfo]) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(title)
-                .font(.system(size: 14, weight: .bold))
-                .padding(.horizontal, 28)
+                .font(theme.typography.sectionLabel)
+                .padding(.horizontal, theme.metrics.pageHorizontalInset)
             // Horizontal strip above the vertical List — perpendicular axes,
             // so the single-scroll-region rule (no same-axis nesting) holds.
             // LazyHStack keeps cards lazy for long discographies.
@@ -198,32 +200,33 @@ struct ArtistDetailView: View {
                         AlbumCard(album: album)
                     }
                 }
-                .padding(.horizontal, 28)
+                .padding(.horizontal, theme.metrics.pageHorizontalInset)
             }
             .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.top, 16)
-        .padding(.bottom, 4)
+        .padding(.top, theme.metrics.sectionTopPadding)
+        .padding(.bottom, theme.metrics.sectionBottomPadding - 2)
     }
 
     private var topTracksHeader: some View {
         HStack(spacing: 10) {
             Text("Top tracks")
-                .font(.system(size: 14, weight: .bold))
+                .font(theme.typography.sectionLabel)
             Text("\(tracks.count)")
                 .font(.system(size: 11))
-                .foregroundStyle(Theme.textSecondary)
+                .foregroundStyle(theme.colors.secondaryText)
             Spacer()
         }
-        .padding(.horizontal, 28)
-        .padding(.top, 14)
-        .padding(.bottom, 6)
+        .padding(.horizontal, theme.metrics.pageHorizontalInset)
+        .padding(.top, theme.metrics.sectionTopPadding - 2)
+        .padding(.bottom, theme.metrics.sectionBottomPadding)
     }
 }
 
 /// Square-cover album card. Hover state is card-local (same rule as rows).
 private struct AlbumCard: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.appTheme) private var theme
     let album: SpotifyClient.AlbumInfo
 
     @State private var hovering = false
@@ -246,17 +249,19 @@ private struct AlbumCard: View {
             VStack(alignment: .leading, spacing: 8) {
                 cover
                 Text(album.name)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white)
+                    .font(theme.typography.tileTitle)
+                    .foregroundStyle(theme.colors.primaryText)
                     .lineLimit(1)
                 Text(album.year ?? "")
-                    .font(.system(size: 10))
-                    .foregroundStyle(Theme.textSecondary)
+                    .font(theme.typography.tileSubtitle)
+                    .foregroundStyle(theme.colors.secondaryText)
             }
             .frame(width: 128, alignment: .leading)
-            .padding(8)
-            .background(hovering ? Color(white: 0.13) : .clear)
-            .cornerRadius(6)
+            .padding(theme.metrics.smallPadding)
+            .background(
+                hovering ? theme.colors.cardHover.swiftUIStyle : AnyShapeStyle(Color.clear)
+            )
+            .cornerRadius(theme.metrics.cardCornerRadius)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -304,18 +309,19 @@ private struct AlbumCard: View {
             placeholderCover
         }
         .frame(width: 112, height: 112)
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-        .shadow(color: .black.opacity(0.4), radius: 8, y: 4)
+        .clipShape(RoundedRectangle(cornerRadius: theme.metrics.imageCornerRadius))
+        .shadow(color: theme.colors.shadow.opacity(0.4), radius: theme.metrics.shadowRadius, y: theme.metrics.shadowYOffset)
     }
 
     private var placeholderCover: some View {
         ZStack {
-            Color(white: 0.14)
+            Rectangle()
+                .fill(theme.colors.placeholderBackground.swiftUIStyle)
             Image("MusicIcon")
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .frame(width: 36, height: 36)
-                .foregroundStyle(Theme.textSecondary)
+                .foregroundStyle(theme.colors.secondaryText)
         }
     }
 }

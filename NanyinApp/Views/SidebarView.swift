@@ -7,6 +7,7 @@ import SwiftUI
 
 struct SidebarView: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.appTheme) private var theme
 
     /// Hover state for the New Playlist (+) button — local to the sidebar.
     @State private var plusHovering = false
@@ -14,23 +15,23 @@ struct SidebarView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Keep navigation content below the title bar controls.
-            Color.clear.frame(height: 54)
+            Color.clear.frame(height: theme.metrics.toolbarSpacerHeight)
 
             entry(.home, icon: Image(systemName: "house"), title: "Home")
             entry(.search, icon: Image(systemName: "magnifyingglass"), title: "Search")
             entry(.queue, icon: Image(systemName: "list.bullet"), title: "Queue")
 
             Divider()
-                .overlay(Theme.playerBar)
-                .padding(.vertical, 10)
-                .padding(.horizontal, 12)
+                .overlay(theme.colors.playerBackground.swiftUIStyle)
+                .padding(.vertical, theme.metrics.dividerVerticalPadding)
+                .padding(.horizontal, theme.metrics.fieldHorizontalPadding)
 
             Text("YOUR LIBRARY")
-                .font(.system(size: 10, weight: .bold))
+                .font(theme.typography.sectionHeader)
                 .tracking(1.2)
-                .foregroundStyle(Theme.textSecondary)
-                .padding(.horizontal, 16)
-                .padding(.bottom, 8)
+                .foregroundStyle(theme.colors.secondaryText)
+                .padding(.horizontal, theme.metrics.sidebarInset)
+                .padding(.bottom, theme.metrics.smallPadding)
 
             entry(.liked, icon: Image(systemName: "heart.fill"), title: "Liked Songs", count: app.likedCount)
             entry(.savedAlbums, icon: Image(systemName: "opticaldisc"), title: "Saved Albums", count: app.savedAlbumCount)
@@ -39,15 +40,15 @@ struct SidebarView: View {
             // Playlist (+) button — present while loading and empty too.
             HStack(spacing: 6) {
                 Text("PLAYLISTS")
-                    .font(.system(size: 10, weight: .bold))
+                    .font(theme.typography.sectionHeader)
                     .tracking(1.2)
-                    .foregroundStyle(Theme.textSecondary)
+                    .foregroundStyle(theme.colors.secondaryText)
                 Spacer()
                 newPlaylistButton
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 14)
-            .padding(.bottom, 8)
+            .padding(.horizontal, theme.metrics.sidebarInset)
+            .padding(.top, theme.metrics.sectionTopPadding - 2)
+            .padding(.bottom, theme.metrics.smallPadding)
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -68,32 +69,32 @@ struct SidebarView: View {
             if let note = app.connectionNote {
                 Text(note)
                     .font(.caption)
-                    .foregroundStyle(Theme.textSecondary)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 8)
+                    .foregroundStyle(theme.colors.secondaryText)
+                    .padding(.horizontal, theme.metrics.sidebarInset)
+                    .padding(.bottom, theme.metrics.smallPadding)
             }
 
             Divider()
-                .overlay(Theme.playerBar)
+                .overlay(theme.colors.playerBackground.swiftUIStyle)
 
             HStack(spacing: 8) {
                 Text(app.userDisplayName.isEmpty ? "Spotify account" : app.userDisplayName)
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textSecondary)
+                    .font(theme.typography.secondary)
+                    .foregroundStyle(theme.colors.secondaryText)
                     .lineLimit(1)
                 Spacer()
                 Button("Sign Out") {
                     Task { await app.signOut() }
                 }
                 .buttonStyle(.plain)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(Theme.textSecondary)
+                .font(theme.typography.fieldLabel)
+                .foregroundStyle(theme.colors.secondaryText)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .padding(.horizontal, theme.metrics.sidebarInset)
+            .padding(.vertical, theme.metrics.fieldVerticalPadding + 1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.sidebar)
+        .background(theme.colors.sidebarBackground.swiftUIStyle)
         .sheet(isPresented: Binding(
             get: { app.isShowingNewPlaylistSheet },
             set: { shown in if !shown { app.cancelNewPlaylistSheet() } }
@@ -110,15 +111,17 @@ struct SidebarView: View {
         } label: {
             Image(systemName: "plus")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(plusHovering ? .white : Theme.textSecondary)
+                .foregroundStyle(plusHovering ? theme.colors.primaryText : theme.colors.secondaryText)
                 .frame(width: 22, height: 22)
                 .background(
-                    plusHovering ? Color.white.opacity(0.1) : .clear,
-                    in: RoundedRectangle(cornerRadius: 5)
+                    plusHovering
+                        ? theme.colors.subtleHover.swiftUIStyle
+                        : AnyShapeStyle(Color.clear),
+                    in: RoundedRectangle(cornerRadius: theme.metrics.iconButtonCornerRadius)
                 )
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ThemePressFeedbackButtonStyle())
         .accessibilityLabel("New Playlist")
         .help("New Playlist")
         .onHover { plusHovering = $0 }
@@ -138,11 +141,11 @@ struct SidebarView: View {
     }
 
     private func listStateText(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 11))
-            .foregroundStyle(Theme.textSecondary.opacity(0.6))
-            .padding(.horizontal, 16)
-            .padding(.vertical, 6)
+            Text(text)
+            .font(theme.typography.secondary)
+            .foregroundStyle(theme.colors.secondaryText.opacity(0.6))
+            .padding(.horizontal, theme.metrics.sidebarInset)
+            .padding(.vertical, theme.metrics.compactFieldVerticalPadding)
     }
 
     private func entry(
@@ -160,23 +163,27 @@ struct SidebarView: View {
                 .aspectRatio(contentMode: .fit)
                 .frame(width: 20, height: 13)
             Text(title)
-                .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
+                .font(isSelected ? theme.typography.nowPlayingTitle : theme.typography.body)
                 .lineLimit(1)
             Spacer()
             if let count {
                 Text("\(count)")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(Theme.textSecondary.opacity(0.6))
+                    .font(theme.typography.mono)
+                    .foregroundStyle(theme.colors.tertiaryText)
             }
         }
         .foregroundStyle(
             disabled
-                ? Theme.textSecondary.opacity(0.5)
-                : (isSelected ? .white : Theme.textSecondary)
+                ? theme.colors.disabledText
+                : (isSelected ? theme.colors.primaryText : theme.colors.secondaryText)
         )
-        .padding(.horizontal, 16)
-        .padding(.vertical, 6)
-        .background(isSelected ? Color(white: 0.12) : .clear)
+        .padding(.horizontal, theme.metrics.sidebarInset)
+        .padding(.vertical, theme.metrics.compactFieldVerticalPadding)
+        .background(
+            isSelected
+                ? theme.colors.rowSelected.swiftUIStyle
+                : AnyShapeStyle(Color.clear)
+        )
         .contentShape(Rectangle())
         .onTapGesture {
             if let page {

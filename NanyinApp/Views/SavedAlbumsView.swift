@@ -15,6 +15,7 @@ import SwiftUI
 /// strips, never a nested same-axis scroller).
 struct SavedAlbumsView: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.appTheme) private var theme
 
     @State private var filterText = ""
     @State private var sortOrder: SortOrder = .recentlyAdded
@@ -58,13 +59,13 @@ struct SavedAlbumsView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Divider().overlay(Color(white: 0.18))
+            Divider().overlay(theme.colors.divider)
             if app.savedAlbumsError != nil, app.hasSavedAlbumsData {
                 refreshErrorBanner
             }
             content
         }
-        .background(Theme.background)
+        .background(theme.colors.contentBackground.swiftUIStyle)
     }
 
     // MARK: - Header
@@ -73,12 +74,12 @@ struct SavedAlbumsView: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline) {
                 Text("Saved Albums")
-                    .font(.system(size: 24, weight: .bold))
-                    .foregroundStyle(.white)
+                    .font(theme.typography.collectionHeader)
+                    .foregroundStyle(theme.colors.primaryText)
                 Spacer()
                 Text(albumCountLabel)
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.textSecondary)
+                    .font(theme.typography.metadata)
+                    .foregroundStyle(theme.colors.secondaryText)
             }
             HStack(spacing: 12) {
                 filterField
@@ -86,9 +87,9 @@ struct SavedAlbumsView: View {
                 sortMenu
             }
         }
-        .padding(.horizontal, 28)
-        .padding(.top, 24)
-        .padding(.bottom, 16)
+        .padding(.horizontal, theme.metrics.pageHorizontalInset)
+        .padding(.top, theme.metrics.pageTopInset)
+        .padding(.bottom, theme.metrics.headerBottomInset)
     }
 
     private var albumCountLabel: String {
@@ -99,30 +100,30 @@ struct SavedAlbumsView: View {
     private var filterField: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 11))
-                .foregroundStyle(Theme.textSecondary)
+                .font(theme.typography.secondary)
+                .foregroundStyle(theme.colors.secondaryText)
             TextField("Filter albums…", text: $filterText)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12))
+                .font(theme.typography.metadata)
             if !filterText.isEmpty {
                 Button {
                     filterText = ""
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 11))
-                        .foregroundStyle(Theme.textSecondary)
+                        .foregroundStyle(theme.colors.secondaryText)
                 }
                 .buttonStyle(.plain)
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(Color(white: 0.13))
+        .padding(.horizontal, theme.metrics.compactFieldHorizontalPadding)
+        .padding(.vertical, theme.metrics.compactFieldVerticalPadding)
+        .background(theme.colors.inputBackground.swiftUIStyle)
         .overlay(
-            RoundedRectangle(cornerRadius: 4)
-                .strokeBorder(Color(white: 0.20), lineWidth: 1)
+            RoundedRectangle(cornerRadius: theme.metrics.cornerRadius)
+                .strokeBorder(theme.colors.border, lineWidth: 1)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .clipShape(RoundedRectangle(cornerRadius: theme.metrics.cornerRadius))
         .frame(width: 220)
     }
 
@@ -136,11 +137,11 @@ struct SavedAlbumsView: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "arrow.up.arrow.down")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(theme.typography.compact)
                 Text(sortOrder.rawValue)
-                    .font(.system(size: 12))
+                    .font(theme.typography.metadata)
             }
-            .foregroundStyle(Theme.textSecondary)
+            .foregroundStyle(theme.colors.secondaryText)
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
@@ -156,7 +157,8 @@ struct SavedAlbumsView: View {
             VStack(spacing: 12) {
                 ProgressView()
                 Text("Loading saved albums…")
-                    .foregroundStyle(Theme.textSecondary)
+                    .font(theme.typography.secondary)
+                    .foregroundStyle(theme.colors.secondaryText)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if app.savedAlbums.isEmpty {
@@ -164,8 +166,8 @@ struct SavedAlbumsView: View {
         } else if visibleAlbums.isEmpty {
             VStack(spacing: 10) {
                 Text("No albums match “\(trimmedFilter)”")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(Theme.textSecondary)
+                    .font(theme.typography.bodyEmphasis)
+                    .foregroundStyle(theme.colors.secondaryText)
                 Button("Clear filter") { filterText = "" }
                     .buttonStyle(.link)
             }
@@ -179,22 +181,22 @@ struct SavedAlbumsView: View {
         VStack(spacing: 12) {
             Image(systemName: "exclamationmark.triangle")
                 .font(.title)
-                .foregroundStyle(.orange)
+                .foregroundStyle(theme.colors.warning)
             Text(message)
-                .font(.system(size: 13))
-                .foregroundStyle(Theme.textSecondary)
+                .font(theme.typography.body)
+                .foregroundStyle(theme.colors.secondaryText)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
+                .padding(.horizontal, theme.metrics.pageHorizontalInset + 12)
             Button {
                 app.refreshSavedAlbums(force: true)
             } label: {
                 Text("Retry")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(.black)
-                    .padding(.horizontal, 22)
-                    .padding(.vertical, 8)
-                    .background(Theme.accent)
-                    .cornerRadius(16)
+                    .font(theme.typography.button)
+                    .foregroundStyle(theme.colors.inverseText)
+                    .padding(.horizontal, theme.metrics.controlHorizontalPadding)
+                    .padding(.vertical, theme.metrics.controlVerticalPadding - 1)
+                    .background(theme.colors.accent)
+                    .cornerRadius(theme.metrics.smallPillCornerRadius)
             }
             .buttonStyle(.plain)
         }
@@ -203,26 +205,26 @@ struct SavedAlbumsView: View {
 
     private var emptyState: some View {
         VStack(spacing: 12) {
-            Image(systemName: "opticaldisc")
-                .font(.system(size: 36, weight: .light))
-                .foregroundStyle(Theme.textSecondary.opacity(0.6))
+                Image(systemName: "opticaldisc")
+                    .font(.system(size: 36, weight: .light))
+                    .foregroundStyle(theme.colors.secondaryText.opacity(0.6))
             Text("No saved albums yet")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.white)
+                .font(theme.typography.collectionTitle)
+                .foregroundStyle(theme.colors.primaryText)
             Text("Save albums from any album page — they stay separate from Liked Songs.")
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.textSecondary)
+                .font(theme.typography.metadata)
+                .foregroundStyle(theme.colors.secondaryText)
                 .multilineTextAlignment(.center)
             Button {
                 app.focusSearch()
             } label: {
                 Text("Search for albums")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(.black)
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 7)
-                    .background(Theme.accent)
-                    .cornerRadius(14)
+                    .font(theme.typography.button)
+                    .foregroundStyle(theme.colors.inverseText)
+                    .padding(.horizontal, theme.metrics.controlHorizontalPadding - 4)
+                    .padding(.vertical, theme.metrics.controlVerticalPadding - 2)
+                    .background(theme.colors.accent)
+                    .cornerRadius(theme.metrics.compactPillCornerRadius)
             }
             .buttonStyle(.plain)
         }
@@ -241,35 +243,35 @@ struct SavedAlbumsView: View {
                     SavedAlbumCard(album: saved)
                 }
             }
-            .padding(.horizontal, 28)
-            .padding(.top, 20)
-            .padding(.bottom, 24)
+            .padding(.horizontal, theme.metrics.pageHorizontalInset)
+            .padding(.top, theme.metrics.sectionTopPadding + 4)
+            .padding(.bottom, theme.metrics.pageBottomInset + 4)
         }
     }
 
     private var refreshErrorBanner: some View {
         HStack(spacing: 10) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
+                .foregroundStyle(theme.colors.warning)
             Text("Couldn’t refresh all saved albums.")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(Theme.textSecondary)
+                .font(theme.typography.bannerText)
+                .foregroundStyle(theme.colors.secondaryText)
             Spacer()
             Button("Retry") {
                 app.refreshSavedAlbums(force: true)
             }
             .buttonStyle(.link)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(Color.orange.opacity(0.10))
+        .padding(.horizontal, theme.metrics.cardPadding)
+        .padding(.vertical, theme.metrics.fieldVerticalPadding)
+        .background(theme.colors.warningContainer.swiftUIStyle)
         .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .strokeBorder(Color.orange.opacity(0.35), lineWidth: 1)
+            RoundedRectangle(cornerRadius: theme.metrics.bannerCornerRadius)
+                .strokeBorder(theme.colors.warningBorder, lineWidth: 1)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-        .padding(.horizontal, 28)
-        .padding(.top, 16)
+        .clipShape(RoundedRectangle(cornerRadius: theme.metrics.bannerCornerRadius))
+        .padding(.horizontal, theme.metrics.pageHorizontalInset)
+        .padding(.top, theme.metrics.sectionTopPadding)
     }
 }
 
@@ -278,6 +280,7 @@ struct SavedAlbumsView: View {
 /// state is card-local (never in the grid parent — UI perf rules).
 private struct SavedAlbumCard: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.appTheme) private var theme
     let album: SpotifyClient.SavedAlbum
 
     @State private var hovering = false
@@ -292,18 +295,20 @@ private struct SavedAlbumCard: View {
         VStack(alignment: .leading, spacing: 8) {
             cover
             Text(album.album.name)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.white)
+                .font(theme.typography.cardTitle)
+                .foregroundStyle(theme.colors.primaryText)
                 .lineLimit(1)
             Text(subtitle)
-                .font(.system(size: 11))
-                .foregroundStyle(Theme.textSecondary)
+                .font(theme.typography.secondary)
+                .foregroundStyle(theme.colors.secondaryText)
                 .lineLimit(1)
         }
-        .padding(8)
+        .padding(theme.metrics.smallPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(hovering ? Color(white: 0.13) : .clear)
-        .cornerRadius(8)
+        .background(
+            hovering ? theme.colors.cardHover.swiftUIStyle : AnyShapeStyle(Color.clear)
+        )
+        .cornerRadius(theme.metrics.cardCornerRadius)
         .contentShape(Rectangle())
         .onTapGesture {
             app.open(.album(
@@ -344,13 +349,13 @@ private struct SavedAlbumCard: View {
         }
         .aspectRatio(1, contentMode: .fit)
         .frame(maxWidth: .infinity)
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-        .shadow(color: .black.opacity(0.35), radius: 8, y: 4)
+        .clipShape(RoundedRectangle(cornerRadius: theme.metrics.cornerRadius))
+        .shadow(color: theme.colors.shadow.opacity(0.35), radius: theme.metrics.shadowRadius, y: theme.metrics.shadowYOffset)
         .overlay(alignment: .topTrailing) {
-            if hovering { removeBadge.padding(6) }
+            if hovering { removeBadge.padding(theme.metrics.smallPadding - 2) }
         }
         .overlay(alignment: .bottomLeading) {
-            if hovering { playButton.padding(8) }
+            if hovering { playButton.padding(theme.metrics.smallPadding) }
         }
     }
 
@@ -362,10 +367,10 @@ private struct SavedAlbumCard: View {
         } label: {
             Image(systemName: "play.fill")
                 .font(.system(size: 14, weight: .bold))
-                .foregroundStyle(.black)
+                .foregroundStyle(theme.colors.inverseText)
                 .frame(width: 34, height: 34)
-                .background(Circle().fill(Theme.accent))
-                .shadow(color: .black.opacity(0.4), radius: 6, y: 2)
+                .background(Circle().fill(theme.colors.accent))
+                .shadow(color: theme.colors.shadow.opacity(0.4), radius: theme.metrics.smallCornerRadius * 2, y: 2)
         }
         .buttonStyle(.plain)
         .help("Play Album")
@@ -379,8 +384,8 @@ private struct SavedAlbumCard: View {
         } label: {
             Image(systemName: "minus.circle.fill")
                 .font(.system(size: 17))
-                .foregroundStyle(.white)
-                .shadow(color: .black.opacity(0.5), radius: 4)
+                .foregroundStyle(theme.colors.primaryText)
+                .shadow(color: theme.colors.shadow.opacity(0.5), radius: theme.metrics.smallCornerRadius + 1)
         }
         .buttonStyle(.plain)
         .help("Remove from Saved Albums")
@@ -388,12 +393,13 @@ private struct SavedAlbumCard: View {
 
     private var placeholderCover: some View {
         ZStack {
-            Color(white: 0.14)
+            Rectangle()
+                .fill(theme.colors.placeholderBackground.swiftUIStyle)
             Image("MusicIcon")
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .frame(width: 34, height: 34)
-                .foregroundStyle(Theme.textSecondary)
+                .foregroundStyle(theme.colors.secondaryText)
         }
     }
 }

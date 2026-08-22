@@ -12,6 +12,7 @@ import SwiftUI
 /// (M4.3: the album save control must remain reachable at all times).
 struct PlaylistDetailView: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.appTheme) private var theme
 
     let title: String
     let subtitle: String
@@ -61,10 +62,10 @@ struct PlaylistDetailView: View {
         // previous nested-ScrollView layout caused scroll jank).
         VStack(spacing: 0) {
             header
-            Divider().overlay(Color(white: 0.18))
+            Divider().overlay(theme.colors.divider)
             trackContent
         }
-        .background(Theme.background)
+        .background(theme.colors.contentBackground.swiftUIStyle)
         .task(id: albumId) {
             // Resolve the saved state for album pages on first appearance.
             if albumId != nil {
@@ -79,22 +80,22 @@ struct PlaylistDetailView: View {
             VStack(spacing: 12) {
                 Image(systemName: "exclamationmark.triangle")
                     .font(.system(size: 30))
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(theme.colors.warning)
                 Text(error)
                     .font(.system(size: 13))
-                    .foregroundStyle(Theme.textSecondary)
+                    .foregroundStyle(theme.colors.secondaryText)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal, 40)
+                    .padding(.horizontal, theme.metrics.pageHorizontalInset + 12)
                 Button {
                     app.retryCurrentPageLoad()
                 } label: {
                     Text("Retry")
                         .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(.black)
-                        .padding(.horizontal, 22)
-                        .padding(.vertical, 8)
-                        .background(Theme.accent)
-                        .cornerRadius(16)
+                        .foregroundStyle(theme.colors.inverseText)
+                        .padding(.horizontal, theme.metrics.controlHorizontalPadding)
+                        .padding(.vertical, theme.metrics.controlVerticalPadding - 1)
+                        .background(theme.colors.accent)
+                        .cornerRadius(theme.metrics.smallPillCornerRadius)
                 }
                 .buttonStyle(.plain)
             }
@@ -104,10 +105,10 @@ struct PlaylistDetailView: View {
                 if app.isLoadingTracks(contextKey: contextKey) {
                     ProgressView()
                     Text("Loading tracks…")
-                        .foregroundStyle(Theme.textSecondary)
+                        .foregroundStyle(theme.colors.secondaryText)
                 } else {
                     Text("Nothing here yet")
-                        .foregroundStyle(Theme.textSecondary)
+                        .foregroundStyle(theme.colors.secondaryText)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -120,21 +121,21 @@ struct PlaylistDetailView: View {
         HStack(spacing: 24) {
             cover
                 .frame(width: 140, height: 140)
-                .cornerRadius(6)
-                .shadow(color: .black.opacity(0.5), radius: 12, y: 6)
+                .cornerRadius(theme.metrics.imageCornerRadius)
+                .shadow(color: theme.colors.shadow.opacity(0.5), radius: theme.metrics.shadowRadius + 4, y: theme.metrics.shadowYOffset + 2)
 
             VStack(alignment: .leading, spacing: 10) {
                 Text(label)
-                    .font(.system(size: 10, weight: .bold))
+                    .font(theme.typography.sectionHeader)
                     .tracking(1.2)
-                    .foregroundStyle(Theme.textSecondary)
+                    .foregroundStyle(theme.colors.secondaryText)
                 Text(title)
-                    .font(.system(size: 32, weight: .bold))
-                    .foregroundStyle(.white)
+                    .font(theme.typography.detailTitle)
+                    .foregroundStyle(theme.colors.primaryText)
                     .lineLimit(2)
                 Text(headerSubtitle)
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.textSecondary)
+                    .font(theme.typography.metadata)
+                    .foregroundStyle(theme.colors.secondaryText)
 
                 HStack(spacing: 12) {
                     playButton
@@ -145,10 +146,10 @@ struct PlaylistDetailView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 28)
-        .padding(.top, 24)
-        .padding(.bottom, 20)
-        .background(Theme.background)
+        .padding(.horizontal, theme.metrics.pageHorizontalInset)
+        .padding(.top, theme.metrics.pageTopInset)
+        .padding(.bottom, theme.metrics.pageBottomInset)
+        .background(theme.colors.contentBackground.swiftUIStyle)
     }
 
     /// Album pages play the server-resolved context directly (no dependency
@@ -165,14 +166,14 @@ struct PlaylistDetailView: View {
                 Image(systemName: "play.fill")
                     .font(.system(size: 11, weight: .bold))
                 Text("PLAY")
-                    .font(.system(size: 12, weight: .bold))
+                    .font(theme.typography.button)
                     .tracking(0.8)
             }
-            .foregroundStyle(.black)
-            .padding(.horizontal, 22)
-            .padding(.vertical, 9)
-            .background(Theme.accent)
-            .cornerRadius(20)
+            .foregroundStyle(theme.colors.inverseText)
+            .padding(.horizontal, theme.metrics.controlHorizontalPadding)
+            .padding(.vertical, theme.metrics.controlVerticalPadding)
+            .background(theme.colors.accent)
+            .cornerRadius(theme.metrics.pillCornerRadius)
         }
         .buttonStyle(.plain)
         .disabled(!app.isPlaybackReady || (albumId == nil && tracks.isEmpty))
@@ -197,12 +198,13 @@ struct PlaylistDetailView: View {
 
     private var placeholderCover: some View {
         ZStack {
-            Color(white: 0.14)
+            Rectangle()
+                .fill(theme.colors.placeholderBackground.swiftUIStyle)
             Image("MusicIcon")
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .frame(width: 44, height: 44)
-                .foregroundStyle(Theme.textSecondary)
+                .foregroundStyle(theme.colors.secondaryText)
         }
     }
 }
@@ -213,6 +215,7 @@ struct PlaylistDetailView: View {
 /// appearance, same discipline as the track like button).
 private struct SaveAlbumButton: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.appTheme) private var theme
     let album: SpotifyClient.SavedAlbum
 
     @State private var hovering = false
@@ -229,16 +232,18 @@ private struct SaveAlbumButton: View {
                 Image(systemName: probeFailed ? "arrow.clockwise" : (isSaved ? "checkmark" : "plus"))
                     .font(.system(size: 11, weight: .bold))
                 Text(probeFailed ? "RETRY" : (isSaved ? "SAVED" : "SAVE ALBUM"))
-                    .font(.system(size: 12, weight: .bold))
+                    .font(theme.typography.button)
                     .tracking(0.8)
             }
-            .foregroundStyle(isSaved ? Theme.accent : .white)
-            .padding(.horizontal, 20)
-            .padding(.vertical, 9)
+            .foregroundStyle(isSaved ? theme.colors.accent : theme.colors.primaryText)
+            .padding(.horizontal, theme.metrics.controlHorizontalPadding - 2)
+            .padding(.vertical, theme.metrics.controlVerticalPadding)
             .background(
-                RoundedRectangle(cornerRadius: 20)
+                RoundedRectangle(cornerRadius: theme.metrics.pillCornerRadius)
                     .strokeBorder(
-                        hovering ? .white.opacity(isSaved ? 0.7 : 0.9) : Color(white: 0.4),
+                        hovering
+                            ? theme.colors.primaryText.opacity(isSaved ? 0.7 : 0.9)
+                            : theme.colors.border,
                         lineWidth: 1
                     )
             )

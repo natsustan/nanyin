@@ -9,7 +9,6 @@ private enum TrackTableLayout {
     static let indexColumnWidth: CGFloat = 64
     static let albumColumnWidth: CGFloat = 260
     static let durationColumnWidth: CGFloat = 56
-    static let rowHorizontalInset: CGFloat = 24
 }
 
 /// Stable identity for one occurrence of a track. Playlists permit the same
@@ -44,6 +43,7 @@ private struct TrackOccurrence: Identifiable {
 /// Single click selects, double-click plays from the context.
 struct TrackListView: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.appTheme) private var theme
     let tracks: [SpotifyClient.Track]
     let contextKey: String
 
@@ -70,7 +70,7 @@ struct TrackListView: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
-        .environment(\.defaultMinListRowHeight, 40)
+        .environment(\.defaultMinListRowHeight, theme.metrics.standardRowHeight)
     }
 
     private var header: some View {
@@ -85,14 +85,14 @@ struct TrackListView: View {
                 .font(.system(size: 13, weight: .semibold))
                 .frame(width: TrackTableLayout.durationColumnWidth, alignment: .trailing)
         }
-        .font(.system(size: 10, weight: .bold))
+        .font(theme.typography.sectionHeader)
         .tracking(0.8)
-        .foregroundStyle(Theme.textSecondary)
-        .padding(.horizontal, TrackTableLayout.rowHorizontalInset)
-        .padding(.vertical, 8)
-        .background(Theme.background)
+        .foregroundStyle(theme.colors.secondaryText)
+        .padding(.horizontal, theme.metrics.sectionHorizontalInset)
+        .padding(.vertical, theme.metrics.smallPadding)
+        .background(theme.colors.contentBackground.swiftUIStyle)
         .overlay(alignment: .bottom) {
-            Divider().overlay(Color(white: 0.18))
+            Divider().overlay(theme.colors.divider)
         }
     }
 }
@@ -101,6 +101,7 @@ struct TrackListView: View {
 /// renders in a plain VStack inside a ScrollView — no NSTableView there).
 struct TrackRow: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.appTheme) private var theme
     let track: SpotifyClient.Track
     let index: Int
     let contextKey: String
@@ -121,26 +122,26 @@ struct TrackRow: View {
                 } else if hovering {
                     Image(systemName: "play.fill")
                         .font(.system(size: 9))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(theme.colors.primaryText)
                 } else {
                     Text("\(index + 1)")
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(Theme.textSecondary)
+                        .font(theme.typography.trackIndex)
+                        .foregroundStyle(theme.colors.secondaryText)
                 }
             }
             .frame(width: TrackTableLayout.indexColumnWidth, alignment: .center)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(track.name)
-                    .font(.system(size: 13, weight: isCurrent ? .semibold : .regular))
-                    .foregroundStyle(isCurrent ? Theme.accent : .white)
+                    .font(isCurrent ? theme.typography.nowPlayingTitle : theme.typography.body)
+                    .foregroundStyle(isCurrent ? theme.colors.accent : theme.colors.primaryText)
                     .lineLimit(1)
                 if !track.artists.isEmpty {
                     artistLine
                 } else if let artist = track.artistDisplayText, !artist.isEmpty {
                     Text(artist)
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.textSecondary)
+                        .font(theme.typography.secondary)
+                        .foregroundStyle(theme.colors.secondaryText)
                         .lineLimit(1)
                 }
             }
@@ -150,8 +151,8 @@ struct TrackRow: View {
                 .frame(width: TrackTableLayout.albumColumnWidth, alignment: .leading)
 
             Text(PlaybackTimeFormatter.string(fromMilliseconds: UInt32(track.durationMs)))
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(Theme.textSecondary)
+                .font(theme.typography.duration)
+                .foregroundStyle(theme.colors.secondaryText)
                 .frame(width: TrackTableLayout.durationColumnWidth, alignment: .trailing)
 
             // Like toggle (M4.2): always visible when liked, ghost on hover.
@@ -160,7 +161,7 @@ struct TrackRow: View {
             } label: {
                 Image(systemName: isLiked ? "heart.fill" : "heart")
                     .font(.system(size: 11))
-                    .foregroundStyle(isLiked ? Theme.accent : Theme.textSecondary)
+                    .foregroundStyle(isLiked ? theme.colors.accent : theme.colors.secondaryText)
             }
             .buttonStyle(.plain)
             .disabled(!isLikeKnown)
@@ -168,8 +169,8 @@ struct TrackRow: View {
             .frame(width: 32, alignment: .center)
             .help(isLikeKnown ? (isLiked ? "Remove from Liked Songs" : "Save to Liked Songs") : "Checking Liked Songs…")
         }
-        .padding(.horizontal, TrackTableLayout.rowHorizontalInset)
-        .padding(.vertical, 7)
+        .padding(.horizontal, theme.metrics.sectionHorizontalInset)
+        .padding(.vertical, theme.metrics.trackRowVerticalPadding)
         .background(rowBackground)
         .contentShape(Rectangle())
         .contextMenu {
@@ -242,19 +243,21 @@ struct TrackRow: View {
             ForEach(Array(track.artists.enumerated()), id: \.element.id) { index, artist in
                 if index > 0 {
                     Text(", ")
-                        .foregroundStyle(Theme.textSecondary)
+                        .foregroundStyle(theme.colors.secondaryText)
                 }
                 Button {
                     app.open(.artist(id: artist.id, name: artist.name, artworkURL: artist.artworkURL))
                 } label: {
                     Text(artist.name)
-                        .foregroundStyle(hovering ? .white : Theme.textSecondary)
+                        .foregroundStyle(
+                            hovering ? theme.colors.primaryText : theme.colors.secondaryText
+                        )
                 }
                 .buttonStyle(.plain)
                 .linkCursor()
             }
         }
-        .font(.system(size: 11))
+        .font(theme.typography.secondary)
         .lineLimit(1)
     }
 
@@ -270,29 +273,33 @@ struct TrackRow: View {
                     ))
                 } label: {
                     Text(track.albumName)
-                        .font(.system(size: 12))
-                        .foregroundStyle(hovering ? .white : Theme.textSecondary)
+                        .font(theme.typography.metadata)
+                        .foregroundStyle(
+                            hovering ? theme.colors.primaryText : theme.colors.secondaryText
+                        )
                         .lineLimit(1)
                 }
                 .buttonStyle(.plain)
                 .linkCursor()
             } else {
                 Text(track.albumName)
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.textSecondary)
+                    .font(theme.typography.metadata)
+                    .foregroundStyle(theme.colors.secondaryText)
                     .lineLimit(1)
             }
         }
     }
 
-    private var rowBackground: Color {
-        if hovering && !isCurrent { return Theme.hover }
-        return .clear
+    private var rowBackground: AnyShapeStyle {
+        if isCurrent { return theme.colors.rowCurrent.swiftUIStyle }
+        if hovering { return theme.colors.rowHover.swiftUIStyle }
+        return AnyShapeStyle(Color.clear)
     }
 }
 
 /// The classic three-bar equalizer animation for the playing row.
 private struct EqIndicator: View {
+    @Environment(\.appTheme) private var theme
     @State private var animate = false
 
     var body: some View {
@@ -307,7 +314,7 @@ private struct EqIndicator: View {
 
     private func bar(phase: CGFloat, delay: Double) -> some View {
         RoundedRectangle(cornerRadius: 1)
-            .fill(Theme.accent)
+            .fill(theme.colors.accent)
             .frame(width: 3, height: 12)
             .scaleEffect(y: animate ? phase : 0.8, anchor: .bottom)
             .animation(

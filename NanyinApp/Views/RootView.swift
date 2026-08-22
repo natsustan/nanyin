@@ -7,6 +7,7 @@ import SwiftUI
 
 struct RootView: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.appTheme) private var theme
 
     var body: some View {
         switch app.authState {
@@ -14,10 +15,10 @@ struct RootView: View {
             VStack(spacing: 12) {
                 ProgressView()
                 Text(app.authState == .signingOut ? "Signing out…" : "Restoring session…")
-                    .foregroundStyle(Theme.textSecondary)
+                    .foregroundStyle(theme.colors.secondaryText)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Theme.background)
+            .background(theme.colors.contentBackground.swiftUIStyle)
         case .loggedOut, .signingIn:
             LoginView()
         case .loggedIn:
@@ -29,16 +30,16 @@ struct RootView: View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 SidebarView()
-                    .frame(width: 230)
-                Divider().overlay(Theme.playerBar)
+                    .frame(width: theme.metrics.sidebarWidth)
+                Divider().overlay(theme.colors.playerBackground.swiftUIStyle)
                 content
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            Divider().overlay(Theme.playerBar)
+            Divider().overlay(theme.colors.playerBackground.swiftUIStyle)
             PlayerBar()
-                .frame(height: 84)
+                .frame(height: theme.metrics.playerBarHeight)
         }
-        .background(Theme.background)
+        .background(theme.colors.contentBackground.swiftUIStyle)
         .ignoresSafeArea()
         .toolbar {
             ToolbarItemGroup(placement: .navigation) {
@@ -113,16 +114,26 @@ private struct NavigationButton: View {
     let shortcut: KeyEquivalent
     let enabled: Bool
     let action: () -> Void
+    @Environment(\.appTheme) private var theme
 
     @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
             Image(systemName: systemImage)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(enabled ? (hovering ? .white : Color(white: 0.85)) : Theme.textSecondary)
+                .font(theme.typography.controlLabel)
+                .foregroundStyle(
+                    enabled
+                        ? (hovering ? theme.colors.primaryText : theme.colors.primaryText.opacity(0.85))
+                        : theme.colors.disabledText
+                )
                 .frame(width: 28, height: 28)
-                .background(hovering && enabled ? Color(white: 0.14) : .clear, in: Circle())
+                .background(
+                    hovering && enabled
+                        ? theme.colors.controlHover.swiftUIStyle
+                        : AnyShapeStyle(Color.clear),
+                    in: Circle()
+                )
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
