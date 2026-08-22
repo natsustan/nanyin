@@ -7,16 +7,24 @@ import SwiftUI
 
 struct ChromeButton: View {
     let title: String
+    var accessibilityLabel: String? = nil
     var style = ChromeStyle()
     var action: () -> Void = {}
 
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.appTheme) private var theme
+
+    private var resolvedStyle: ChromeStyle {
+        var resolved = style
+        resolved.palette = theme.chrome.palette
+        return resolved
+    }
 
     var body: some View {
         ClassicChromeButtonRepresentable(
-            style: style,
+            style: resolvedStyle,
             isEnabled: isEnabled,
-            accessibilityLabel: title,
+            accessibilityLabel: accessibilityLabel ?? title,
             action: action
         )
         .overlay {

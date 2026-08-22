@@ -98,6 +98,28 @@ rg -q 'fixedSize\(\)' "$ROOT_DIR/NanyinApp/Classic/Bridge/ChromeButton.swift" \
 ! rg -q 'ClassicChromeButtonConfiguration' "$ROOT_DIR/NanyinApp/Classic" \
     || fail "Classic Chrome bridge still exposes the old implementation configuration"
 
+step "checking shell and playback ownership seams"
+for source in \
+    "$ROOT_DIR/NanyinApp/Views/AppContentView.swift" \
+    "$ROOT_DIR/NanyinApp/Views/NanyinDarkShell.swift" \
+    "$ROOT_DIR/NanyinApp/Views/Classic2010Shell.swift" \
+    "$ROOT_DIR/NanyinApp/Views/ClassicToolbarView.swift" \
+    "$ROOT_DIR/NanyinApp/Views/ClassicShellGeometryFixture.swift"; do
+    [[ -f "$source" ]] || fail "required shell source is missing: ${source##*/}"
+done
+rg -q 'AppContentView\(\)' "$ROOT_DIR/NanyinApp/Views/NanyinDarkShell.swift" \
+    || fail "shared AppContentView is not owned by the shell scaffold"
+rg -q 'app\.searchQuery' "$ROOT_DIR/NanyinApp/Views/SearchView.swift" \
+    || fail "SearchView is not bound to the shared search query"
+rg -q 'ChromeSliderTrack' "$ROOT_DIR/NanyinApp/Views/PlayerBar.swift" \
+    || fail "Classic playback deck is missing the chrome slider bridge"
+[[ "$(rg -c 'task\(id: app\.nowPlaying\?\.uri\)' "$ROOT_DIR/NanyinApp/Views/PlayerBar.swift")" == "1" ]] \
+    || fail "PlayerBar must retain exactly one local playback-position ticker"
+for size in '900, height: 600' '1280, height: 800' '1600, height: 900'; do
+    rg -q "$size" "$ROOT_DIR/NanyinApp/Views/ClassicShellGeometryFixture.swift" \
+        || fail "Classic shell geometry fixture is missing a required canvas size"
+done
+
 command -v mise >/dev/null 2>&1 || fail "mise is required"
 command -v xcrun >/dev/null 2>&1 || fail "Xcode command-line tools are required"
 
@@ -132,6 +154,7 @@ xcrun swiftc \
 
 step "running theme preference tests"
 xcrun swiftc \
+    "$ROOT_DIR/NanyinApp/Classic/Bridge/ChromeStyle.swift" \
     "$ROOT_DIR/NanyinApp/Views/Theme.swift" \
     "$ROOT_DIR/Tests/ThemePreferenceTests.swift" \
     -framework AppKit \

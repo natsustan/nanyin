@@ -5,17 +5,30 @@
 
 import SwiftUI
 
+enum SidebarPresentation {
+    case nanyinDark
+    case classic2010
+}
+
 struct SidebarView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.appTheme) private var theme
 
+    let presentation: SidebarPresentation
+
     /// Hover state for the New Playlist (+) button — local to the sidebar.
     @State private var plusHovering = false
 
+    init(presentation: SidebarPresentation = .nanyinDark) {
+        self.presentation = presentation
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Keep navigation content below the title bar controls.
-            Color.clear.frame(height: theme.metrics.toolbarSpacerHeight)
+            if presentation == .nanyinDark {
+                // Keep navigation content below the title bar controls.
+                Color.clear.frame(height: theme.metrics.toolbarSpacerHeight)
+            }
 
             entry(.home, icon: Image(systemName: "house"), title: "Home")
             entry(.search, icon: Image(systemName: "magnifyingglass"), title: "Search")
@@ -26,7 +39,7 @@ struct SidebarView: View {
                 .padding(.vertical, theme.metrics.dividerVerticalPadding)
                 .padding(.horizontal, theme.metrics.fieldHorizontalPadding)
 
-            Text("YOUR LIBRARY")
+            Text(presentation == .classic2010 ? "LIBRARY" : "YOUR LIBRARY")
                 .font(theme.typography.sectionHeader)
                 .tracking(1.2)
                 .foregroundStyle(theme.colors.secondaryText)
@@ -74,6 +87,10 @@ struct SidebarView: View {
                     .padding(.bottom, theme.metrics.smallPadding)
             }
 
+            if presentation == .classic2010 {
+                classicNowPlayingPanel
+            }
+
             Divider()
                 .overlay(theme.colors.playerBackground.swiftUIStyle)
 
@@ -100,6 +117,95 @@ struct SidebarView: View {
             set: { shown in if !shown { app.cancelNewPlaylistSheet() } }
         )) {
             NewPlaylistSheet()
+        }
+    }
+
+    private var classicNowPlayingPanel: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Divider()
+                .overlay(theme.colors.divider)
+
+            Text("NOW PLAYING")
+                .font(theme.typography.sectionHeader)
+                .tracking(1.1)
+                .foregroundStyle(theme.colors.secondaryText)
+                .padding(.horizontal, theme.metrics.sidebarInset)
+
+            HStack(spacing: 8) {
+                ArtworkView(url: app.nowPlaying?.artworkURL, size: 64) {
+                    Rectangle()
+                        .fill(theme.colors.placeholderBackground.swiftUIStyle)
+                        .overlay {
+                            Image("MusicIcon")
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(width: 24, height: 24)
+                                .foregroundStyle(theme.colors.secondaryText)
+                        }
+                }
+                .frame(width: 64, height: 64)
+                .cornerRadius(theme.metrics.imageCornerRadius)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 4) {
+                        Text(app.nowPlaying?.title ?? "Not playing")
+                            .font(theme.typography.playerTitle)
+                            .foregroundStyle(theme.colors.primaryText)
+                            .lineLimit(2)
+
+                        if let nowPlaying = app.nowPlaying,
+                           let id = SpotifyClient.trackId(from: nowPlaying.uri) {
+                            let known = app.isLikeKnown(id)
+                            let liked = app.likedIDs.contains(id)
+                            Button {
+                                app.toggleLikePlaying()
+                            } label: {
+                                Image(systemName: liked ? "heart.fill" : "heart")
+                                    .font(theme.typography.compact)
+                                    .foregroundStyle(
+                                        liked ? theme.colors.accent : theme.colors.secondaryText
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(!known)
+                            .opacity(known ? 1 : 0.35)
+                            .help(known ? (liked ? "Remove from Liked Songs" : "Save to Liked Songs") : "Checking Liked Songs…")
+                            .task(id: id) {
+                                app.requestLikedState(id)
+                            }
+                        }
+                    }
+
+                    if let nowPlaying = app.nowPlaying {
+                        Button(nowPlaying.artist.isEmpty ? "—" : nowPlaying.artist) {
+                            app.openNowPlayingArtist()
+                        }
+                        .buttonStyle(.plain)
+                        .font(theme.typography.secondary)
+                        .foregroundStyle(theme.colors.secondaryText)
+                        .lineLimit(1)
+                        .disabled(nowPlaying.artists.isEmpty)
+                        .help("Open artist")
+
+                        Button(nowPlaying.album.isEmpty ? "—" : nowPlaying.album) {
+                            app.openNowPlayingAlbum()
+                        }
+                        .buttonStyle(.plain)
+                        .font(theme.typography.compact)
+                        .foregroundStyle(theme.colors.tertiaryText)
+                        .lineLimit(1)
+                        .disabled(nowPlaying.albumId == nil)
+                        .help("Open album")
+                    } else {
+                        Text("—")
+                            .font(theme.typography.secondary)
+                            .foregroundStyle(theme.colors.secondaryText)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, theme.metrics.sidebarInset)
+            .padding(.bottom, theme.metrics.smallPadding)
         }
     }
 
@@ -157,21 +263,28 @@ struct SidebarView: View {
     ) -> some View {
         let isSelected = page != nil && app.page == page
 
-        return HStack(spacing: 12) {
-            icon
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 20, height: 13)
-            Text(title)
-                .font(isSelected ? theme.typography.nowPlayingTitle : theme.typography.body)
-                .lineLimit(1)
-            Spacer()
-            if let count {
-                Text("\(count)")
-                    .font(theme.typography.mono)
-                    .foregroundStyle(theme.colors.tertiaryText)
+        return Button {
+            if let page {
+                app.open(page)
+            }
+        } label: {
+            HStack(spacing: 12) {
+                icon
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 20, height: 13)
+                Text(title)
+                    .font(isSelected ? theme.typography.nowPlayingTitle : theme.typography.body)
+                    .lineLimit(1)
+                Spacer()
+                if let count {
+                    Text("\(count)")
+                        .font(theme.typography.mono)
+                        .foregroundStyle(theme.colors.tertiaryText)
+                }
             }
         }
+        .buttonStyle(.plain)
         .foregroundStyle(
             disabled
                 ? theme.colors.disabledText
@@ -185,11 +298,7 @@ struct SidebarView: View {
                 : AnyShapeStyle(Color.clear)
         )
         .contentShape(Rectangle())
-        .onTapGesture {
-            if let page {
-                app.open(page)
-            }
-        }
+        .disabled(disabled || page == nil)
         .onHover { hovering in
             if hovering, !disabled {
                 NSCursor.pointingHand.push()

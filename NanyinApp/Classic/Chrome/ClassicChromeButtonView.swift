@@ -131,10 +131,23 @@ final class ClassicChromeButtonView: NSView {
         case .transport:
             layer.shape = ChouTiUI.Ellipse()
         }
+        // ChouTiUI owns the Classic convex/concave surface recipes; the
+        // palette controls the semantic interaction edges around them.
         layer.setBackgroundColor(state == .pressed ? .concaveGray : .convexGray)
-        layer.borderColor = NSColor(white: state == .hovered ? 0.58 : 0.38, alpha: 1).cgColor
+        layer.borderColor = nsColor(
+            state == .hovered ? style.palette.controlHoverBorder : style.palette.controlBorder
+        ).cgColor
         layer.borderWidth = 1
-        alphaValue = isEnabled ? 1 : 0.45
+        alphaValue = isEnabled ? 1 : style.palette.disabledAlpha
         needsDisplay = true
+    }
+
+    private func nsColor(_ color: ChromeColor) -> NSColor {
+        NSColor(
+            calibratedRed: color.red,
+            green: color.green,
+            blue: color.blue,
+            alpha: color.alpha
+        )
     }
 }

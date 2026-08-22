@@ -66,6 +66,14 @@ struct NanyinApp: App {
                     .keyboardShortcut(.leftArrow, modifiers: .command)
                     .disabled(!delegate.appModel.isPlaybackReady)
             }
+            CommandMenu("Navigate") {
+                Button("Back") { delegate.appModel.goBack() }
+                    .keyboardShortcut("[", modifiers: .command)
+                    .disabled(!delegate.appModel.canGoBack)
+                Button("Forward") { delegate.appModel.goForward() }
+                    .keyboardShortcut("]", modifiers: .command)
+                    .disabled(!delegate.appModel.canGoForward)
+            }
             CommandMenu("Theme") {
                 ForEach(AppThemeID.allCases) { themeID in
                     Toggle(themeID.displayName, isOn: themeSelection(for: themeID))

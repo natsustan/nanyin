@@ -16,6 +16,36 @@ struct PlayerBar: View {
     @State private var displayPosition: UInt32 = 0
 
     var body: some View {
+        content
+            .task(id: app.nowPlaying?.uri) {
+                displayPosition = app.playbackPositionMs
+                while !Task.isCancelled {
+                    if draggingProgress == nil {
+                        let p = app.playbackPositionMs
+                        if p != displayPosition { displayPosition = p }
+                    }
+                    try? await Task.sleep(for: .milliseconds(400))
+                }
+            }
+            .onChange(of: app.isPlaybackReady) { _, ready in
+                if !ready { draggingProgress = nil }
+            }
+            .onChange(of: app.nowPlaying?.uri) { _, _ in
+                draggingProgress = nil
+            }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch theme.id {
+        case .nanyinDark:
+            darkContent
+        case .classic2010:
+            classicContent
+        }
+    }
+
+    private var darkContent: some View {
         HStack(spacing: 0) {
             // Now playing (left)
             HStack(spacing: 12) {
@@ -164,20 +194,138 @@ struct PlayerBar: View {
             .padding(.trailing, theme.metrics.sidebarInset)
         }
         .background(theme.colors.playerBackground.swiftUIStyle)
-        .task(id: app.nowPlaying?.uri) {
-            displayPosition = 0
-            while !Task.isCancelled {
-                if draggingProgress == nil {
-                    let p = app.playbackPositionMs
-                    if p != displayPosition { displayPosition = p }
+    }
+
+    private var classicContent: some View {
+        HStack(spacing: 0) {
+            HStack(spacing: 4) {
+                Button {
+                    app.toggleShuffle()
+                } label: {
+                    Image(systemName: "shuffle")
+                        .font(theme.typography.compact)
+                        .foregroundStyle(
+                            app.shuffle ? theme.colors.accent : theme.colors.secondaryText
+                        )
+                        .frame(width: 22, height: 22)
                 }
-                try? await Task.sleep(for: .milliseconds(400))
+                .buttonStyle(ThemePressFeedbackButtonStyle())
+                .help("Shuffle")
+
+                ChromeButton(
+                    title: "◀",
+                    accessibilityLabel: "Previous track",
+                    style: ChromeStyle(role: .transport, size: CGSize(width: 28, height: 26)),
+                    action: app.prev
+                )
+                ChromeButton(
+                    title: app.isPlaying ? "❚❚" : "▶",
+                    accessibilityLabel: app.isPlaying ? "Pause" : "Play",
+                    style: ChromeStyle(role: .transport, size: CGSize(width: 32, height: 28)),
+                    action: app.togglePlay
+                )
+                ChromeButton(
+                    title: "▶",
+                    accessibilityLabel: "Next track",
+                    style: ChromeStyle(role: .transport, size: CGSize(width: 28, height: 26)),
+                    action: app.next
+                )
+
+                Button {
+                    app.cycleRepeat()
+                } label: {
+                    Image(systemName: app.repeatMode == .one ? "repeat.1" : "repeat")
+                        .font(theme.typography.compact)
+                        .foregroundStyle(
+                            app.repeatMode == .off ? theme.colors.secondaryText : theme.colors.accent
+                        )
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(ThemePressFeedbackButtonStyle())
+                .help("Repeat")
             }
+            .disabled(!app.isPlaybackReady)
+            .padding(.horizontal, 8)
+            .overlay(alignment: .trailing) {
+                Rectangle()
+                    .fill(theme.colors.border)
+                    .frame(width: 1, height: 40)
+            }
+
+            VStack(spacing: 2) {
+                HStack(spacing: 7) {
+                    Text(PlaybackTimeFormatter.string(fromMilliseconds: effectivePosition))
+                        .font(theme.typography.mono)
+                        .foregroundStyle(theme.colors.secondaryText)
+                        .frame(width: 34, alignment: .trailing)
+
+                    ChromeSliderTrack(
+                        style: ChromeSliderStyle(
+                            fraction: progressFraction,
+                            isEnabled: app.isPlaybackReady
+                        ),
+                        onChanged: { draggingProgress = $0 },
+                        onEnded: {
+                            app.seek(to: $0)
+                            draggingProgress = nil
+                        },
+                        onCancelled: { draggingProgress = nil }
+                    )
+
+                    Text(PlaybackTimeFormatter.string(fromMilliseconds: max(app.durationMs, 0)))
+                        .font(theme.typography.mono)
+                        .foregroundStyle(theme.colors.secondaryText)
+                        .frame(width: 34, alignment: .leading)
+                }
+
+                Text(app.nowPlaying?.title ?? "Not playing")
+                    .font(theme.typography.compact)
+                    .foregroundStyle(theme.colors.tertiaryText)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 8)
+            .overlay(alignment: .trailing) {
+                Rectangle()
+                    .fill(theme.colors.border)
+                    .frame(width: 1, height: 40)
+            }
+
+            HStack(spacing: 6) {
+                Image(systemName: "speaker.fill")
+                    .font(theme.typography.compact)
+                    .foregroundStyle(theme.colors.secondaryText)
+                Slider(value: Binding(
+                    get: { app.volume },
+                    set: { app.setVolume($0) }
+                ), in: 0 ... 1)
+                .controlSize(.mini)
+                .frame(width: 92)
+                .disabled(!app.isPlaybackReady)
+
+                ChromeButton(
+                    title: "Queue",
+                    accessibilityLabel: "Queue",
+                    style: ChromeStyle(size: CGSize(width: 54, height: 24)),
+                    action: { app.open(.queue) }
+                )
+                .help("Queue")
+            }
+            .padding(.horizontal, 8)
+        }
+        .padding(.horizontal, 10)
+        .background {
+            ChromeSectionBar(style: ChromeSectionBarStyle(height: theme.metrics.playerBarHeight))
         }
     }
 
     private var effectivePosition: UInt32 {
         min(draggingProgress.map { UInt32($0 * Double(max(app.durationMs, 1))) } ?? displayPosition, max(app.durationMs, 0))
+    }
+
+    private var progressFraction: Double {
+        guard app.durationMs > 0 else { return 0 }
+        return min(max(Double(effectivePosition) / Double(app.durationMs), 0), 1)
     }
 
     private var slider: some View {
@@ -206,6 +354,27 @@ struct PlayerBar: View {
             )
         }
         .frame(width: 220, height: 12)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Playback progress")
+        .accessibilityValue(
+            Text(
+                "\(PlaybackTimeFormatter.string(fromMilliseconds: effectivePosition)) of "
+                    + PlaybackTimeFormatter.string(fromMilliseconds: max(app.durationMs, 0))
+            )
+        )
+        .disabled(!app.isPlaybackReady)
+        .accessibilityAdjustableAction { direction in
+            guard app.isPlaybackReady, app.durationMs > 0 else { return }
+            let step = 0.05
+            switch direction {
+            case .increment:
+                app.seek(to: min(progressFraction + step, 1))
+            case .decrement:
+                app.seek(to: max(progressFraction - step, 0))
+            @unknown default:
+                break
+            }
+        }
     }
 
     private func progressWidth(_ geo: GeometryProxy) -> CGFloat {

@@ -188,10 +188,15 @@ struct AppTheme {
         let sheetWidth: CGFloat
     }
 
+    struct ChromeTokens {
+        let palette: ChromePalette
+    }
+
     let id: AppThemeID
     let colors: Colors
     let typography: Typography
     let metrics: Metrics
+    let chrome: ChromeTokens
 
     static func resolve(_ id: AppThemeID) -> Self {
         switch id {
@@ -315,7 +320,8 @@ struct AppTheme {
             bannerCornerRadius: 6,
             sheetPadding: 24,
             sheetWidth: 400
-        )
+        ),
+        chrome: ChromeTokens(palette: .nanyinDark)
     )
 
     static let classic2010 = Self(
@@ -450,7 +456,8 @@ struct AppTheme {
             bannerCornerRadius: 3,
             sheetPadding: 18,
             sheetWidth: 360
-        )
+        ),
+        chrome: ChromeTokens(palette: .classic2010)
     )
 }
 

@@ -12,8 +12,11 @@ import SwiftUI
 struct SearchView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.appTheme) private var theme
-    @State private var query = ""
     @FocusState private var focused: Bool
+
+    private var query: String {
+        app.searchQuery
+    }
 
     private var results: [SpotifyClient.Track] {
         app.tracksByContext["search"] ?? []
@@ -41,9 +44,6 @@ struct SearchView: View {
         }
         .background(theme.colors.contentBackground.swiftUIStyle)
         .onAppear {
-            // Restore across page switches (view is destroyed by RootView's
-            // switch; the model keeps query + cached results in sync).
-            if query.isEmpty { query = app.searchQuery }
             focused = true
         }
         .onChange(of: app.searchFocusToken) { focused = true }
@@ -55,7 +55,18 @@ struct SearchView: View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(theme.colors.secondaryText)
-            TextField("Search for songs or artists", text: $query)
+            TextField(
+                "Search for songs or artists",
+                text: Binding(
+                    get: { app.searchQuery },
+                    set: { value in
+                        app.searchQuery = value
+                        if Self.pastedTrackLinkID(value) == nil {
+                            app.searchDebounced(value)
+                        }
+                    }
+                )
+            )
                 .textFieldStyle(.plain)
                 .font(.system(size: 15))
                 .focused($focused)
@@ -97,16 +108,10 @@ struct SearchView: View {
         .padding(.horizontal, theme.metrics.pageHorizontalInset)
         .padding(.top, theme.metrics.pageTopInset)
         .padding(.bottom, theme.metrics.pageBottomInset)
-        .onChange(of: query) { _, new in
-            app.searchQuery = new
-            if Self.pastedTrackLinkID(new) == nil {
-                app.searchDebounced(new)
-            }
-        }
     }
 
     private func clearQuery() {
-        query = ""
+        app.searchQuery = ""
         app.search("")
         focused = true
     }
