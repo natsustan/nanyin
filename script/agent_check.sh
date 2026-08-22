@@ -110,6 +110,15 @@ xcrun swiftc \
     -o "$state_test_dir/state-reducer-tests"
 "$state_test_dir/state-reducer-tests"
 
+step "running theme preference tests"
+xcrun swiftc \
+    "$ROOT_DIR/NanyinApp/Views/Theme.swift" \
+    "$ROOT_DIR/Tests/ThemePreferenceTests.swift" \
+    -framework AppKit \
+    -framework SwiftUI \
+    -o "$state_test_dir/theme-preference-tests"
+"$state_test_dir/theme-preference-tests"
+
 step "running artwork cache tests"
 xcrun swiftc \
     "$ROOT_DIR/NanyinApp/Core/ArtworkCache.swift" \

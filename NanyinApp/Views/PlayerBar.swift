@@ -112,7 +112,7 @@ struct PlayerBar: View {
                 .disabled(!app.isPlaybackReady)
 
                 HStack(spacing: 8) {
-                    Text(Theme.fmtTime(effectivePosition))
+                    Text(PlaybackTimeFormatter.string(fromMilliseconds: effectivePosition))
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(Theme.textSecondary)
                         .frame(width: 34, alignment: .trailing)
@@ -120,7 +120,7 @@ struct PlayerBar: View {
                     slider
                         .allowsHitTesting(app.isPlaybackReady)
 
-                    Text(Theme.fmtTime(max(app.durationMs, 0)))
+                    Text(PlaybackTimeFormatter.string(fromMilliseconds: max(app.durationMs, 0)))
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(Theme.textSecondary)
                         .frame(width: 34, alignment: .leading)

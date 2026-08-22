@@ -149,7 +149,7 @@ struct TrackRow: View {
             albumCell
                 .frame(width: TrackTableLayout.albumColumnWidth, alignment: .leading)
 
-            Text(Theme.fmtTime(UInt32(track.durationMs)))
+            Text(PlaybackTimeFormatter.string(fromMilliseconds: UInt32(track.durationMs)))
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(Theme.textSecondary)
                 .frame(width: TrackTableLayout.durationColumnWidth, alignment: .trailing)

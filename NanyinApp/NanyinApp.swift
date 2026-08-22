@@ -32,11 +32,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct NanyinApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
+    @AppStorage(AppThemeID.preferenceKey)
+    private var storedThemeID = AppThemeID.nanyinDark.rawValue
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environment(delegate.appModel)
+                .environment(\.appTheme, AppTheme.resolve(selectedThemeID))
                 .preferredColorScheme(.dark)
                 .frame(minWidth: 900, minHeight: 600)
                 .onAppear {
@@ -63,6 +66,31 @@ struct NanyinApp: App {
                     .keyboardShortcut(.leftArrow, modifiers: .command)
                     .disabled(!delegate.appModel.isPlaybackReady)
             }
+            CommandMenu("Theme") {
+                ForEach(AppThemeID.allCases) { themeID in
+                    Toggle(themeID.displayName, isOn: themeSelection(for: themeID))
+                }
+            }
         }
+
+        Settings {
+            ThemeSettingsView()
+                .preferredColorScheme(.dark)
+        }
+    }
+
+    private var selectedThemeID: AppThemeID {
+        AppThemeID(storedValue: storedThemeID)
+    }
+
+    private func themeSelection(for themeID: AppThemeID) -> Binding<Bool> {
+        Binding(
+            get: { selectedThemeID == themeID },
+            set: { selected in
+                if selected {
+                    storedThemeID = themeID.rawValue
+                }
+            }
+        )
     }
 }

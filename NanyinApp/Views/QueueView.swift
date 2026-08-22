@@ -226,7 +226,7 @@ private struct QueueRow: View {
                     .lineLimit(1)
             }
             Spacer()
-            Text(Theme.fmtTime(UInt32(track.durationMs)))
+            Text(PlaybackTimeFormatter.string(fromMilliseconds: UInt32(track.durationMs)))
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(Theme.textSecondary)
         }
