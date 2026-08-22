@@ -21,17 +21,13 @@ struct NewPlaylistSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("New Playlist")
-                .font(theme.typography.sheetTitle)
-                .foregroundStyle(theme.colors.primaryText)
+            sheetTitle
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("Name")
                     .font(theme.typography.fieldLabel)
                     .foregroundStyle(theme.colors.secondaryText)
-                TextField("My playlist", text: $name)
-                    .textFieldStyle(.roundedBorder)
-                    .focused($nameFocused)
+                nameField
             }
 
             if let error = app.playlistCreationError {
@@ -47,16 +43,11 @@ struct NewPlaylistSheet: View {
                         .controlSize(.small)
                 }
                 Spacer()
-                Button("Cancel") {
-                    app.cancelNewPlaylistSheet()
+                if theme.id == .classic2010 {
+                    classicActions
+                } else {
+                    darkActions
                 }
-                .keyboardShortcut(.cancelAction)
-                .disabled(app.isCreatingPlaylist)
-                Button("Create") {
-                    app.createPlaylist(named: name)
-                }
-                .keyboardShortcut(.defaultAction) // Return submits
-                .disabled(trimmedName.isEmpty || app.isCreatingPlaylist)
             }
         }
         .padding(theme.metrics.sheetPadding)
@@ -64,5 +55,89 @@ struct NewPlaylistSheet: View {
         .background(theme.colors.contentBackground.swiftUIStyle)
         .interactiveDismissDisabled(app.isCreatingPlaylist)
         .onAppear { nameFocused = true }
+    }
+
+    private var sheetTitle: some View {
+        Text("New Playlist")
+            .font(theme.typography.sheetTitle)
+            .foregroundStyle(theme.colors.primaryText)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.bottom, theme.id == .classic2010 ? theme.metrics.smallPadding : 0)
+            .overlay(alignment: .bottom) {
+                if theme.id == .classic2010 {
+                    Rectangle()
+                        .fill(theme.colors.divider)
+                        .frame(height: 1)
+                }
+            }
+    }
+
+    @ViewBuilder
+    private var nameField: some View {
+        if theme.id == .classic2010 {
+            TextField("My playlist", text: $name)
+                .textFieldStyle(.plain)
+                .font(theme.typography.body)
+                .padding(.horizontal, theme.metrics.compactFieldHorizontalPadding)
+                .padding(.vertical, theme.metrics.compactFieldVerticalPadding)
+                .background(theme.colors.inputBackground.swiftUIStyle)
+                .overlay {
+                    Rectangle()
+                        .strokeBorder(nameFocused ? theme.colors.focusRing : theme.colors.border, lineWidth: 1)
+                }
+                .focused($nameFocused)
+        } else {
+            TextField("My playlist", text: $name)
+                .textFieldStyle(.roundedBorder)
+                .focused($nameFocused)
+        }
+    }
+
+    private var darkActions: some View {
+        Group {
+            Button("Cancel") {
+                app.cancelNewPlaylistSheet()
+            }
+            .keyboardShortcut(.cancelAction)
+            .disabled(app.isCreatingPlaylist)
+            Button("Create") {
+                app.createPlaylist(named: name)
+            }
+            .keyboardShortcut(.defaultAction)
+            .disabled(trimmedName.isEmpty || app.isCreatingPlaylist)
+        }
+    }
+
+    private var classicActions: some View {
+        Group {
+            Button("Cancel") {
+                app.cancelNewPlaylistSheet()
+            }
+            .keyboardShortcut(.cancelAction)
+            .disabled(app.isCreatingPlaylist)
+            .buttonStyle(.plain)
+            .foregroundStyle(theme.colors.primaryText)
+            .padding(.horizontal, theme.metrics.controlHorizontalPadding - 4)
+            .padding(.vertical, theme.metrics.controlVerticalPadding - 2)
+            .background(theme.colors.raisedSurface.swiftUIStyle)
+            .overlay {
+                Rectangle().strokeBorder(theme.colors.border, lineWidth: 1)
+            }
+
+            Button("Create") {
+                app.createPlaylist(named: name)
+            }
+            .keyboardShortcut(.defaultAction)
+            .disabled(trimmedName.isEmpty || app.isCreatingPlaylist)
+            .buttonStyle(.plain)
+            .foregroundStyle(theme.colors.inverseText)
+            .padding(.horizontal, theme.metrics.controlHorizontalPadding - 4)
+            .padding(.vertical, theme.metrics.controlVerticalPadding - 2)
+            .background(theme.colors.accent)
+            .overlay {
+                Rectangle().strokeBorder(theme.colors.focusRing, lineWidth: 1)
+            }
+            .opacity(trimmedName.isEmpty || app.isCreatingPlaylist ? 0.5 : 1)
+        }
     }
 }

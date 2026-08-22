@@ -22,7 +22,7 @@ struct HomeView: View {
 
     var body: some View {
         ScrollView(.vertical) {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: theme.metrics.sectionTopPadding + 8) {
                 header
                 partialErrorNotice
                 content
@@ -156,7 +156,7 @@ struct HomeView: View {
                 // Bounded horizontal strip (≤10 cards) — perpendicular to
                 // the page's single vertical scroll region.
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
+                    HStack(spacing: theme.metrics.smallPadding + 4) {
                         ForEach(app.homeRecentlyPlayed) { card in
                             RecentCard(card: card)
                         }
@@ -178,7 +178,8 @@ struct HomeView: View {
                         TrackRow(
                             track: track,
                             index: index,
-                            contextKey: AppModel.homeTopTracksContextKey
+                            contextKey: AppModel.homeTopTracksContextKey,
+                            presentation: rowPresentation
                         )
                     }
                 }
@@ -191,7 +192,7 @@ struct HomeView: View {
         if !app.homeTopArtists.isEmpty {
             section(title: "Top Artists", caption: "most played · last 6 months") {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
+                    HStack(spacing: theme.metrics.smallPadding + 4) {
                         ForEach(app.homeTopArtists) { artist in
                             ArtistTile(artist: artist)
                         }
@@ -205,8 +206,8 @@ struct HomeView: View {
     private var librarySection: some View {
         section(title: "Your Library", caption: "liked and saved") {
             LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 170), spacing: 16)],
-                spacing: 16
+                columns: [GridItem(.adaptive(minimum: theme.metrics.collectionGridMinimum), spacing: theme.metrics.smallPadding + 8)],
+                spacing: theme.metrics.smallPadding + 8
             ) {
                 likedSongsTile
                 ForEach(Array(app.savedAlbums.prefix(5))) { saved in
@@ -254,6 +255,10 @@ struct HomeView: View {
             onPlay: app.userId.isEmpty ? nil : { app.playLikedSongs() },
             linkURL: nil
         )
+    }
+
+    private var rowPresentation: TrackRowPresentation {
+        theme.id == .classic2010 ? .classic : .comfortable
     }
 
     private func section<Content: View>(
@@ -328,7 +333,7 @@ private struct RecentCard: View {
                 .foregroundStyle(theme.colors.secondaryText)
                 .lineLimit(1)
         }
-        .frame(width: 150, alignment: .leading)
+        .frame(width: theme.metrics.homeFeatureArtworkSize + theme.metrics.smallPadding * 2, alignment: .leading)
         .padding(theme.metrics.smallPadding)
         .background(
             hovering ? theme.colors.cardHover.swiftUIStyle : AnyShapeStyle(Color.clear)
@@ -397,10 +402,10 @@ private struct RecentCard: View {
     }
 
     private var cover: some View {
-        ArtworkView(url: card.artworkURL, size: 134) {
+        ArtworkView(url: card.artworkURL, size: theme.metrics.homeFeatureArtworkSize) {
             placeholderCover
         }
-        .frame(width: 134, height: 134)
+        .frame(width: theme.metrics.homeFeatureArtworkSize, height: theme.metrics.homeFeatureArtworkSize)
         .clipShape(RoundedRectangle(cornerRadius: theme.metrics.imageCornerRadius))
         .shadow(color: theme.colors.shadow.opacity(0.35), radius: theme.metrics.shadowRadius, y: theme.metrics.shadowYOffset)
         .overlay(alignment: .bottomLeading) {
@@ -448,11 +453,11 @@ private struct ArtistTile: View {
         Button {
             app.open(.artist(id: artist.id, name: artist.name, artworkURL: artist.artworkURL))
         } label: {
-            VStack(spacing: 8) {
-                ArtworkView(url: artist.artworkURL, size: 88) {
+            VStack(spacing: theme.metrics.smallPadding) {
+                ArtworkView(url: artist.artworkURL, size: theme.metrics.artistArtworkSize) {
                     placeholderPortrait
                 }
-                .frame(width: 88, height: 88)
+                .frame(width: theme.metrics.artistArtworkSize, height: theme.metrics.artistArtworkSize)
                 .clipShape(Circle())
                 .shadow(color: theme.colors.shadow.opacity(0.4), radius: theme.metrics.shadowRadius, y: theme.metrics.shadowYOffset)
                 Text(artist.name)
@@ -464,7 +469,7 @@ private struct ArtistTile: View {
                     .font(theme.typography.tileSubtitle)
                     .foregroundStyle(theme.colors.secondaryText)
             }
-            .frame(width: 104)
+            .frame(width: theme.metrics.artistArtworkSize + theme.metrics.smallPadding * 2)
             .padding(theme.metrics.smallPadding)
             .background(
                 hovering ? theme.colors.cardHover.swiftUIStyle : AnyShapeStyle(Color.clear)
@@ -482,7 +487,7 @@ private struct ArtistTile: View {
             Rectangle()
                 .fill(theme.colors.placeholderBackground.swiftUIStyle)
             Image(systemName: "person.crop.circle.fill")
-                .font(.system(size: 40))
+                .font(.system(size: theme.metrics.artistArtworkSize * 0.45))
                 .foregroundStyle(theme.colors.secondaryText)
         }
     }
@@ -550,7 +555,7 @@ private struct LibraryTile: View {
                     .resizable()
                     .scaledToFill()
             } else {
-                ArtworkView(url: artworkURL, size: 170) {
+                ArtworkView(url: artworkURL, size: theme.metrics.collectionArtworkSize) {
                     placeholderCover
                 }
             }

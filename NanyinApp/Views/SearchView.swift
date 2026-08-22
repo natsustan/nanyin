@@ -38,15 +38,23 @@ struct SearchView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            searchField
-            Divider().overlay(theme.colors.divider)
+            if theme.id != .classic2010 {
+                searchField
+                Divider().overlay(theme.colors.divider)
+            }
             content
         }
         .background(theme.colors.contentBackground.swiftUIStyle)
         .onAppear {
-            focused = true
+            if theme.id != .classic2010 {
+                focused = true
+            }
         }
-        .onChange(of: app.searchFocusToken) { focused = true }
+        .onChange(of: app.searchFocusToken) {
+            if theme.id != .classic2010 {
+                focused = true
+            }
+        }
     }
 
     // MARK: - Search field
@@ -265,7 +273,7 @@ struct SearchView: View {
             // so the single-scroll-region rule (no same-axis nesting) holds.
             // Capped at 10: the row is not lazy; every card mounts immediately.
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 12) {
+                HStack(spacing: theme.metrics.smallPadding + 4) {
                     ForEach(app.searchArtists.prefix(10)) { artist in
                         ArtistCard(artist: artist)
                     }
@@ -288,6 +296,8 @@ private struct ArtistCard: View {
 
     @State private var hovering = false
 
+    private var artworkSize: CGFloat { theme.metrics.artistArtworkSize }
+
     var body: some View {
         Button {
             app.open(.artist(id: artist.id, name: artist.name, artworkURL: artist.artworkURL))
@@ -303,7 +313,7 @@ private struct ArtistCard: View {
                     .font(theme.typography.tileSubtitle)
                     .foregroundStyle(theme.colors.secondaryText)
             }
-            .frame(width: 104)
+            .frame(width: artworkSize + theme.metrics.smallPadding * 2)
             .padding(theme.metrics.smallPadding)
             .background(
                 hovering ? theme.colors.cardHover.swiftUIStyle : AnyShapeStyle(Color.clear)
@@ -320,10 +330,10 @@ private struct ArtistCard: View {
 
     @ViewBuilder
     private var portrait: some View {
-        ArtworkView(url: artist.artworkURL, size: 88) {
+        ArtworkView(url: artist.artworkURL, size: artworkSize) {
             placeholderPortrait
         }
-        .frame(width: 88, height: 88)
+        .frame(width: artworkSize, height: artworkSize)
         .clipShape(Circle())
         .shadow(color: theme.colors.shadow.opacity(0.4), radius: theme.metrics.shadowRadius, y: theme.metrics.shadowYOffset)
     }
@@ -333,7 +343,7 @@ private struct ArtistCard: View {
             Rectangle()
                 .fill(theme.colors.placeholderBackground.swiftUIStyle)
             Image(systemName: "person.crop.circle.fill")
-                .font(.system(size: 40))
+                .font(.system(size: artworkSize * 0.45))
                 .foregroundStyle(theme.colors.secondaryText)
         }
     }

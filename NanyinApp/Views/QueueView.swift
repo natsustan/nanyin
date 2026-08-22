@@ -45,7 +45,16 @@ struct QueueView: View {
         .background(theme.colors.contentBackground.swiftUIStyle)
     }
 
+    @ViewBuilder
     private var header: some View {
+        if theme.id == .classic2010 {
+            classicHeader
+        } else {
+            darkHeader
+        }
+    }
+
+    private var darkHeader: some View {
         HStack(spacing: 14) {
             Image(systemName: "list.bullet")
                 .font(.system(size: 22, weight: .semibold))
@@ -63,6 +72,27 @@ struct QueueView: View {
         .padding(.horizontal, theme.metrics.sectionHorizontalInset)
         .padding(.top, theme.metrics.pageTopInset + 4)
         .padding(.bottom, theme.metrics.pageBottomInset)
+    }
+
+    private var classicHeader: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "list.bullet")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(theme.colors.primaryText)
+            Text("QUEUE")
+                .font(theme.typography.sectionHeader)
+                .tracking(0.8)
+                .foregroundStyle(theme.colors.primaryText)
+            Text(subtitle)
+                .font(theme.typography.metadata)
+                .foregroundStyle(theme.colors.secondaryText)
+            Spacer()
+        }
+        .padding(.horizontal, theme.metrics.sectionHorizontalInset)
+        .padding(.vertical, theme.metrics.smallPadding + 2)
+        .background {
+            ChromeSectionBar(style: ChromeSectionBarStyle(height: 40))
+        }
     }
 
     private var subtitle: String {

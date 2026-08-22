@@ -120,6 +120,27 @@ for size in '900, height: 600' '1280, height: 800' '1600, height: 900'; do
         || fail "Classic shell geometry fixture is missing a required canvas size"
 done
 
+step "checking Classic content seams"
+rg -q 'ClassicTrackRow' "$ROOT_DIR/NanyinApp/Views/TrackListView.swift" \
+    || fail "Classic track table row is missing"
+rg -q 'classicArtistColumnWidth' "$ROOT_DIR/NanyinApp/Views/TrackListView.swift" \
+    || fail "Classic track table is missing the dedicated artist column"
+rg -q 'theme\.id != \.classic2010' "$ROOT_DIR/NanyinApp/Views/SearchView.swift" \
+    || fail "SearchView does not reserve its page field for Nanyin Dark"
+for source in \
+    "$ROOT_DIR/NanyinApp/Views/PlaylistDetailView.swift" \
+    "$ROOT_DIR/NanyinApp/Views/ArtistDetailView.swift" \
+    "$ROOT_DIR/NanyinApp/Views/QueueView.swift" \
+    "$ROOT_DIR/NanyinApp/Views/LoginView.swift" \
+    "$ROOT_DIR/NanyinApp/Views/NewPlaylistSheet.swift"; do
+    rg -q 'classic2010|ChromeSectionBar' "$source" \
+        || fail "Classic content presentation is missing: ${source##*/}"
+done
+rg -q 'collectionGridMinimum' "$ROOT_DIR/NanyinApp/Views/HomeView.swift" \
+    || fail "Home library grid is not theme-density aware"
+rg -q 'collectionGridMinimum' "$ROOT_DIR/NanyinApp/Views/SavedAlbumsView.swift" \
+    || fail "Saved Albums grid is not theme-density aware"
+
 command -v mise >/dev/null 2>&1 || fail "mise is required"
 command -v xcrun >/dev/null 2>&1 || fail "Xcode command-line tools are required"
 

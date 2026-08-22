@@ -186,6 +186,12 @@ struct AppTheme {
         let bannerCornerRadius: CGFloat
         let sheetPadding: CGFloat
         let sheetWidth: CGFloat
+        let detailArtworkSize: CGFloat
+        let homeFeatureArtworkSize: CGFloat
+        let artistArtworkSize: CGFloat
+        let discographyArtworkSize: CGFloat
+        let collectionArtworkSize: CGFloat
+        let collectionGridMinimum: CGFloat
     }
 
     struct ChromeTokens {
@@ -319,7 +325,13 @@ struct AppTheme {
             shadowYOffset: 4,
             bannerCornerRadius: 6,
             sheetPadding: 24,
-            sheetWidth: 400
+            sheetWidth: 400,
+            detailArtworkSize: 140,
+            homeFeatureArtworkSize: 134,
+            artistArtworkSize: 88,
+            discographyArtworkSize: 112,
+            collectionArtworkSize: 170,
+            collectionGridMinimum: 170
         ),
         chrome: ChromeTokens(palette: .nanyinDark)
     )
@@ -455,7 +467,13 @@ struct AppTheme {
             shadowYOffset: 1,
             bannerCornerRadius: 3,
             sheetPadding: 18,
-            sheetWidth: 360
+            sheetWidth: 360,
+            detailArtworkSize: 72,
+            homeFeatureArtworkSize: 116,
+            artistArtworkSize: 72,
+            discographyArtworkSize: 88,
+            collectionArtworkSize: 132,
+            collectionGridMinimum: 132
         ),
         chrome: ChromeTokens(palette: .classic2010)
     )

@@ -236,8 +236,8 @@ struct SavedAlbumsView: View {
     private var albumGrid: some View {
         ScrollView {
             LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 170), spacing: 16)],
-                spacing: 18
+                columns: [GridItem(.adaptive(minimum: theme.metrics.collectionGridMinimum), spacing: theme.metrics.smallPadding + 8)],
+                spacing: theme.metrics.smallPadding + 8
             ) {
                 ForEach(visibleAlbums) { saved in
                     SavedAlbumCard(album: saved)
@@ -344,7 +344,7 @@ private struct SavedAlbumCard: View {
     }
 
     private var cover: some View {
-        ArtworkView(url: album.album.artworkURL, size: 170) {
+        ArtworkView(url: album.album.artworkURL, size: theme.metrics.collectionArtworkSize) {
             placeholderCover
         }
         .aspectRatio(1, contentMode: .fit)
@@ -368,7 +368,7 @@ private struct SavedAlbumCard: View {
             Image(systemName: "play.fill")
                 .font(.system(size: 14, weight: .bold))
                 .foregroundStyle(theme.colors.inverseText)
-                .frame(width: 34, height: 34)
+                .frame(width: theme.metrics.collectionArtworkSize * 0.20, height: theme.metrics.collectionArtworkSize * 0.20)
                 .background(Circle().fill(theme.colors.accent))
                 .shadow(color: theme.colors.shadow.opacity(0.4), radius: theme.metrics.smallCornerRadius * 2, y: 2)
         }

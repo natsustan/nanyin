@@ -117,10 +117,19 @@ struct PlaylistDetailView: View {
         }
     }
 
+    @ViewBuilder
     private var header: some View {
+        if theme.id == .classic2010 {
+            classicHeader
+        } else {
+            darkHeader
+        }
+    }
+
+    private var darkHeader: some View {
         HStack(spacing: 24) {
-            cover
-                .frame(width: 140, height: 140)
+            cover(size: theme.metrics.detailArtworkSize)
+                .frame(width: theme.metrics.detailArtworkSize, height: theme.metrics.detailArtworkSize)
                 .cornerRadius(theme.metrics.imageCornerRadius)
                 .shadow(color: theme.colors.shadow.opacity(0.5), radius: theme.metrics.shadowRadius + 4, y: theme.metrics.shadowYOffset + 2)
 
@@ -150,6 +159,46 @@ struct PlaylistDetailView: View {
         .padding(.top, theme.metrics.pageTopInset)
         .padding(.bottom, theme.metrics.pageBottomInset)
         .background(theme.colors.contentBackground.swiftUIStyle)
+    }
+
+    private var classicHeader: some View {
+        HStack(spacing: 12) {
+            cover(size: theme.metrics.detailArtworkSize)
+                .frame(width: theme.metrics.detailArtworkSize, height: theme.metrics.detailArtworkSize)
+                .cornerRadius(theme.metrics.imageCornerRadius)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(label)
+                    .font(theme.typography.sectionHeader)
+                    .tracking(0.8)
+                    .foregroundStyle(theme.colors.secondaryText)
+                Text(title)
+                    .font(theme.typography.detailTitle)
+                    .foregroundStyle(theme.colors.primaryText)
+                    .lineLimit(1)
+                Text(headerSubtitle)
+                    .font(theme.typography.metadata)
+                    .foregroundStyle(theme.colors.secondaryText)
+                    .lineLimit(1)
+
+                HStack(spacing: 8) {
+                    playButton
+                    if albumId != nil {
+                        SaveAlbumButton(album: albumSeed)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, theme.metrics.pageHorizontalInset)
+        .padding(.vertical, theme.metrics.smallPadding + 2)
+        .background {
+            ChromeSectionBar(
+                style: ChromeSectionBarStyle(
+                    height: theme.metrics.detailArtworkSize + (theme.metrics.smallPadding + 2) * 2
+                )
+            )
+        }
     }
 
     /// Album pages play the server-resolved context directly (no dependency
@@ -184,26 +233,26 @@ struct PlaylistDetailView: View {
     }
 
     @ViewBuilder
-    private var cover: some View {
+    private func cover(size: CGFloat) -> some View {
         if let coverAssetName {
             Image(coverAssetName)
                 .resizable()
                 .scaledToFill()
         } else {
-            ArtworkView(url: coverURL, size: 140) {
-                placeholderCover
+            ArtworkView(url: coverURL, size: size) {
+                placeholderCover(size: size)
             }
         }
     }
 
-    private var placeholderCover: some View {
+    private func placeholderCover(size: CGFloat) -> some View {
         ZStack {
             Rectangle()
                 .fill(theme.colors.placeholderBackground.swiftUIStyle)
             Image("MusicIcon")
                 .resizable()
                 .aspectRatio(contentMode: .fit)
-                .frame(width: 44, height: 44)
+                .frame(width: size * 0.32, height: size * 0.32)
                 .foregroundStyle(theme.colors.secondaryText)
         }
     }
