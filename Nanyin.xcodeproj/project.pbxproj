@@ -13,6 +13,7 @@
 		174C7CDED5FCAFF6647A63D9 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 76BAF3B565A2B4E3EC2BC956 /* Assets.xcassets */; };
 		17E0BAB2F9C35F875CAD6ADA /* SpotifyClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63B137ABBBF1D05325A8ED16 /* SpotifyClient.swift */; };
 		1C824AEBA97FE5D6B3A80EE2 /* ArtistDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1BABB1701DC20C390270DB2 /* ArtistDetailView.swift */; };
+		1F95067B899D9D06EF8C1CCD /* ChouTiUI in Frameworks */ = {isa = PBXBuildFile; productRef = DB31B019530AC3D9E7DAD07E /* ChouTiUI */; };
 		2C33ADC8885AA0DE3B857361 /* PendingPlayIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40227EC50BC3F11ADCDBF6EA /* PendingPlayIntent.swift */; };
 		2E59FDD89A41153EA44A4C6D /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD9151ECFD94AFE44E6F5E27 /* LoginView.swift */; };
 		309757210FCAB40AD7320473 /* SavedAlbumsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29DF36B3CB2F281AC7CE3E9A /* SavedAlbumsView.swift */; };
@@ -29,6 +30,8 @@
 		762B77578549312AFA4EBA63 /* PlaybackStallDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2CC8CB2F66E24260D048945 /* PlaybackStallDetector.swift */; };
 		76A0FBCD808CE4272E6E9FF7 /* CredentialRevision.swift in Sources */ = {isa = PBXBuildFile; fileRef = D958F31D59797780BE73F9F5 /* CredentialRevision.swift */; };
 		840397300BB1399C8824A015 /* SavedAlbumCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A304C3165403EF8BCC680B91 /* SavedAlbumCache.swift */; };
+		8BA79311D06E4870F7108167 /* ChromeButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BE78A5C4C4901EC940FAD47 /* ChromeButton.swift */; };
+		A25B430D787B7E5F81AFEA3D /* ClassicChromeButtonView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6F7A03F72E05B94F8661242 /* ClassicChromeButtonView.swift */; };
 		B096E4977747700C3EB6CC82 /* LocalPlaybackStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3D90AF51885C8E464B60FE5 /* LocalPlaybackStore.swift */; };
 		B4A205276406D7F4468DE96F /* NanyinApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D16BE0C19B1222A7FFFA360C /* NanyinApp.swift */; };
 		B4A7E0B8FA945E0D257077DB /* SpotifyAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3769801C838BE7FD6353F953 /* SpotifyAuth.swift */; };
@@ -69,6 +72,7 @@
 		6AE5477026638A4B5FD55C57 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		6FB0ED02C7F536E98940B95B /* SystemConfiguration.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SystemConfiguration.framework; path = System/Library/Frameworks/SystemConfiguration.framework; sourceTree = SDKROOT; };
 		76BAF3B565A2B4E3EC2BC956 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		9BE78A5C4C4901EC940FAD47 /* ChromeButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromeButton.swift; sourceTree = "<group>"; };
 		A1BABB1701DC20C390270DB2 /* ArtistDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtistDetailView.swift; sourceTree = "<group>"; };
 		A304C3165403EF8BCC680B91 /* SavedAlbumCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedAlbumCache.swift; sourceTree = "<group>"; };
 		A9DA62671ECF8B9C27AA8947 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
@@ -77,12 +81,14 @@
 		B9D94ED4DB09441D529487CA /* HomeFeed.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeFeed.swift; sourceTree = "<group>"; };
 		C2CC8CB2F66E24260D048945 /* PlaybackStallDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackStallDetector.swift; sourceTree = "<group>"; };
 		C3D90AF51885C8E464B60FE5 /* LocalPlaybackStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalPlaybackStore.swift; sourceTree = "<group>"; };
+		C7E6E3AD68A38077F7AF53E7 /* ChouTiUI */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ChouTiUI; path = "research-repos/ChouTiUI"; sourceTree = SOURCE_ROOT; };
 		C80E837723AE8C7766A7C226 /* PlayerBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerBar.swift; sourceTree = "<group>"; };
 		D16BE0C19B1222A7FFFA360C /* NanyinApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NanyinApp.swift; sourceTree = "<group>"; };
 		D958F31D59797780BE73F9F5 /* CredentialRevision.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialRevision.swift; sourceTree = "<group>"; };
 		DD9151ECFD94AFE44E6F5E27 /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
 		E9E3597C813B3B8DD81E108D /* SpotifyConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotifyConfig.swift; sourceTree = "<group>"; };
 		EE5EC6E22F04C69F48FC16FF /* SearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchView.swift; sourceTree = "<group>"; };
+		F6F7A03F72E05B94F8661242 /* ClassicChromeButtonView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClassicChromeButtonView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -91,6 +97,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				FBB1CACFEE36F0855B5D4CC4 /* SystemConfiguration.framework in Frameworks */,
+				1F95067B899D9D06EF8C1CCD /* ChouTiUI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -113,6 +120,14 @@
 			path = Core;
 			sourceTree = "<group>";
 		};
+		080184D7987D80C0F27DAB03 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				C7E6E3AD68A38077F7AF53E7 /* ChouTiUI */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
 		0CA71501A50430F445B867B9 /* Products */ = {
 			isa = PBXGroup;
 			children = (
@@ -125,6 +140,7 @@
 			isa = PBXGroup;
 			children = (
 				FE85B3A2A69326679E9422B4 /* NanyinApp */,
+				080184D7987D80C0F27DAB03 /* Packages */,
 				3295313B756F0599E0ABC731 /* Frameworks */,
 				0CA71501A50430F445B867B9 /* Products */,
 			);
@@ -159,6 +175,14 @@
 			path = Views;
 			sourceTree = "<group>";
 		};
+		96150C7B805028AA012A77B3 /* Bridge */ = {
+			isa = PBXGroup;
+			children = (
+				9BE78A5C4C4901EC940FAD47 /* ChromeButton.swift */,
+			);
+			path = Bridge;
+			sourceTree = "<group>";
+		};
 		D14ABDAFEF0E43EDC8543B89 /* State */ = {
 			isa = PBXGroup;
 			children = (
@@ -172,6 +196,23 @@
 				A304C3165403EF8BCC680B91 /* SavedAlbumCache.swift */,
 			);
 			path = State;
+			sourceTree = "<group>";
+		};
+		E6334B8F18645DE2AD395BB3 /* Chrome */ = {
+			isa = PBXGroup;
+			children = (
+				F6F7A03F72E05B94F8661242 /* ClassicChromeButtonView.swift */,
+			);
+			path = Chrome;
+			sourceTree = "<group>";
+		};
+		F5DCA635E2C023950945B4A3 /* Classic */ = {
+			isa = PBXGroup;
+			children = (
+				96150C7B805028AA012A77B3 /* Bridge */,
+				E6334B8F18645DE2AD395BB3 /* Chrome */,
+			);
+			path = Classic;
 			sourceTree = "<group>";
 		};
 		FE20EAE131182D00019CD5F1 /* Audio */ = {
@@ -189,6 +230,7 @@
 				76BAF3B565A2B4E3EC2BC956 /* Assets.xcassets */,
 				D16BE0C19B1222A7FFFA360C /* NanyinApp.swift */,
 				FE20EAE131182D00019CD5F1 /* Audio */,
+				F5DCA635E2C023950945B4A3 /* Classic */,
 				044243CFFBA21FEF1B6F93F4 /* Core */,
 				D14ABDAFEF0E43EDC8543B89 /* State */,
 				43746712EB07AF3E0A6B4DBA /* Views */,
@@ -214,6 +256,7 @@
 			);
 			name = Nanyin;
 			packageProductDependencies = (
+				DB31B019530AC3D9E7DAD07E /* ChouTiUI */,
 			);
 			productName = Nanyin;
 			productReference = 407D7A1D4B2A09E284C8A895 /* Nanyin.app */;
@@ -243,6 +286,9 @@
 			);
 			mainGroup = 2924F003B6BC2588327A0A11;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				0E939310993C9733D098E7CB /* XCLocalSwiftPackageReference "research-repos/ChouTiUI" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 0CA71501A50430F445B867B9 /* Products */;
 			projectDirPath = "";
@@ -296,6 +342,8 @@
 				F1B27D6D9957E862044DF2E2 /* ArtworkCache.swift in Sources */,
 				0488D3AEEFDFD759FF66A8A4 /* ArtworkView.swift in Sources */,
 				5E25110C2C6F2BB024C3BE81 /* AudioRenderer.swift in Sources */,
+				8BA79311D06E4870F7108167 /* ChromeButton.swift in Sources */,
+				A25B430D787B7E5F81AFEA3D /* ClassicChromeButtonView.swift in Sources */,
 				76A0FBCD808CE4272E6E9FF7 /* CredentialRevision.swift in Sources */,
 				D53EA805C18FC6BD2585A05E /* DebugLog.swift in Sources */,
 				3CD0F98412A26065319A48E8 /* HomeFeed.swift in Sources */,
@@ -518,6 +566,20 @@
 			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		0E939310993C9733D098E7CB /* XCLocalSwiftPackageReference "research-repos/ChouTiUI" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "research-repos/ChouTiUI";
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		DB31B019530AC3D9E7DAD07E /* ChouTiUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ChouTiUI;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 78617FB4077391B15B2334E1 /* Project object */;
 }

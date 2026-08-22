@@ -12,6 +12,10 @@ LIBRESPOT_PATCHES=(
     "$ROOT_DIR/patches/librespot-auth-error-classification.patch"
     "$ROOT_DIR/patches/librespot-audio-progress.patch"
 )
+source "$ROOT_DIR/script/vendor_choutiui.sh"
+CHOUTIUI_DIR="$ROOT_DIR/research-repos/ChouTiUI"
+CHOUTI_DIR="$ROOT_DIR/research-repos/ChouTi"
+COMPOSEUI_DIR="$ROOT_DIR/research-repos/ComposeUI"
 XCODE_PROJECT_FILE="$ROOT_DIR/Nanyin.xcodeproj/project.pbxproj"
 
 export PATH="$HOME/.local/share/mise/shims:$HOME/.cargo/bin:$PATH"
@@ -44,6 +48,35 @@ for patch in "${LIBRESPOT_PATCHES[@]}"; do
     git -C "$LIBRESPOT_DIR" apply --reverse --check --unidiff-zero "$patch" \
         || fail "required librespot patch is not applied exactly: ${patch##*/}"
 done
+
+step "checking vendored ChouTiUI wiring"
+[[ -d "$CHOUTIUI_DIR/.git" ]] || fail "research-repos/ChouTiUI checkout is missing; run script/vendor_choutiui.sh"
+[[ -d "$CHOUTI_DIR/.git" ]] || fail "research-repos/ChouTi checkout is missing; run script/vendor_choutiui.sh"
+[[ -d "$COMPOSEUI_DIR/.git" ]] || fail "research-repos/ComposeUI checkout is missing; run script/vendor_choutiui.sh"
+[[ "$(git -C "$CHOUTIUI_DIR" rev-parse HEAD^)" == "$CHOUTIUI_SHA" ]] \
+    || fail "ChouTiUI is not based on the pinned revision"
+[[ "$(git -C "$CHOUTI_DIR" rev-parse HEAD)" == "$CHOUTI_SHA" ]] \
+    || fail "ChouTi is not at the pinned revision"
+[[ "$(git -C "$COMPOSEUI_DIR" rev-parse HEAD)" == "$COMPOSEUI_SHA" ]] \
+    || fail "ComposeUI is not at the pinned revision"
+for checkout in "$CHOUTIUI_DIR" "$CHOUTI_DIR" "$COMPOSEUI_DIR"; do
+    [[ -z "$(git -C "$checkout" status --porcelain)" ]] \
+        || fail "${checkout##*/} vendored checkout has local changes"
+done
+git -C "$CHOUTIUI_DIR" apply --reverse --check "$CHOUTIUI_PATCH" \
+    || fail "required ChouTiUI path-dependency patch is not applied exactly"
+rg -q '\.package\(path: "\.\./ChouTi"\)' "$CHOUTIUI_DIR/Package.swift" \
+    || fail "ChouTiUI is not wired to the vendored ChouTi checkout"
+rg -q '\.package\(path: "\.\./ComposeUI"\)' "$CHOUTIUI_DIR/Package.swift" \
+    || fail "ChouTiUI is not wired to the vendored ComposeUI checkout"
+rg -q 'path: research-repos/ChouTiUI' "$ROOT_DIR/project.yml" \
+    || fail "project.yml is not wired to the vendored ChouTiUI package"
+while IFS= read -r source; do
+    [[ "$source" == "$ROOT_DIR/NanyinApp/Classic/Chrome/"* ]] \
+        || fail "ChouTiUI import escaped Classic/Chrome: ${source#"$ROOT_DIR/"}"
+    ! rg -q '^import SwiftUI$' "$source" \
+        || fail "file imports both ChouTiUI and SwiftUI: ${source#"$ROOT_DIR/"}"
+done < <(rg -l '^import ChouTiUI$' "$ROOT_DIR/NanyinApp" -g '*.swift')
 
 command -v mise >/dev/null 2>&1 || fail "mise is required"
 command -v xcrun >/dev/null 2>&1 || fail "Xcode command-line tools are required"

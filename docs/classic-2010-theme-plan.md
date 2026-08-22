@@ -2,6 +2,8 @@
 
 Status: design direction confirmed on 2026-08-22. This plan covers implementation sequencing and acceptance criteria; it does not authorize live Spotify testing.
 
+Related: `choutiui-research-and-plan.md` records the 2026-08-22 ChouTiUI evaluation — decision (revised same day): narrow adoption. ChouTiUI is vendored at pinned revisions (librespot convention) and renders Classic-2010 chrome components (toolbar, search field, section bars, pill/transport buttons, slider tracks) behind `NSViewRepresentable` bridges; `List` rows and all Nanyin Dark surfaces stay pure SwiftUI. It inserts a Phase 2.5 (vendoring + bridge spike) between the token and shell phases.
+
 ## Outcome
 
 Add a runtime-switchable `Classic 2010` theme to Nanyin, based on the 2006–2010 Spotify desktop design documented by founding design lead Rasmus Andersson, while retaining Nanyin's identity, features, native macOS behavior, accessibility, and performance.
