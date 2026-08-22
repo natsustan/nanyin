@@ -535,7 +535,7 @@ private struct LibraryTile: View {
                     .resizable()
                     .scaledToFill()
             } else {
-                ArtworkView(url: artworkURL, size: 160) {
+                ArtworkView(url: artworkURL, size: 170) {
                     placeholderCover
                 }
             }

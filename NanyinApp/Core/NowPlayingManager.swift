@@ -16,6 +16,7 @@ final class NowPlayingManager {
 
     private var registered = false
     private var artworkTask: Task<Void, Never>?
+    private var artworkGeneration = 0
     private var currentArtworkURL: URL?
     private var currentArtworkImage: NSImage?
 
@@ -85,6 +86,7 @@ final class NowPlayingManager {
         if artworkChanged {
             artworkTask?.cancel()
             artworkTask = nil
+            artworkGeneration &+= 1
             currentArtworkURL = artworkURL
             currentArtworkImage = nil
         }
@@ -93,14 +95,20 @@ final class NowPlayingManager {
                 ?? ArtworkCache.shared.cachedImage(for: artworkURL, targetSize: 640) {
                 currentArtworkImage = image
                 mergeArtwork(image)
-            } else if artworkChanged {
+            } else if artworkTask == nil {
+                let generation = artworkGeneration
                 artworkTask = Task { [weak self] in
+                    defer {
+                        if self?.artworkGeneration == generation {
+                            self?.artworkTask = nil
+                        }
+                    }
                     guard let image = await ArtworkCache.shared.image(
                         for: artworkURL,
                         targetSize: 640
                     ),
                           !Task.isCancelled,
-                          self?.currentArtworkURL == artworkURL else { return }
+                          self?.artworkGeneration == generation else { return }
                     self?.currentArtworkImage = image
                     self?.mergeArtwork(image)
                 }
@@ -117,6 +125,8 @@ final class NowPlayingManager {
 
     func clear() {
         artworkTask?.cancel()
+        artworkTask = nil
+        artworkGeneration &+= 1
         currentArtworkURL = nil
         currentArtworkImage = nil
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil

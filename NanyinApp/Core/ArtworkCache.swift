@@ -528,7 +528,7 @@ final class ArtworkCache {
         case .homeTopArtists:
             88
         case .library, .savedAlbums:
-            160
+            170
         case .queue:
             32
         case .detail:

@@ -339,7 +339,7 @@ private struct SavedAlbumCard: View {
     }
 
     private var cover: some View {
-        ArtworkView(url: album.album.artworkURL, size: 160) {
+        ArtworkView(url: album.album.artworkURL, size: 170) {
             placeholderCover
         }
         .aspectRatio(1, contentMode: .fit)

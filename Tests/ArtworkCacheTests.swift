@@ -76,13 +76,14 @@ private enum ArtworkCacheTests {
 
         async let small = cache.image(for: url, targetSize: 32)
         async let large = cache.image(for: url, targetSize: 112)
-        let images = await [small, large]
+        async let grid = cache.image(for: url, targetSize: 170)
+        let images = await [small, large, grid]
         let downloadCount = await loader.callCount
         let pixelSizes = await decoder.pixelSizes.sorted()
 
-        expect(images.allSatisfy { $0 != nil }, "both renditions return images")
+        expect(images.allSatisfy { $0 != nil }, "all renditions return images")
         expect(downloadCount == 1, "different renditions share one download")
-        expect(pixelSizes == [64, 320], "different pixel buckets decode separately")
+        expect(pixelSizes == [64, 320, 640], "different pixel buckets decode separately")
     }
 
     @MainActor
@@ -99,11 +100,11 @@ private enum ArtworkCacheTests {
 
         expect(decodeCount == 30, "saved albums decode only the hot prefix")
         expect(
-            cache.cachedImage(for: urls[29], targetSize: 160) != nil,
+            cache.cachedImage(for: urls[29], targetSize: 170) != nil,
             "last hot artwork is decoded"
         )
         expect(
-            cache.cachedImage(for: urls[30], targetSize: 160) == nil,
+            cache.cachedImage(for: urls[30], targetSize: 170) == nil,
             "cold artwork only warms the byte cache"
         )
     }
