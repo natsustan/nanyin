@@ -5,6 +5,8 @@ import Foundation
 struct PendingPlayIntent: Equatable {
     enum Call: Equatable {
         case context(uri: String, index: Int)
+        case tracks(uris: [String], index: Int)
+        case trackAt(uri: String, positionMs: UInt32)
     }
 
     let call: Call

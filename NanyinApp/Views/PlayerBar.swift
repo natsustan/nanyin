@@ -161,7 +161,7 @@ struct PlayerBar: View {
             displayPosition = 0
             while !Task.isCancelled {
                 if draggingProgress == nil {
-                    let p = Core.positionMs
+                    let p = app.playbackPositionMs
                     if p != displayPosition { displayPosition = p }
                 }
                 try? await Task.sleep(for: .milliseconds(400))

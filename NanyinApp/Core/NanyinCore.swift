@@ -18,7 +18,7 @@ enum Core {
 
     /// Playback event delivered from Rust as JSON.
     enum Event {
-        case loading(uri: String, positionMs: Int)
+        case loading(uri: String, positionMs: Int, playRequestID: UInt64)
         case playing(uri: String, positionMs: Int, playRequestID: UInt64)
         case paused(uri: String, positionMs: Int, playRequestID: UInt64)
         case stopped(uri: String, playRequestID: UInt64)
@@ -29,11 +29,12 @@ enum Core {
             title: String?,
             artists: String?,
             album: String?,
-            coverURL: String?
+            coverURL: String?,
+            playRequestID: UInt64
         )
         case shuffleChanged(Bool)
         case repeatChanged(context: Bool, track: Bool)
-        case endOfTrack
+        case endOfTrack(playRequestID: UInt64)
     }
 
     nonisolated(unsafe) static var onEvent: (@MainActor (UInt64, Event) -> Void)?
@@ -89,7 +90,12 @@ enum Core {
 
         let event: Event
         switch eventName {
-        case "loading": event = .loading(uri: uri, positionMs: position)
+        case "loading":
+            event = .loading(
+                uri: uri,
+                positionMs: position,
+                playRequestID: playRequestID
+            )
         case "playing":
             event = .playing(
                 uri: uri,
@@ -111,9 +117,10 @@ enum Core {
                 title: object["title"] as? String,
                 artists: object["artists"] as? String,
                 album: object["album"] as? String,
-                coverURL: object["cover_url"] as? String
+                coverURL: object["cover_url"] as? String,
+                playRequestID: playRequestID
             )
-        case "end_of_track": event = .endOfTrack
+        case "end_of_track": event = .endOfTrack(playRequestID: playRequestID)
         case "shuffle_changed": event = .shuffleChanged(object["shuffle"] as? Bool ?? false)
         case "repeat_changed":
             event = .repeatChanged(
@@ -220,6 +227,10 @@ enum Core {
               let json = String(data: data, encoding: .utf8)
         else { return -1 }
         return json.withCString { nanyin_play_tracks($0, UInt32(startIndex)) }
+    }
+
+    nonisolated static func playTrack(_ uri: String, at positionMs: UInt32) -> Int32 {
+        uri.withCString { nanyin_play_track_at($0, positionMs) }
     }
 
     nonisolated static func playContext(_ uri: String, startIndex: Int = 0) -> Int32 {
