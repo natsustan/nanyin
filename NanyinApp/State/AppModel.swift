@@ -145,10 +145,16 @@ final class AppModel {
     }
 
     private(set) var nowPlaying: NowPlaying?
+    private var localPlaybackRestore: LocalPlaybackRestoreState?
+    private var localPlaybackRequestID: UInt64?
     private(set) var playbackConnectionState: PlaybackConnectionState = .connecting
 
     var isPlaybackReady: Bool {
         playbackConnectionState == .ready
+    }
+
+    var playbackPositionMs: UInt32 {
+        localPlaybackRestore?.snapshot.playablePositionMs ?? Core.positionMs
     }
 
     var connectionNote: String? {
@@ -1445,6 +1451,8 @@ final class AppModel {
 
     func signIn() {
         guard authState == .loggedOut else { return }
+        LocalPlaybackStore.clear()
+        localPlaybackRestore = nil
         authState = .signingIn
         authError = nil
         let epoch = accountEpoch
@@ -1493,6 +1501,7 @@ final class AppModel {
 
     /// Clean shutdown of the Rust core (Connect goodbye) — app quit path.
     func shutdown() {
+        persistLocalPlaybackSnapshot()
         cancelPlaybackWatchdog()
         clearPendingPlayIntent()
         cancelAudioStallWatchdog()
@@ -1590,6 +1599,8 @@ final class AppModel {
         userDisplayName = ""
         userId = ""
         nowPlaying = nil
+        localPlaybackRestore = nil
+        localPlaybackRequestID = nil
         isPlaying = false
         isBuffering = false
         durationMs = 0
@@ -1608,6 +1619,7 @@ final class AppModel {
     func signOut() async {
         guard authState == .loggedIn else { return }
         authState = .signingOut
+        LocalPlaybackStore.clear()
         invalidateAccountSession()
         var keychainErrors: [String] = []
         for kind in [SpotifyAuth.TokenKind.web, .playback] {
@@ -1634,6 +1646,42 @@ final class AppModel {
         playbackAccessToken = playbackToken.accessToken
     }
 
+    private func restoreLocalPlaybackSnapshot(for accountID: String) {
+        guard let snapshot = LocalPlaybackStore.load(for: accountID) else { return }
+        localPlaybackRestore = .idle(snapshot)
+        durationMs = snapshot.durationMs
+        nowPlaying = NowPlaying(
+            uri: snapshot.uri,
+            title: snapshot.title,
+            artist: snapshot.artist,
+            artists: [],
+            album: snapshot.album,
+            albumId: snapshot.albumId,
+            artworkURL: snapshot.artworkURL
+        )
+        isPlaying = false
+        isBuffering = false
+    }
+
+    private func persistLocalPlaybackSnapshot() {
+        guard authState == .loggedIn,
+              !userId.isEmpty,
+              let nowPlaying,
+              let localPlaybackRequestID,
+              localPlaybackRequestID == Core.playbackProgress.playRequestID else { return }
+        LocalPlaybackStore.save(LocalPlaybackSnapshot(
+            accountID: userId,
+            uri: nowPlaying.uri,
+            title: nowPlaying.title,
+            artist: nowPlaying.artist,
+            album: nowPlaying.album,
+            albumId: nowPlaying.albumId,
+            artworkURL: nowPlaying.artworkURL,
+            durationMs: durationMs,
+            positionMs: playbackPositionMs
+        ))
+    }
+
     private func restoreUserAndLibrary(for epoch: Int) {
         Task {
             guard epoch == accountEpoch, authState == .loggedIn else { return }
@@ -1645,6 +1693,7 @@ final class AppModel {
                 guard epoch == accountEpoch, authState == .loggedIn else { return }
                 userDisplayName = profile.displayName ?? profile.id
                 userId = profile.id
+                restoreLocalPlaybackSnapshot(for: profile.id)
                 dlog("/v1/me OK: \(startedAt.duration(to: .now))")
             } catch {
                 dlog("/v1/me failed: \(error)")
@@ -1727,6 +1776,7 @@ final class AppModel {
                 activePlaybackGeneration = generation
                 playbackConnectionState = .ready
                 nowPlayingMgr.activate()
+                pushNowPlayingInfo()
                 dlog("player init OK: \(startedAt.duration(to: .now))")
             case let .credentialsRejected(message):
                 dlog("player init credentials rejected: \(message)")
@@ -2130,6 +2180,8 @@ final class AppModel {
     func play(track: SpotifyClient.Track, contextKey: String, index preferredIndex: Int? = nil) {
         cancelPendingPlayForUserCommand()
         guard isPlaybackReady else { return }
+        discardLocalPlaybackRestore()
+        localPlaybackRequestID = nil
         cancelAudioStallWatchdog()
         if pendingQueueHistory == nil, let nowPlaying, nowPlaying.uri != track.uri {
             pendingQueueHistory = (nowPlaying, durationMs)
@@ -2178,13 +2230,33 @@ final class AppModel {
     /// Bounded-context fallback: 50 tracks from the clicked index.
     private func playWindowed(track: SpotifyClient.Track, contextKey: String, index: Int) {
         guard isPlaybackReady else { return }
+        let previousPlayRequestID = Core.playbackProgress.playRequestID
         guard let context = tracksByContext[contextKey] else {
-            _ = Core.playTracks([track.uri])
+            let rc = Core.playTracks([track.uri])
+            if rc == 0 {
+                setPendingPlayIntent(
+                    call: .tracks(uris: [track.uri], index: 0),
+                    trackURI: track.uri,
+                    previousPlayRequestID: previousPlayRequestID
+                )
+            } else {
+                isBuffering = false
+            }
             return
         }
         let window = context.map(\.uri).dropFirst(index).prefix(50)
-        let rc = Core.playTracks(Array(window), startIndex: 0)
+        let uris = Array(window)
+        let rc = Core.playTracks(uris, startIndex: 0)
         dlog("playWindowed(\(window.count) uris) rc=\(rc)")
+        if rc == 0 {
+            setPendingPlayIntent(
+                call: .tracks(uris: uris, index: 0),
+                trackURI: track.uri,
+                previousPlayRequestID: previousPlayRequestID
+            )
+        } else {
+            isBuffering = false
+        }
     }
 
     /// If a context load doesn't produce audio within 8s, retry windowed.
@@ -2211,6 +2283,8 @@ final class AppModel {
     private func playServerContext(_ contextURI: String) {
         cancelPendingPlayForUserCommand()
         guard isPlaybackReady else { return }
+        discardLocalPlaybackRestore()
+        localPlaybackRequestID = nil
         cancelAudioStallWatchdog()
         isBuffering = true
         let previousPlayRequestID = Core.playbackProgress.playRequestID
@@ -2277,6 +2351,7 @@ final class AppModel {
             try? await Task.sleep(for: .seconds(60))
             guard !Task.isCancelled, pendingPlayIntent == intent else { return }
             dlog("pending play expired without confirmation")
+            restoreIdlePlaybackIfStarting()
             clearPendingPlayIntent()
             isBuffering = false
         }
@@ -2294,8 +2369,19 @@ final class AppModel {
         if pendingPlayIntent != nil {
             isBuffering = false
         }
+        restoreIdlePlaybackIfStarting()
         cancelPlaybackWatchdog()
         clearPendingPlayIntent()
+    }
+
+    private func discardLocalPlaybackRestore() {
+        localPlaybackRestore = nil
+        LocalPlaybackStore.clear()
+    }
+
+    private func restoreIdlePlaybackIfStarting() {
+        guard let restore = localPlaybackRestore, restore.isStarting else { return }
+        localPlaybackRestore = .idle(restore.snapshot)
     }
 
     private func cancelPlaybackWatchdog() {
@@ -2429,8 +2515,23 @@ final class AppModel {
     }
 
     private func handle(_ event: Core.Event, generation: UInt64) {
+        // Keep startup restoration strictly local. While its explicit play is
+        // starting, only the matching new Playing event may enter live state;
+        // queued events from the inactive session remain ignored.
+        if let restore = localPlaybackRestore {
+            guard restore.isStarting,
+                  case let .playing(uri, _, playRequestID) = event,
+                  playRequestID == Core.playbackProgress.playRequestID,
+                  pendingPlayIntent?.isConfirmed(
+                      byPlayingURI: uri,
+                      playRequestID: playRequestID
+                  ) == true else { return }
+            localPlaybackRestore = nil
+        }
         switch event {
         case let .playing(uri, _, playRequestID):
+            guard playRequestID == Core.playbackProgress.playRequestID else { return }
+            let hadPendingPlay = pendingPlayIntent != nil
             let confirmsPendingPlay = pendingPlayIntent?.isConfirmed(
                 byPlayingURI: uri,
                 playRequestID: playRequestID
@@ -2438,6 +2539,11 @@ final class AppModel {
             if confirmsPendingPlay {
                 cancelPlaybackWatchdog()
                 clearPendingPlayIntent()
+                if hadPendingPlay {
+                    localPlaybackRequestID = playRequestID
+                } else if localPlaybackRequestID != playRequestID {
+                    localPlaybackRequestID = nil
+                }
             }
             isPlaying = true
             isBuffering = !confirmsPendingPlay
@@ -2446,6 +2552,7 @@ final class AppModel {
             }
             pushNowPlayingInfo()
         case let .paused(_, positionMs, playRequestID):
+            guard playRequestID == Core.playbackProgress.playRequestID else { return }
             guard pendingPlayIntent?.isEventFromPreviousRequest(
                 playRequestID: playRequestID
             ) != true else { return }
@@ -2458,6 +2565,7 @@ final class AppModel {
             pushNowPlayingInfo()
             resumeDeferredReconnectIfNeeded()
         case let .stopped(_, playRequestID):
+            guard playRequestID == Core.playbackProgress.playRequestID else { return }
             guard pendingPlayIntent?.isEventFromPreviousRequest(
                 playRequestID: playRequestID
             ) != true else { return }
@@ -2468,11 +2576,21 @@ final class AppModel {
             isBuffering = false
             pushNowPlayingInfo()
             resumeDeferredReconnectIfNeeded()
-        case let .loading(uri, _):
+        case let .loading(uri, _, playRequestID):
+            guard playRequestID == Core.playbackProgress.playRequestID else { return }
             cancelAudioStallWatchdog()
             isBuffering = true
             fetchMetadata(uri: uri, playbackGeneration: generation)
-        case let .trackChanged(uri, durationMs, title, artists, album, coverURL):
+        case let .trackChanged(
+            uri,
+            durationMs,
+            title,
+            artists,
+            album,
+            coverURL,
+            playRequestID
+        ):
+            guard playRequestID == Core.playbackProgress.playRequestID else { return }
             let previous = nowPlaying
             let previousDurationMs = self.durationMs
             self.durationMs = UInt32(durationMs)
@@ -2707,6 +2825,12 @@ final class AppModel {
             case let .context(uri, index):
                 rc = Core.playContext(uri, startIndex: index)
                 dlog("replay playContext(\(uri), index \(index)) rc=\(rc)")
+            case let .tracks(uris, index):
+                rc = Core.playTracks(uris, startIndex: index)
+                dlog("replay playTracks(\(uris.count), index \(index)) rc=\(rc)")
+            case let .trackAt(uri, positionMs):
+                rc = Core.playTrack(uri, at: positionMs)
+                dlog("replay playTrack(\(uri), position \(positionMs)) rc=\(rc)")
             }
             guard rc == 0 else {
                 failPendingPlay(intent)
@@ -2726,6 +2850,7 @@ final class AppModel {
 
     private func failPendingPlay(_ intent: PendingPlayIntent) {
         guard pendingPlayIntent == intent else { return }
+        restoreIdlePlaybackIfStarting()
         clearPendingPlayIntent()
         cancelPlaybackWatchdog()
         isBuffering = false
@@ -2739,25 +2864,53 @@ final class AppModel {
     func playURI(_ input: String) {
         cancelPendingPlayForUserCommand()
         guard isPlaybackReady else { return }
+        discardLocalPlaybackRestore()
+        localPlaybackRequestID = nil
         cancelAudioStallWatchdog()
         var uri = input.trimmingCharacters(in: .whitespacesAndNewlines)
         if !uri.hasPrefix("spotify:"), let id = SpotifyClient.trackId(from: uri) {
             uri = "spotify:track:\(id)"
         }
         dlog("playURI → \(uri)")
+        let previousPlayRequestID = Core.playbackProgress.playRequestID
         let rc = Core.playTracks([uri])
         dlog("playTracks rc=\(rc)")
         if rc == 0 {
             isBuffering = true
+            setPendingPlayIntent(
+                call: .tracks(uris: [uri], index: 0),
+                trackURI: uri.hasPrefix("spotify:track:") ? uri : nil,
+                previousPlayRequestID: previousPlayRequestID
+            )
         }
     }
 
     func togglePlay() {
         cancelPendingPlayForUserCommand()
         guard isPlaybackReady else { return }
+        if localPlaybackRestore == nil {
+            LocalPlaybackStore.clear()
+        }
         if isPlaying {
             _ = Core.pause()
+        } else if let restore = localPlaybackRestore,
+                  !restore.isStarting,
+                  case let snapshot = restore.snapshot,
+                  snapshot.uri == nowPlaying?.uri {
+            let previousPlayRequestID = Core.playbackProgress.playRequestID
+            let rc = Core.playTrack(snapshot.uri, at: snapshot.playablePositionMs)
+            dlog("playTrack(restored, position \(snapshot.playablePositionMs)) rc=\(rc)")
+            if rc == 0 {
+                localPlaybackRestore = .starting(snapshot)
+                isBuffering = true
+                setPendingPlayIntent(
+                    call: .trackAt(uri: snapshot.uri, positionMs: snapshot.playablePositionMs),
+                    trackURI: snapshot.uri,
+                    previousPlayRequestID: previousPlayRequestID
+                )
+            }
         } else {
+            discardLocalPlaybackRestore()
             _ = Core.resume()
         }
     }
@@ -2773,20 +2926,20 @@ final class AppModel {
             artist: np.artist,
             album: np.album,
             durationMs: durationMs,
-            positionMs: Core.positionMs,
+            positionMs: playbackPositionMs,
             isPlaying: isPlaying,
             artworkURL: np.artworkURL
         )
     }
 
     func toggleShuffle() {
-        guard isPlaybackReady else { return }
+        guard isPlaybackReady, localPlaybackRestore == nil else { return }
         shuffle.toggle()
         _ = Core.setShuffle(shuffle)
     }
 
     func cycleRepeat() {
-        guard isPlaybackReady else { return }
+        guard isPlaybackReady, localPlaybackRestore == nil else { return }
         switch repeatMode {
         case .off: repeatMode = .all
         case .all: repeatMode = .one
@@ -2798,7 +2951,7 @@ final class AppModel {
 
     /// Appends to the active queue (right-click → Add to queue).
     func addToQueue(_ track: SpotifyClient.Track) {
-        guard isPlaybackReady else { return }
+        guard isPlaybackReady, localPlaybackRestore == nil else { return }
         let rc = Core.addToQueue(track.uri)
         if rc == 0 {
             refreshQueueSoon()
@@ -2807,26 +2960,37 @@ final class AppModel {
 
     func seek(to fraction: Double) {
         guard isPlaybackReady else { return }
-        _ = Core.seek(UInt32(fraction * Double(max(durationMs, 1))))
+        let positionMs = UInt32(fraction * Double(max(durationMs, 1)))
+        if let restore = localPlaybackRestore {
+            let updated = restore.snapshot.withPosition(positionMs)
+            localPlaybackRestore = restore.isStarting ? .starting(updated) : .idle(updated)
+            LocalPlaybackStore.save(updated)
+        } else {
+            LocalPlaybackStore.clear()
+            _ = Core.seek(positionMs)
+        }
     }
 
     func setVolume(_ fraction: Double) {
         guard isPlaybackReady else { return }
         volume = fraction
         AudioRenderer.shared.volume = Float(fraction)
+        guard localPlaybackRestore == nil else { return }
         _ = Core.setVolume(UInt16(fraction * 65_535))
     }
 
     func next() {
         cancelPendingPlayForUserCommand()
-        guard isPlaybackReady else { return }
+        guard isPlaybackReady, localPlaybackRestore == nil else { return }
+        discardLocalPlaybackRestore()
         cancelAudioStallWatchdog()
         _ = Core.next()
     }
 
     func prev() {
         cancelPendingPlayForUserCommand()
-        guard isPlaybackReady else { return }
+        guard isPlaybackReady, localPlaybackRestore == nil else { return }
+        discardLocalPlaybackRestore()
         cancelAudioStallWatchdog()
         _ = Core.prev()
     }

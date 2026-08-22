@@ -671,7 +671,11 @@ fn handle_player_event(
     }
 
     match event {
-        PlayerEvent::Loading { track_id, position_ms, .. } => {
+        PlayerEvent::Loading {
+            play_request_id,
+            track_id,
+            position_ms,
+        } => {
             // Buffering: audio hasn't started yet. Freeze the interpolated
             // position clock — otherwise the UI keeps counting from the
             // previous track's timestamp while nothing is audible.
@@ -682,6 +686,7 @@ fn handle_player_event(
                 "event": "loading",
                 "track_uri": track_id.to_string(),
                 "position_ms": position_ms,
+                "play_request_id": play_request_id,
             }), callback_generation);
         }
         PlayerEvent::Playing {
@@ -743,6 +748,7 @@ fn handle_player_event(
             confirm_position(position_ms);
         }
         PlayerEvent::TrackChanged { audio_item } => {
+            let play_request_id = CURRENT_PLAY_REQUEST_ID.load(Ordering::Relaxed);
             let uri = audio_item.track_id.to_string();
             let duration = audio_item.duration_ms;
             *CURRENT_URI.lock().unwrap() = Some(uri.clone());
@@ -773,6 +779,7 @@ fn handle_player_event(
                 "artists": artists,
                 "album": album,
                 "cover_url": cover,
+                "play_request_id": play_request_id,
             }), callback_generation);
         }
         PlayerEvent::EndOfTrack { .. } => {
@@ -851,6 +858,28 @@ pub extern "C" fn nanyin_play_tracks(track_uris_json: *const c_char, start_index
         return -1;
     }
 
+    play_tracks(uris, start_index, 0)
+}
+
+/// Starts one track at a locally persisted position. This is invoked only
+/// after an explicit user play command; restoring the UI alone does not
+/// activate this Connect device.
+#[no_mangle]
+pub extern "C" fn nanyin_play_track_at(track_uri: *const c_char, position_ms: u32) -> i32 {
+    if track_uri.is_null() {
+        return -1;
+    }
+    let uri = unsafe {
+        match CStr::from_ptr(track_uri).to_str() {
+            Ok(s) if s.starts_with("spotify:track:") => s.to_string(),
+            _ => return -1,
+        }
+    };
+
+    play_tracks(vec![uri], 0, position_ms)
+}
+
+fn play_tracks(uris: Vec<String>, start_index: u32, position_ms: u32) -> i32 {
     let spirc = match require_spirc() {
         Ok(s) => s,
         Err(code) => return code,
@@ -860,16 +889,19 @@ pub extern "C" fn nanyin_play_tracks(track_uris_json: *const c_char, start_index
         uris,
         LoadRequestOptions {
             start_playing: true,
+            seek_to: position_ms,
             playing_track: Some(librespot_connect::PlayingTrack::Index(start_index)),
             ..Default::default()
         },
     );
 
-    eprintln!("nanyin_core: play_tracks → activate + load (index {start_index})");
+    eprintln!(
+        "nanyin_core: play_tracks → activate + load (index {start_index}, position {position_ms}ms)"
+    );
     // Optimistic UI guard: stop the position clock immediately so the UI
     // doesn't keep counting the previous track while this one buffers.
     IS_PLAYING.store(false, Ordering::SeqCst);
-    update_position(0);
+    update_position(position_ms);
     // Claim the active-device role first — Spirc ignores commands while
     // this device is Not Active (the "ignored while Not Active" WARN).
     if let Err(e) = spirc.activate() {

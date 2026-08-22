@@ -12,6 +12,11 @@ private enum StateReducerTests {
         testNewerServerObservationWinsOverFailedWrite()
         testSignOutRejectsLateCredentialPersistence()
 
+        testLocalPlaybackSnapshotRoundTrips()
+        testLocalPlaybackSnapshotRejectsAnotherAccount()
+        testLocalPlaybackPositionClampsToDuration()
+        testLocalPlaybackRestoreStateKeepsSnapshotWhileStarting()
+
         testSaveOverrideInsertsAtTopAndBumpsCount()
         testRemoveOverrideDropsConfirmedRowAndCount()
         testStalePrefixCannotResurrectRemovedAlbum()
@@ -683,6 +688,104 @@ private enum StateReducerTests {
         expect(cache.needsFullReconciliation, "expiry marking must force full re-paging")
     }
 
+    // MARK: - Local playback
+
+    private static func testLocalPlaybackSnapshotRoundTrips() {
+        let suite = "com.nanyin.tests.local-playback.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let snapshot = LocalPlaybackSnapshot(
+            accountID: "account-a",
+            uri: "spotify:track:abc",
+            title: "Song",
+            artist: "Artist",
+            album: "Album",
+            albumId: "album-id",
+            artworkURL: URL(string: "https://example.com/cover.jpg"),
+            durationMs: 180_000,
+            positionMs: 42_000
+        )
+
+        LocalPlaybackStore.save(snapshot, to: defaults)
+        expect(
+            LocalPlaybackStore.load(for: "account-a", from: defaults) == snapshot,
+            "local playback snapshot must round-trip through UserDefaults"
+        )
+        LocalPlaybackStore.clear(from: defaults)
+        expect(
+            LocalPlaybackStore.load(for: "account-a", from: defaults) == nil,
+            "clearing local playback must remove the persisted snapshot"
+        )
+    }
+
+    private static func testLocalPlaybackPositionClampsToDuration() {
+        let snapshot = LocalPlaybackSnapshot(
+            accountID: "account-a",
+            uri: "spotify:track:abc",
+            title: "Song",
+            artist: "Artist",
+            album: "Album",
+            albumId: nil,
+            artworkURL: nil,
+            durationMs: 100,
+            positionMs: 150
+        )
+        expect(
+            snapshot.playablePositionMs == 100,
+            "restored playback must not seek past the track duration"
+        )
+    }
+
+    private static func testLocalPlaybackSnapshotRejectsAnotherAccount() {
+        let suite = "com.nanyin.tests.local-playback-account.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let snapshot = LocalPlaybackSnapshot(
+            accountID: "account-a",
+            uri: "spotify:track:abc",
+            title: "Song",
+            artist: "Artist",
+            album: "Album",
+            albumId: nil,
+            artworkURL: nil,
+            durationMs: 100,
+            positionMs: 50
+        )
+
+        LocalPlaybackStore.save(snapshot, to: defaults)
+        expect(
+            LocalPlaybackStore.load(for: "account-b", from: defaults) == nil,
+            "a snapshot from another Spotify account must not be restored"
+        )
+        expect(
+            LocalPlaybackStore.load(for: "account-a", from: defaults) == nil,
+            "an account mismatch must remove the stale snapshot"
+        )
+    }
+
+    private static func testLocalPlaybackRestoreStateKeepsSnapshotWhileStarting() {
+        let snapshot = LocalPlaybackSnapshot(
+            accountID: "account-a",
+            uri: "spotify:track:abc",
+            title: "Song",
+            artist: "Artist",
+            album: "Album",
+            albumId: nil,
+            artworkURL: nil,
+            durationMs: 100,
+            positionMs: 50
+        )
+        let idle = LocalPlaybackRestoreState.idle(snapshot)
+        let starting = LocalPlaybackRestoreState.starting(snapshot)
+
+        expect(!idle.isStarting, "a restored snapshot must begin idle")
+        expect(starting.isStarting, "an explicit restored play must enter starting state")
+        expect(
+            starting.snapshot == snapshot,
+            "starting playback must retain the snapshot until Playing confirms it"
+        )
+    }
+
     // MARK: - PlaybackStallDetector
 
     private static func playbackSnapshot(
@@ -922,6 +1025,17 @@ private enum StateReducerTests {
         expect(
             intent.trackURI == "spotify:track:def",
             "the best-effort confirmation URI must survive reconnect"
+        )
+
+        let restored = PendingPlayIntent(
+            call: .trackAt(uri: "spotify:track:def", positionMs: 42_000),
+            trackURI: "spotify:track:def",
+            accountEpoch: 7,
+            previousPlayRequestID: 10
+        )
+        expect(
+            restored.call == .trackAt(uri: "spotify:track:def", positionMs: 42_000),
+            "restored playback must retain its URI and position for one replay"
         )
     }
 

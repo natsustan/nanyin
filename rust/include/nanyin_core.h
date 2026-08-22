@@ -40,6 +40,9 @@ int32_t nanyin_shutdown(void);
 /// For large contexts prefer nanyin_play_context (server-side resolution).
 int32_t nanyin_play_tracks(const char* track_uris_json, uint32_t start_index);
 
+/// Plays one track from a locally restored position.
+int32_t nanyin_play_track_at(const char* track_uri, uint32_t position_ms);
+
 /// Plays a server-resolved context URI (e.g. "spotify:playlist:...",
 /// "spotify:user:<name>:collection" for Liked Songs) starting at start_index.
 int32_t nanyin_play_context(const char* context_uri, uint32_t start_index);
