@@ -2081,7 +2081,10 @@ final class AppModel {
                 scheduleAudioStallWatchdog(generation: generation)
             }
             pushNowPlayingInfo()
-        case let .paused(_, positionMs):
+        case let .paused(_, positionMs, playRequestID):
+            guard pendingPlayIntent?.isEventFromPreviousRequest(
+                playRequestID: playRequestID
+            ) != true else { return }
             cancelPlaybackWatchdog()
             clearPendingPlayIntent()
             cancelAudioStallWatchdog()
@@ -2090,7 +2093,10 @@ final class AppModel {
             _ = positionMs
             pushNowPlayingInfo()
             resumeDeferredReconnectIfNeeded()
-        case .stopped:
+        case let .stopped(_, playRequestID):
+            guard pendingPlayIntent?.isEventFromPreviousRequest(
+                playRequestID: playRequestID
+            ) != true else { return }
             cancelPlaybackWatchdog()
             clearPendingPlayIntent()
             cancelAudioStallWatchdog()
@@ -2239,43 +2245,24 @@ final class AppModel {
             }
             // 1) Try re-init with the CURRENT access token — cheap and usually
             //    sufficient (librespot also refreshes internally via login5).
-            // A transient network drop can outlive the first 30s handshake.
-            // Retry with bounded backoff, but never refresh the token for a
-            // generic connection failure or loop indefinitely.
-            let retryDelays: [Duration] = [.seconds(2), .seconds(8)]
-            var retryIndex = 0
-            reconnectAttempts: while true {
-                guard isCurrentPlayback(epoch: epoch, generation: generation) else { return }
-                let result = await Core.initializePlayer(
-                    accessToken: accessToken,
-                    deviceId: deviceId,
-                    generation: generation
-                )
-                guard isCurrentPlayback(epoch: epoch, generation: generation) else { return }
-                switch result {
-                case .connected:
-                    activePlaybackGeneration = generation
-                    playbackConnectionState = .ready
-                    schedulePendingPlayReplay(epoch: epoch, generation: generation)
-                    return
-                case let .failed(code, message):
-                    dlog("reconnect kept current token after init rc=\(code): \(message)")
-                    guard retryIndex < retryDelays.count else {
-                        playbackConnectionState = .unavailable("Connection lost — \(message)")
-                        return
-                    }
-                    let delay = retryDelays[retryIndex]
-                    retryIndex += 1
-                    dlog("reconnect retry \(retryIndex + 1) in \(delay)")
-                    do {
-                        try await Task.sleep(for: delay)
-                    } catch {
-                        return
-                    }
-                case let .credentialsRejected(message):
-                    dlog("reconnect credentials rejected: \(message)")
-                    break reconnectAttempts
-                }
+            let result = await Core.initializePlayer(
+                accessToken: accessToken,
+                deviceId: deviceId,
+                generation: generation
+            )
+            guard isCurrentPlayback(epoch: epoch, generation: generation) else { return }
+            switch result {
+            case .connected:
+                activePlaybackGeneration = generation
+                playbackConnectionState = .ready
+                schedulePendingPlayReplay(epoch: epoch, generation: generation)
+                return
+            case let .failed(code, message):
+                dlog("reconnect kept current token after init rc=\(code): \(message)")
+                playbackConnectionState = .unavailable("Connection lost — \(message)")
+                return
+            case let .credentialsRejected(message):
+                dlog("reconnect credentials rejected: \(message)")
             }
             // 2) Only an explicit credential rejection may mint a fresh token.
             do {

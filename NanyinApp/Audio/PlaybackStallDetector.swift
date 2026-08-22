@@ -121,7 +121,6 @@ struct PlaybackStallDetector {
         to current: PlaybackPipelineSnapshot
     ) -> Bool {
         current.renderer.renderedSamples > baseline.renderer.renderedSamples
-            || current.core.confirmedPositionMs > baseline.core.confirmedPositionMs
     }
 
     private func classify(

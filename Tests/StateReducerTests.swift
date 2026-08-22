@@ -49,6 +49,7 @@ private enum StateReducerTests {
         testPendingPlayIntentRejectsAnotherAccountEpoch()
         testPendingPlayIntentKeepsOriginalContextCall()
         testPendingPlayIntentMatchesPlayingEvent()
+        testPendingPlayIntentIdentifiesPreviousRequestEvents()
 
         testReconnectDefersWhileAudioIsProgressing()
         testReconnectDoesNotDeferWhenPlaybackNeedsControlPlane()
@@ -837,11 +838,11 @@ private enum StateReducerTests {
             "rendered PCM must confirm local recovery"
         )
         expect(
-            PlaybackStallDetector.recoveryMadeProgress(
+            !PlaybackStallDetector.recoveryMadeProgress(
                 from: baseline,
                 to: playbackSnapshot(rendered: 10, position: 42_001)
             ),
-            "confirmed decoder position must confirm local recovery"
+            "decoder progress without rendered PCM must still escalate"
         )
     }
 
@@ -944,6 +945,18 @@ private enum StateReducerTests {
                 playRequestID: 11
             ),
             "an unknown context track must accept Playing from its new request"
+        )
+    }
+
+    private static func testPendingPlayIntentIdentifiesPreviousRequestEvents() {
+        let intent = pendingPlayIntent()
+        expect(
+            intent.isEventFromPreviousRequest(playRequestID: 10),
+            "a terminal event from the previous request must not cancel the pending intent"
+        )
+        expect(
+            !intent.isEventFromPreviousRequest(playRequestID: 11),
+            "a terminal event from the new request must be handled normally"
         )
     }
 

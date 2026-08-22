@@ -20,8 +20,8 @@ enum Core {
     enum Event {
         case loading(uri: String, positionMs: Int)
         case playing(uri: String, positionMs: Int, playRequestID: UInt64)
-        case paused(uri: String, positionMs: Int)
-        case stopped(uri: String)
+        case paused(uri: String, positionMs: Int, playRequestID: UInt64)
+        case stopped(uri: String, playRequestID: UInt64)
         case position(positionMs: Int)
         case trackChanged(
             uri: String,
@@ -96,8 +96,13 @@ enum Core {
                 positionMs: position,
                 playRequestID: playRequestID
             )
-        case "paused": event = .paused(uri: uri, positionMs: position)
-        case "stopped": event = .stopped(uri: uri)
+        case "paused":
+            event = .paused(
+                uri: uri,
+                positionMs: position,
+                playRequestID: playRequestID
+            )
+        case "stopped": event = .stopped(uri: uri, playRequestID: playRequestID)
         case "position": event = .position(positionMs: position)
         case "track_changed":
             event = .trackChanged(

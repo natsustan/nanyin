@@ -48,4 +48,9 @@ struct PendingPlayIntent: Equatable {
             && playRequestID != previousPlayRequestID
             && (trackURI == nil || trackURI == uri)
     }
+
+    func isEventFromPreviousRequest(playRequestID: UInt64) -> Bool {
+        playRequestID != CorePlaybackProgress.noPlayRequest
+            && playRequestID == previousPlayRequestID
+    }
 }

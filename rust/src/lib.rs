@@ -699,20 +699,29 @@ fn handle_player_event(
                 "play_request_id": play_request_id,
             }), callback_generation);
         }
-        PlayerEvent::Paused { track_id, position_ms, .. } => {
+        PlayerEvent::Paused {
+            play_request_id,
+            track_id,
+            position_ms,
+        } => {
             IS_PLAYING.store(false, Ordering::SeqCst);
             confirm_position(position_ms);
             emit_state(json!({
                 "event": "paused",
                 "track_uri": track_id.to_string(),
                 "position_ms": position_ms,
+                "play_request_id": play_request_id,
             }), callback_generation);
         }
-        PlayerEvent::Stopped { track_id, .. } => {
+        PlayerEvent::Stopped {
+            play_request_id,
+            track_id,
+        } => {
             stop_position_clock();
             emit_state(json!({
                 "event": "stopped",
                 "track_uri": track_id.to_string(),
+                "play_request_id": play_request_id,
             }), callback_generation);
         }
         PlayerEvent::Seeked { position_ms, .. }
