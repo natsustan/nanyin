@@ -37,9 +37,11 @@
 		B4A205276406D7F4468DE96F /* NanyinApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D16BE0C19B1222A7FFFA360C /* NanyinApp.swift */; };
 		B4A7E0B8FA945E0D257077DB /* SpotifyAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3769801C838BE7FD6353F953 /* SpotifyAuth.swift */; };
 		B65B50DEC7B998D60E808DE4 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AE5477026638A4B5FD55C57 /* Theme.swift */; };
+		B7A8F5C27CE3E0B4CE496DE0 /* ChromeStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4C7D21A04EED9DB1C9CFE42 /* ChromeStyle.swift */; };
 		C08063B3487CD8115D817D01 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6332196A87845CF96EBF8B /* HomeView.swift */; };
 		C0DD952271D2CECFD543B0CF /* MembershipMutation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C34F9480C980947C6DBA66E /* MembershipMutation.swift */; };
 		C480BDD897799A7CF14CBCCC /* NowPlayingManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5362EA9DE5C94A675FC10A2A /* NowPlayingManager.swift */; };
+		CEE4F338C3A35800937BF7B7 /* ClassicChromePreviewHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = F79877AF87B61E7E6245030C /* ClassicChromePreviewHarness.swift */; };
 		D53EA805C18FC6BD2585A05E /* DebugLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EF680835CEF2B531A47F6E0 /* DebugLog.swift */; };
 		E3147F1FBCE00F908E18C6DA /* PlaylistDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04B2F003CBEB64EB848C8C21 /* PlaylistDetailView.swift */; };
 		EF615432E21E71D8FDC83A84 /* SpotifyConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9E3597C813B3B8DD81E108D /* SpotifyConfig.swift */; };
@@ -84,6 +86,7 @@
 		B9D94ED4DB09441D529487CA /* HomeFeed.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeFeed.swift; sourceTree = "<group>"; };
 		C2CC8CB2F66E24260D048945 /* PlaybackStallDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackStallDetector.swift; sourceTree = "<group>"; };
 		C3D90AF51885C8E464B60FE5 /* LocalPlaybackStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalPlaybackStore.swift; sourceTree = "<group>"; };
+		C4C7D21A04EED9DB1C9CFE42 /* ChromeStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromeStyle.swift; sourceTree = "<group>"; };
 		C7E6E3AD68A38077F7AF53E7 /* ChouTiUI */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ChouTiUI; path = "research-repos/ChouTiUI"; sourceTree = SOURCE_ROOT; };
 		C80E837723AE8C7766A7C226 /* PlayerBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerBar.swift; sourceTree = "<group>"; };
 		D16BE0C19B1222A7FFFA360C /* NanyinApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NanyinApp.swift; sourceTree = "<group>"; };
@@ -93,6 +96,7 @@
 		EE5EC6E22F04C69F48FC16FF /* SearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchView.swift; sourceTree = "<group>"; };
 		F44F7DCE76E9710B8B7CCF3C /* ThemeSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeSettingsView.swift; sourceTree = "<group>"; };
 		F6F7A03F72E05B94F8661242 /* ClassicChromeButtonView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClassicChromeButtonView.swift; sourceTree = "<group>"; };
+		F79877AF87B61E7E6245030C /* ClassicChromePreviewHarness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClassicChromePreviewHarness.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -185,6 +189,8 @@
 			isa = PBXGroup;
 			children = (
 				9BE78A5C4C4901EC940FAD47 /* ChromeButton.swift */,
+				C4C7D21A04EED9DB1C9CFE42 /* ChromeStyle.swift */,
+				F79877AF87B61E7E6245030C /* ClassicChromePreviewHarness.swift */,
 			);
 			path = Bridge;
 			sourceTree = "<group>";
@@ -349,7 +355,9 @@
 				0488D3AEEFDFD759FF66A8A4 /* ArtworkView.swift in Sources */,
 				5E25110C2C6F2BB024C3BE81 /* AudioRenderer.swift in Sources */,
 				8BA79311D06E4870F7108167 /* ChromeButton.swift in Sources */,
+				B7A8F5C27CE3E0B4CE496DE0 /* ChromeStyle.swift in Sources */,
 				A25B430D787B7E5F81AFEA3D /* ClassicChromeButtonView.swift in Sources */,
+				CEE4F338C3A35800937BF7B7 /* ClassicChromePreviewHarness.swift in Sources */,
 				76A0FBCD808CE4272E6E9FF7 /* CredentialRevision.swift in Sources */,
 				D53EA805C18FC6BD2585A05E /* DebugLog.swift in Sources */,
 				3CD0F98412A26065319A48E8 /* HomeFeed.swift in Sources */,

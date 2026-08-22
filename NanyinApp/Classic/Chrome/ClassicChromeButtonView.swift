@@ -6,19 +6,8 @@
 import AppKit
 import ChouTiUI
 
-enum ClassicChromeInteractionState: Equatable {
-    case automatic
-    case hovered
-    case pressed
-}
-
-struct ClassicChromeButtonConfiguration: Equatable {
-    var size = CGSize(width: 88, height: 24)
-    var interactionState = ClassicChromeInteractionState.automatic
-}
-
 final class ClassicChromeButtonView: NSView {
-    var configuration = ClassicChromeButtonConfiguration() {
+    var style = ChromeStyle() {
         didSet {
             invalidateIntrinsicContentSize()
             updateAppearance()
@@ -26,7 +15,13 @@ final class ClassicChromeButtonView: NSView {
     }
 
     var isEnabled = true {
-        didSet { updateAppearance() }
+        didSet {
+            if !isEnabled {
+                isPressed = false
+            }
+            setAccessibilityEnabled(isEnabled)
+            updateAppearance()
+        }
     }
 
     var action: () -> Void = {}
@@ -41,6 +36,7 @@ final class ClassicChromeButtonView: NSView {
         focusRingType = .default
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
+        setAccessibilityEnabled(true)
         updateAppearance()
     }
 
@@ -50,7 +46,7 @@ final class ClassicChromeButtonView: NSView {
     }
 
     override var intrinsicContentSize: NSSize {
-        configuration.size
+        style.size
     }
 
     override var acceptsFirstResponder: Bool {
@@ -89,16 +85,16 @@ final class ClassicChromeButtonView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
-        guard isEnabled else { return }
+        let shouldActivate = isEnabled && bounds.contains(convert(event.locationInWindow, from: nil))
         isPressed = false
         updateAppearance()
-        if bounds.contains(convert(event.locationInWindow, from: nil)) {
+        if shouldActivate {
             action()
         }
     }
 
     override func keyDown(with event: NSEvent) {
-        guard isEnabled, event.keyCode == 36 || event.charactersIgnoringModifiers == " " else {
+        guard isEnabled, !event.isARepeat, event.keyCode == 36 || event.charactersIgnoringModifiers == " " else {
             super.keyDown(with: event)
             return
         }
@@ -122,14 +118,19 @@ final class ClassicChromeButtonView: NSView {
     private func updateAppearance() {
         guard let layer else { return }
 
-        let state: ClassicChromeInteractionState
-        if configuration.interactionState == .automatic {
+        let state: ChromeInteractionState
+        if style.interactionState == .automatic {
             state = isPressed ? .pressed : (isHovered ? .hovered : .automatic)
         } else {
-            state = configuration.interactionState
+            state = style.interactionState
         }
 
-        layer.shape = ChouTiUI.Capsule(style: .circular)
+        switch style.role {
+        case .pill:
+            layer.shape = ChouTiUI.Capsule(style: .circular)
+        case .transport:
+            layer.shape = ChouTiUI.Ellipse()
+        }
         layer.setBackgroundColor(state == .pressed ? .concaveGray : .convexGray)
         layer.borderColor = NSColor(white: state == .hovered ? 0.58 : 0.38, alpha: 1).cgColor
         layer.borderWidth = 1

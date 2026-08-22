@@ -78,6 +78,26 @@ while IFS= read -r source; do
         || fail "file imports both ChouTiUI and SwiftUI: ${source#"$ROOT_DIR/"}"
 done < <(rg -l '^import ChouTiUI$' "$ROOT_DIR/NanyinApp" -g '*.swift')
 
+step "checking offline Classic Chrome preview harness"
+CHROME_PREVIEW="$ROOT_DIR/NanyinApp/Classic/Bridge/ClassicChromePreviewHarness.swift"
+CHROME_STYLE="$ROOT_DIR/NanyinApp/Classic/Bridge/ChromeStyle.swift"
+[[ -f "$CHROME_PREVIEW" ]] || fail "Classic Chrome preview harness is missing"
+[[ -f "$CHROME_STYLE" ]] || fail "Classic Chrome style contract is missing"
+! rg -q '^import (SwiftUI|ChouTiUI)$' "$CHROME_STYLE" \
+    || fail "Classic Chrome style contract depends on a UI framework"
+rg -q 'ClassicChromePreviewHarness' "$CHROME_PREVIEW" \
+    || fail "Classic Chrome preview harness declaration is missing"
+for state in Default Hovered Pressed Disabled; do
+    rg -q "$state" "$CHROME_PREVIEW" \
+        || fail "Classic Chrome preview harness is missing a required state"
+done
+rg -q 'List' "$CHROME_PREVIEW" \
+    || fail "Classic Chrome preview harness does not exercise List independence"
+rg -q 'fixedSize\(\)' "$ROOT_DIR/NanyinApp/Classic/Bridge/ChromeButton.swift" \
+    || fail "Classic Chrome button preview does not exercise intrinsic sizing"
+! rg -q 'ClassicChromeButtonConfiguration' "$ROOT_DIR/NanyinApp/Classic" \
+    || fail "Classic Chrome bridge still exposes the old implementation configuration"
+
 command -v mise >/dev/null 2>&1 || fail "mise is required"
 command -v xcrun >/dev/null 2>&1 || fail "Xcode command-line tools are required"
 
