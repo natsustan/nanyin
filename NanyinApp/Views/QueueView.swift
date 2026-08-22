@@ -188,13 +188,7 @@ private struct NowPlayingRow: View {
 
     @ViewBuilder
     private var artwork: some View {
-        if let url = artworkURL {
-            AsyncImage(url: url) { image in
-                image.resizable().scaledToFill()
-            } placeholder: {
-                Color(white: 0.14)
-            }
-        } else {
+        ArtworkView(url: artworkURL, size: 44) {
             ZStack {
                 Color(white: 0.14)
                 Image("MusicIcon")
@@ -262,13 +256,7 @@ private struct QueueRow: View {
 
     @ViewBuilder
     private var artwork: some View {
-        if let url = track.artworkURL {
-            AsyncImage(url: url) { image in
-                image.resizable().scaledToFill()
-            } placeholder: {
-                Color(white: 0.14)
-            }
-        } else {
+        ArtworkView(url: track.artworkURL, size: 32) {
             ZStack {
                 Color(white: 0.14)
                 Image("MusicIcon")

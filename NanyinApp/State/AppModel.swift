@@ -1135,6 +1135,10 @@ final class AppModel {
                         complete: false
                     )
                     clearSettledAlbumOverrides(prefixConfirmed)
+                    ArtworkCache.shared.replacePrefetch(
+                        urls: prefix.albums.compactMap { $0.album.artworkURL },
+                        in: .savedAlbums
+                    )
                 }
 
                 let snapshot = try await withAPIAuthRetry(for: epoch) { api in
@@ -1165,6 +1169,10 @@ final class AppModel {
                     complete: true
                 )
                 clearSettledAlbumOverrides(confirmed)
+                ArtworkCache.shared.replacePrefetch(
+                    urls: snapshot.0.compactMap { $0.album.artworkURL },
+                    in: .savedAlbums
+                )
             } catch {
                 guard epoch == accountEpoch else { return }
                 savedAlbumsError = error.localizedDescription
@@ -1258,7 +1266,7 @@ final class AppModel {
                 } publish: { [weak self] history in
                     guard let self else { return }
                     homeHistory = history
-                    homeRecentlyPlayed = HomeFeed.recentlyPlayedCards(from: history, playlists: playlists)
+                    publishHomeRecentlyPlayed()
                 }
             case .topTracks:
                 runHomeSection(section, epoch: epoch, generation: generation) { api in
@@ -1274,9 +1282,24 @@ final class AppModel {
                 } publish: { [weak self] artists in
                     guard let self else { return }
                     homeTopArtists = artists
+                    ArtworkCache.shared.replacePrefetch(
+                        urls: artists.compactMap { $0.artworkURL },
+                        in: .homeTopArtists
+                    )
                 }
             }
         }
+    }
+
+    private func publishHomeRecentlyPlayed() {
+        homeRecentlyPlayed = HomeFeed.recentlyPlayedCards(
+            from: homeHistory,
+            playlists: playlists
+        )
+        ArtworkCache.shared.replacePrefetch(
+            urls: homeRecentlyPlayed.compactMap { $0.artworkURL },
+            in: .homeRecentlyPlayed
+        )
     }
 
     /// One section's request/publish cycle, fenced by account epoch AND the
@@ -1479,6 +1502,7 @@ final class AppModel {
         albumSaveMutationTasks.removeAll()
         cancelPlaybackWatchdog()
         accountEpoch += 1
+        ArtworkCache.shared.cancelPrefetches()
         playbackGeneration &+= 1
         activePlaybackGeneration = nil
         loadEpoch += 1
@@ -1619,13 +1643,14 @@ final class AppModel {
                 let loadedPlaylists = try await api.playlists()
                 guard epoch == accountEpoch, authState == .loggedIn else { return }
                 applyPlaylistsSnapshot(loadedPlaylists)
+                ArtworkCache.shared.replacePrefetch(
+                    urls: loadedPlaylists.compactMap { $0.artworkURL },
+                    in: .library
+                )
                 // Recently-played playlist contexts resolve names/covers
                 // from this list — re-derive the strip if home loaded first.
                 if !homeHistory.isEmpty {
-                    homeRecentlyPlayed = HomeFeed.recentlyPlayedCards(
-                        from: homeHistory,
-                        playlists: playlists
-                    )
+                    publishHomeRecentlyPlayed()
                 }
                 dlog("playlists loaded: \(startedAt.duration(to: .now))")
             } catch {
@@ -1839,6 +1864,10 @@ final class AppModel {
                       authState == .loggedIn else { return }
                 queueCurrent = result.current
                 queueUpcoming = result.upcoming.map { QueueItem(track: $0) }
+                ArtworkCache.shared.replacePrefetch(
+                    urls: result.upcoming.compactMap { $0.artworkURL },
+                    in: .queue
+                )
             } catch {
                 dlog("queue refresh failed: \(error)")
             }
@@ -1954,7 +1983,7 @@ final class AppModel {
                         // top-tracks endpoint fails, so the artist page can
                         // still show Albums/Singles alongside the error.
                         if let releases = try? await albums, epoch == loadEpoch {
-                            albumsByArtist[key] = releases
+                            publishDiscography(releases, contextKey: key)
                             dlog("discography \(key) → \(releases.count) releases (top tracks failed)")
                         }
                         throw error
@@ -1973,7 +2002,7 @@ final class AppModel {
                 guard epoch == loadEpoch else { return }
                 tracksByContext[key] = tracks
                 if let discography {
-                    albumsByArtist[key] = discography
+                    publishDiscography(discography, contextKey: key)
                     dlog("discography \(key) → \(discography.count) releases")
                 }
             } catch {
@@ -1982,6 +2011,17 @@ final class AppModel {
                 dlog("tracks load failed: \(error)")
             }
         }
+    }
+
+    private func publishDiscography(
+        _ releases: [SpotifyClient.AlbumInfo],
+        contextKey: String
+    ) {
+        albumsByArtist[contextKey] = releases
+        ArtworkCache.shared.replacePrefetch(
+            urls: releases.compactMap { $0.artworkURL },
+            in: .detail
+        )
     }
 
     /// Loads a full artist profile when a navigation source did not include

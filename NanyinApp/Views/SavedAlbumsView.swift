@@ -339,16 +339,8 @@ private struct SavedAlbumCard: View {
     }
 
     private var cover: some View {
-        Group {
-            if let url = album.album.artworkURL {
-                AsyncImage(url: url) { image in
-                    image.resizable().scaledToFill()
-                } placeholder: {
-                    placeholderCover
-                }
-            } else {
-                placeholderCover
-            }
+        ArtworkView(url: album.album.artworkURL, size: 170) {
+            placeholderCover
         }
         .aspectRatio(1, contentMode: .fit)
         .frame(maxWidth: .infinity)

@@ -16,6 +16,9 @@ final class NowPlayingManager {
 
     private var registered = false
     private var artworkTask: Task<Void, Never>?
+    private var artworkGeneration = 0
+    private var currentArtworkURL: URL?
+    private var currentArtworkImage: NSImage?
 
     private init() {}
 
@@ -68,7 +71,7 @@ final class NowPlayingManager {
         isPlaying: Bool,
         artworkURL: URL?
     ) {
-        var info: [String: Any] = [
+        let info: [String: Any] = [
             MPMediaItemPropertyTitle: title,
             MPMediaItemPropertyArtist: artist,
             MPMediaItemPropertyAlbumTitle: album,
@@ -79,22 +82,41 @@ final class NowPlayingManager {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
 
         // Artwork is fetched async and merged (avoid clobbering on every tick).
+        let artworkChanged = currentArtworkURL != artworkURL
+        if artworkChanged {
+            artworkTask?.cancel()
+            artworkTask = nil
+            artworkGeneration &+= 1
+            currentArtworkURL = artworkURL
+            currentArtworkImage = nil
+        }
         if let artworkURL {
-            let key = artworkURL.absoluteString
-            if MediaArtworkCache.shared[key] == nil {
-                artworkTask?.cancel()
+            if let image = currentArtworkImage
+                ?? ArtworkCache.shared.cachedImage(for: artworkURL, targetSize: 640) {
+                currentArtworkImage = image
+                mergeArtwork(image)
+            } else if artworkTask == nil {
+                let generation = artworkGeneration
                 artworkTask = Task { [weak self] in
-                    if let image = await MediaArtworkCache.shared.fetch(key, url: artworkURL) {
-                        self?.mergeArtwork(image, into: &info)
+                    defer {
+                        if self?.artworkGeneration == generation {
+                            self?.artworkTask = nil
+                        }
                     }
+                    guard let image = await ArtworkCache.shared.image(
+                        for: artworkURL,
+                        targetSize: 640
+                    ),
+                          !Task.isCancelled,
+                          self?.artworkGeneration == generation else { return }
+                    self?.currentArtworkImage = image
+                    self?.mergeArtwork(image)
                 }
-            } else if let image = MediaArtworkCache.shared[key] {
-                mergeArtwork(image, into: &info)
             }
         }
     }
 
-    private func mergeArtwork(_ image: NSImage, into info: inout [String: Any]) {
+    private func mergeArtwork(_ image: NSImage) {
         let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
         var current = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
         current[MPMediaItemPropertyArtwork] = artwork
@@ -102,28 +124,11 @@ final class NowPlayingManager {
     }
 
     func clear() {
+        artworkTask?.cancel()
+        artworkTask = nil
+        artworkGeneration &+= 1
+        currentArtworkURL = nil
+        currentArtworkImage = nil
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
-    }
-}
-
-/// Tiny process-lifetime image cache for now-playing artwork.
-@MainActor
-final class MediaArtworkCache {
-    static let shared = MediaArtworkCache()
-    private var cache: [String: NSImage] = [:]
-    private init() {}
-
-    subscript(key: String) -> NSImage? {
-        cache[key]
-    }
-
-    func fetch(_ key: String, url: URL) async -> NSImage? {
-        if let cached = cache[key] { return cached }
-        guard let (data, response) = try? await URLSession.shared.data(from: url),
-              (response as? HTTPURLResponse)?.statusCode == 200,
-              let image = NSImage(data: data)
-        else { return nil }
-        cache[key] = image
-        return image
     }
 }
