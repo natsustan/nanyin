@@ -233,7 +233,7 @@ struct SearchView: View {
                 .padding(.horizontal, 28)
             // Horizontal strip above the vertical List — perpendicular axes,
             // so the single-scroll-region rule (no same-axis nesting) holds.
-            // Capped at 10: the row is not lazy; every AsyncImage would fire.
+            // Capped at 10: the row is not lazy; every card mounts immediately.
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
                     ForEach(app.searchArtists.prefix(10)) { artist in
@@ -287,16 +287,8 @@ private struct ArtistCard: View {
 
     @ViewBuilder
     private var portrait: some View {
-        Group {
-            if let url = artist.artworkURL {
-                AsyncImage(url: url) { image in
-                    image.resizable().scaledToFill()
-                } placeholder: {
-                    placeholderPortrait
-                }
-            } else {
-                placeholderPortrait
-            }
+        ArtworkView(url: artist.artworkURL, size: 88) {
+            placeholderPortrait
         }
         .frame(width: 88, height: 88)
         .clipShape(Circle())

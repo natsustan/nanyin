@@ -1,0 +1,54 @@
+diff --git a/audio/src/fetch/mod.rs b/audio/src/fetch/mod.rs
+index df5780f..92f14a6 100644
+--- a/audio/src/fetch/mod.rs
++++ b/audio/src/fetch/mod.rs
+@@ -29,6 +29,27 @@ use crate::range_set::{Range, RangeSet};
+ pub type AudioFileResult = Result<(), librespot_core::Error>;
+ 
+ const DOWNLOAD_STATUS_POISON_MSG: &str = "audio download status mutex should not be poisoned";
++static ACTIVE_STREAM_READ_WAITS: AtomicUsize = AtomicUsize::new(0);
++
++/// Number of streaming readers currently blocked waiting for a downloaded range.
++pub fn active_stream_read_waits() -> usize {
++    ACTIVE_STREAM_READ_WAITS.load(Ordering::Relaxed)
++}
++
++struct ActiveStreamReadWait;
++
++impl ActiveStreamReadWait {
++    fn begin() -> Self {
++        ACTIVE_STREAM_READ_WAITS.fetch_add(1, Ordering::Relaxed);
++        Self
++    }
++}
++
++impl Drop for ActiveStreamReadWait {
++    fn drop(&mut self) {
++        ACTIVE_STREAM_READ_WAITS.fetch_sub(1, Ordering::Relaxed);
++    }
++}
+ 
+ #[derive(Error, Debug)]
+ pub enum AudioFileError {
+@@ -591,7 +612,9 @@ impl Read for AudioFileStreaming {
+         }
+ 
+         let download_timeout = AudioFetchParams::get().download_timeout;
++        let mut active_wait = None;
+         while !download_status.downloaded.contains(offset) {
++            active_wait.get_or_insert_with(ActiveStreamReadWait::begin);
+             let (new_download_status, wait_result) = self
+                 .shared
+                 .cond
+diff --git a/audio/src/lib.rs b/audio/src/lib.rs
+index 99c41df..809484d 100644
+--- a/audio/src/lib.rs
++++ b/audio/src/lib.rs
+@@ -7,4 +7,6 @@ mod fetch;
+ mod range_set;
+ 
+ pub use decrypt::AudioDecrypt;
+-pub use fetch::{AudioFetchParams, AudioFile, AudioFileError, StreamLoaderController};
++pub use fetch::{
++    AudioFetchParams, AudioFile, AudioFileError, StreamLoaderController, active_stream_read_waits,
++};

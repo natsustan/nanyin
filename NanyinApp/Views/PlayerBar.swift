@@ -209,13 +209,7 @@ struct PlayerBar: View {
 
     @ViewBuilder
     private var artwork: some View {
-        if let url = app.nowPlaying?.artworkURL {
-            AsyncImage(url: url) { image in
-                image.resizable().scaledToFill()
-            } placeholder: {
-                placeholderArtwork
-            }
-        } else {
+        ArtworkView(url: app.nowPlaying?.artworkURL, size: 52) {
             placeholderArtwork
         }
     }

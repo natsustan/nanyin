@@ -28,6 +28,9 @@ final nonisolated class AudioRenderer: @unchecked Sendable {
     private var readIndex = 0
     private var filled = 0 // samples currently in the ring
     private var consumedSinceSignal = 0
+    private var acceptedSamples: UInt64 = 0
+    private var renderCallbacks: UInt64 = 0
+    private var renderedSamples: UInt64 = 0
     private let lock = NSLock()
     /// Signalled by the reader when space frees up; the writer waits on it.
     private let spaceAvailable = DispatchSemaphore(value: 0)
@@ -37,7 +40,9 @@ final nonisolated class AudioRenderer: @unchecked Sendable {
     private let engine = AVAudioEngine()
     private var sourceNode: AVAudioSourceNode?
     private let renderQueue = DispatchQueue(label: "com.nanyin.audio.render", qos: .userInteractive)
+    private let engineLock = NSLock()
     private var running = false
+    private var activeGeneration: UInt64?
 
     /// Restart the engine when the default output device changes
     /// (headphones plugged/unplugged, bluetooth switch) — AVAudioEngine does
@@ -61,19 +66,36 @@ final nonisolated class AudioRenderer: @unchecked Sendable {
             NSLog("[nanyin] audio route changed — restarting engine")
             let wasRunning: Bool = self.lock.withLock { self.running }
             guard wasRunning else { return }
-            self.stop()
-            self.start()
+            self.restartForRecovery()
         }
     }
 
     // MARK: - Public API
 
     /// Starts the audio engine (idempotent).
-    func start() {
-        lock.lock()
-        defer { lock.unlock() }
-        guard !running else { return }
-        running = true
+    func start(generation: UInt64) {
+        engineLock.lock()
+        defer { engineLock.unlock() }
+        let transition = lock.withLock { () -> (shouldStart: Bool, replaced: Bool) in
+            if let activeGeneration, generation < activeGeneration {
+                return (false, false)
+            }
+            let replaced = activeGeneration != generation
+            activeGeneration = generation
+            if running {
+                if replaced {
+                    resetBuffer()
+                }
+                return (false, replaced)
+            }
+            running = true
+            resetBuffer()
+            return (true, replaced)
+        }
+        if transition.replaced {
+            spaceAvailable.signal()
+        }
+        guard transition.shouldStart else { return }
 
         let format = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
@@ -81,12 +103,6 @@ final nonisolated class AudioRenderer: @unchecked Sendable {
             channels: channelCount,
             interleaved: false
         )!
-
-        // Clear any stale samples from a previous run.
-        writeIndex = 0
-        readIndex = 0
-        filled = 0
-        consumedSinceSignal = 0
 
         let node = AVAudioSourceNode(format: format) { [weak self] _, _, frameCount, audioBufferList in
             guard let self else { return noErr }
@@ -106,39 +122,59 @@ final nonisolated class AudioRenderer: @unchecked Sendable {
             NSLog("AudioRenderer: engine start failed: \(error)")
             engine.detach(node)
             sourceNode = nil
-            running = false
+            lock.withLock {
+                running = false
+            }
         }
     }
 
     /// Stops the engine and flushes the ring (track end / app quit).
     func stop() {
-        lock.lock()
-        defer { lock.unlock() }
-        guard running else { return }
-        running = false
+        stop(generation: nil)
+    }
+
+    func stop(generation: UInt64) {
+        stop(generation: Optional(generation))
+    }
+
+    private func stop(generation: UInt64?) {
+        engineLock.lock()
+        defer { engineLock.unlock() }
+        let shouldStop = lock.withLock {
+            guard running,
+                  generation == nil || generation == activeGeneration else { return false }
+            running = false
+            resetBuffer()
+            return true
+        }
+        guard shouldStop else { return }
+
         engine.stop()
         if let node = sourceNode {
             engine.detach(node)
         }
         sourceNode = nil
-        writeIndex = 0
-        readIndex = 0
-        filled = 0
         // Wake a possibly-blocked writer so it can observe the stopped state.
         spaceAvailable.signal()
     }
 
     /// Flushes buffered samples but keeps the engine running (seek / skip).
-    func clear() {
+    func clear(generation: UInt64) {
         lock.lock()
         defer { lock.unlock() }
-        writeIndex = 0
-        readIndex = 0
-        filled = 0
-        consumedSinceSignal = 0
+        guard generation == activeGeneration else { return }
+        resetBuffer()
         // Wake a possibly-blocked writer; it will see space and continue or
         // exit when the ring stays empty.
         spaceAvailable.signal()
+    }
+
+    /// Rebuilds only the CoreAudio output path; Spotify session, Spirc, and
+    /// the decoder remain untouched.
+    func restartForRecovery() {
+        guard let generation = lock.withLock({ activeGeneration }) else { return }
+        stop(generation: generation)
+        start(generation: generation)
     }
 
     var volume: Float {
@@ -146,15 +182,25 @@ final nonisolated class AudioRenderer: @unchecked Sendable {
         set { engine.mainMixerNode.outputVolume = newValue }
     }
 
+    var playbackProgress: RendererPlaybackProgress {
+        lock.withLock {
+            RendererPlaybackProgress(
+                acceptedSamples: acceptedSamples,
+                renderCallbacks: renderCallbacks,
+                renderedSamples: renderedSamples
+            )
+        }
+    }
+
     // MARK: - Writer (called from the Rust audio thread)
 
     /// Writes interleaved stereo f32 samples. Blocks (backpressure) while the
     /// ring is full, pacing librespot's decoder to real time.
-    func write(samples: UnsafePointer<Float>, count: Int) {
+    func write(samples: UnsafePointer<Float>, count: Int, generation: UInt64) {
         var offset = 0
         while offset < count {
             lock.lock()
-            if !running {
+            if !running || generation != activeGeneration {
                 // Engine stopped mid-write (track switch / quit) — drop the
                 // rest instead of blocking forever on a full ring.
                 lock.unlock()
@@ -173,15 +219,24 @@ final nonisolated class AudioRenderer: @unchecked Sendable {
                 writeIndex = (writeIndex + 1) % ringCapacity
             }
             filled += toCopy
+            acceptedSamples &+= UInt64(toCopy)
             offset += toCopy
             lock.unlock()
         }
+    }
+
+    private func resetBuffer() {
+        writeIndex = 0
+        readIndex = 0
+        filled = 0
+        consumedSinceSignal = 0
     }
 
     // MARK: - Reader (render callback, real-time audio thread)
 
     private func render(into buffers: UnsafeMutableAudioBufferListPointer, frameCount: Int) {
         lock.lock()
+        renderCallbacks &+= 1
         let available = filled
         let frames = min(frameCount, available / Int(channelCount))
 
@@ -196,6 +251,7 @@ final nonisolated class AudioRenderer: @unchecked Sendable {
             }
             filled -= frames * Int(channelCount)
             consumedSinceSignal += frames * Int(channelCount)
+            renderedSamples &+= UInt64(frames * Int(channelCount))
 
             // Wake the writer once enough space has been consumed.
             while consumedSinceSignal >= chunkSize {

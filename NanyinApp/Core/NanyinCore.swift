@@ -19,9 +19,9 @@ enum Core {
     /// Playback event delivered from Rust as JSON.
     enum Event {
         case loading(uri: String, positionMs: Int)
-        case playing(uri: String, positionMs: Int)
-        case paused(uri: String, positionMs: Int)
-        case stopped(uri: String)
+        case playing(uri: String, positionMs: Int, playRequestID: UInt64)
+        case paused(uri: String, positionMs: Int, playRequestID: UInt64)
+        case stopped(uri: String, playRequestID: UInt64)
         case position(positionMs: Int)
         case trackChanged(
             uri: String,
@@ -39,8 +39,8 @@ enum Core {
     nonisolated(unsafe) static var onEvent: (@MainActor (UInt64, Event) -> Void)?
     nonisolated(unsafe) static var onConnected: (@MainActor (UInt64) -> Void)?
     nonisolated(unsafe) static var onDisconnected: (@MainActor (UInt64) -> Void)?
-    nonisolated(unsafe) static var onAudioData: ((UnsafePointer<Float>, Int) -> Void)?
-    nonisolated(unsafe) static var onAudioControl: ((UInt8) -> Void)?
+    nonisolated(unsafe) static var onAudioData: ((UnsafePointer<Float>, Int, UInt64) -> Void)?
+    nonisolated(unsafe) static var onAudioControl: ((UInt8, UInt64) -> Void)?
 
     // MARK: - Callback registration
 
@@ -50,28 +50,26 @@ enum Core {
         guard !registered else { return }
         registered = true
 
-        nanyin_register_audio_data_callback { samples, count in
+        nanyin_register_audio_data_callback { samples, count, generation in
             guard let samples else { return }
             if let handler = Core.onAudioData {
-                handler(samples, count)
+                handler(samples, count, generation)
             }
         }
-        nanyin_register_audio_control_callback { event in
+        nanyin_register_audio_control_callback { event, generation in
             if let handler = Core.onAudioControl {
-                handler(event)
+                handler(event, generation)
             }
         }
-        nanyin_register_playback_state_callback { json in
+        nanyin_register_playback_state_callback { json, generation in
             guard let json = json.map(String.init(cString:)) else { return }
-            Core.handleStateJSON(json, generation: Core.currentCallbackGeneration())
+            Core.handleStateJSON(json, generation: generation)
         }
-        nanyin_register_session_connected_callback {
-            let generation = Core.currentCallbackGeneration()
+        nanyin_register_session_connected_callback { generation in
             let handler = Core.onConnected
             Task { @MainActor in handler?(generation) }
         }
-        nanyin_register_session_disconnected_callback {
-            let generation = Core.currentCallbackGeneration()
+        nanyin_register_session_disconnected_callback { generation in
             let handler = Core.onDisconnected
             Task { @MainActor in handler?(generation) }
         }
@@ -86,13 +84,25 @@ enum Core {
         let uri = object["track_uri"] as? String ?? ""
         let position = object["position_ms"] as? Int ?? 0
         let duration = object["duration_ms"] as? Int ?? 0
+        let playRequestID = (object["play_request_id"] as? NSNumber)?.uint64Value
+            ?? CorePlaybackProgress.noPlayRequest
 
         let event: Event
         switch eventName {
         case "loading": event = .loading(uri: uri, positionMs: position)
-        case "playing": event = .playing(uri: uri, positionMs: position)
-        case "paused": event = .paused(uri: uri, positionMs: position)
-        case "stopped": event = .stopped(uri: uri)
+        case "playing":
+            event = .playing(
+                uri: uri,
+                positionMs: position,
+                playRequestID: playRequestID
+            )
+        case "paused":
+            event = .paused(
+                uri: uri,
+                positionMs: position,
+                playRequestID: playRequestID
+            )
+        case "stopped": event = .stopped(uri: uri, playRequestID: playRequestID)
         case "position": event = .position(positionMs: position)
         case "track_changed":
             event = .trackChanged(
@@ -129,20 +139,10 @@ enum Core {
     )
     private static let initStateLock = NSLock()
     nonisolated(unsafe) private static var initGeneration: UInt64 = 0
-    nonisolated(unsafe) private static var callbackGeneration: UInt64 = 0
 
-    nonisolated private static func currentCallbackGeneration() -> UInt64 {
-        initStateLock.lock()
-        defer { initStateLock.unlock() }
-        return callbackGeneration
-    }
-
-    nonisolated private static func beginInitialization(
-        callbackGeneration: UInt64
-    ) -> UInt64 {
+    nonisolated private static func beginInitialization() -> UInt64 {
         initStateLock.lock()
         initGeneration &+= 1
-        self.callbackGeneration = callbackGeneration
         let generation = initGeneration
         initStateLock.unlock()
         return generation
@@ -157,7 +157,6 @@ enum Core {
     nonisolated private static func invalidateInitialization() {
         initStateLock.lock()
         initGeneration &+= 1
-        callbackGeneration = 0
         initStateLock.unlock()
     }
 
@@ -166,7 +165,7 @@ enum Core {
         deviceId: String,
         generation: UInt64
     ) async -> InitializationResult {
-        let initialization = beginInitialization(callbackGeneration: generation)
+        let initialization = beginInitialization()
         return await withCheckedContinuation { cont in
             initQueue.async {
                 guard acceptsInitialization(initialization) else {
@@ -177,7 +176,9 @@ enum Core {
                     return
                 }
                 let result = initializePlayerBlocking(
-                    accessToken: accessToken, deviceId: deviceId
+                    accessToken: accessToken,
+                    deviceId: deviceId,
+                    callbackGeneration: generation
                 )
                 guard acceptsInitialization(initialization) else {
                     _ = nanyin_shutdown()
@@ -193,11 +194,15 @@ enum Core {
     }
 
     nonisolated private static func initializePlayerBlocking(
-        accessToken: String, deviceId: String
+        accessToken: String,
+        deviceId: String,
+        callbackGeneration: UInt64
     ) -> InitializationResult {
         installCallbacks()
         let code = accessToken.withCString { token in
-            deviceId.withCString { nanyin_init_player(token, $0) }
+            deviceId.withCString {
+                nanyin_init_player(token, $0, callbackGeneration)
+            }
         }
         let message = code == 0 ? "" : lastErrorMessage() ?? "unknown"
         switch code {
@@ -242,6 +247,15 @@ enum Core {
     nonisolated static var isPlaying: Bool { nanyin_is_playing() == 1 }
     nonisolated static var positionMs: UInt32 { nanyin_get_position_ms() }
     nonisolated static var durationMs: UInt32 { nanyin_get_duration_ms() }
+    nonisolated static var playbackProgress: CorePlaybackProgress {
+        CorePlaybackProgress(
+            playRequestID: nanyin_get_play_request_id(),
+            decoderPackets: nanyin_get_decoder_packets(),
+            pcmWrites: nanyin_get_pcm_writes(),
+            downloadWaiters: nanyin_get_download_waiters(),
+            confirmedPositionMs: nanyin_get_confirmed_position_ms()
+        )
+    }
 
     /// Last error message from the Rust core (nil when none). Frees the C string.
     nonisolated static func lastErrorMessage() -> String? {

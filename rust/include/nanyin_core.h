@@ -24,7 +24,11 @@ extern "C" {
 /// device_id: STABLE per-install identifier (persist by the caller). A fresh
 /// pid-based id every launch floods connect-state with zombie devices and
 /// gets the account throttled (dealer goes silent, spirc dies at ~33s).
-int32_t nanyin_init_player(const char* access_token, const char* device_id);
+int32_t nanyin_init_player(
+    const char* access_token,
+    const char* device_id,
+    uint64_t callback_generation
+);
 
 /// Shuts down Spirc and the session (call on app quit).
 int32_t nanyin_shutdown(void);
@@ -67,31 +71,42 @@ char* nanyin_last_error(void);
 /// Duration of the current track in ms (0 if unknown).
 uint32_t nanyin_get_duration_ms(void);
 
+/// Read-only monotonic progress metrics used by the local audio watchdog.
+uint64_t nanyin_get_play_request_id(void);
+uint64_t nanyin_get_decoder_packets(void);
+uint64_t nanyin_get_pcm_writes(void);
+uint64_t nanyin_get_download_waiters(void);
+uint32_t nanyin_get_confirmed_position_ms(void);
+
 // === Callbacks ===
 // All callbacks fire on background threads — Swift side must be thread-safe.
 
 /// Raw PCM from the decoder: 44100 Hz, stereo, Float32, interleaved.
-typedef void (*NanyinAudioDataCallback)(const float* samples, size_t sample_count);
+typedef void (*NanyinAudioDataCallback)(
+    const float* samples,
+    size_t sample_count,
+    uint64_t player_generation
+);
 void nanyin_register_audio_data_callback(NanyinAudioDataCallback callback);
 
 /// Audio control events: 0 = stop, 1 = start/resume, 2 = clear/flush.
-typedef void (*NanyinAudioControlCallback)(uint8_t event);
+typedef void (*NanyinAudioControlCallback)(uint8_t event, uint64_t player_generation);
 void nanyin_register_audio_control_callback(NanyinAudioControlCallback callback);
 
 /// Playback state updates as JSON:
 /// {"event":"loading|playing|paused|stopped|position|track_changed|end_of_track",
 ///  "track_uri":..., "position_ms":..., "duration_ms":...}
-typedef void (*NanyinPlaybackStateCallback)(const char* state_json);
+typedef void (*NanyinPlaybackStateCallback)(const char* state_json, uint64_t generation);
 void nanyin_register_playback_state_callback(NanyinPlaybackStateCallback callback);
 
 /// Fired once the session + Spirc are ready for commands.
-typedef void (*NanyinSessionConnectedCallback)(void);
+typedef void (*NanyinSessionConnectedCallback)(uint64_t generation);
 void nanyin_register_session_connected_callback(NanyinSessionConnectedCallback callback);
 
 /// Fired when the session drops (idle timeout, network loss, revoke).
 /// Swift should re-init with the current token first. Refresh only when
 /// nanyin_init_player explicitly returns -4 (credentials rejected).
-typedef void (*NanyinSessionDisconnectedCallback)(void);
+typedef void (*NanyinSessionDisconnectedCallback)(uint64_t generation);
 void nanyin_register_session_disconnected_callback(NanyinSessionDisconnectedCallback callback);
 
 /// Frees a C string allocated by this library.

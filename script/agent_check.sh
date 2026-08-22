@@ -10,6 +10,7 @@ LIBRESPOT_DIR="$ROOT_DIR/research-repos/librespot"
 LIBRESPOT_PATCHES=(
     "$ROOT_DIR/patches/librespot-pr-1741.patch"
     "$ROOT_DIR/patches/librespot-auth-error-classification.patch"
+    "$ROOT_DIR/patches/librespot-audio-progress.patch"
 )
 XCODE_PROJECT_FILE="$ROOT_DIR/Nanyin.xcodeproj/project.pbxproj"
 
@@ -32,7 +33,7 @@ git diff HEAD --check
 
 step "checking vendored librespot wiring"
 [[ -d "$LIBRESPOT_DIR/.git" ]] || fail "research-repos/librespot checkout is missing"
-for dependency in core connect playback metadata protocol; do
+for dependency in audio core connect playback metadata protocol; do
     rg -q \
         "librespot-${dependency} = \\{ path = \\\"\.\./research-repos/librespot/${dependency}\\\" \\}" \
         "$RUST_MANIFEST" \
@@ -64,13 +65,25 @@ xcrun swiftc \
     "$ROOT_DIR/NanyinApp/Core/DebugLog.swift" \
     "$ROOT_DIR/NanyinApp/Core/SpotifyClient.swift" \
     "$ROOT_DIR/NanyinApp/Core/CredentialRevision.swift" \
+    "$ROOT_DIR/NanyinApp/Audio/PlaybackStallDetector.swift" \
     "$ROOT_DIR/NanyinApp/State/MembershipMutation.swift" \
+    "$ROOT_DIR/NanyinApp/State/PendingPlayIntent.swift" \
+    "$ROOT_DIR/NanyinApp/State/PlaybackReconnectPolicy.swift" \
     "$ROOT_DIR/NanyinApp/State/SavedAlbumCache.swift" \
     "$ROOT_DIR/NanyinApp/State/PlaylistLibraryMerge.swift" \
     "$ROOT_DIR/NanyinApp/State/HomeFeed.swift" \
     "$ROOT_DIR/Tests/StateReducerTests.swift" \
     -o "$state_test_dir/state-reducer-tests"
 "$state_test_dir/state-reducer-tests"
+
+step "running artwork cache tests"
+xcrun swiftc \
+    "$ROOT_DIR/NanyinApp/Core/ArtworkCache.swift" \
+    "$ROOT_DIR/Tests/ArtworkCacheTests.swift" \
+    -framework AppKit \
+    -framework ImageIO \
+    -o "$state_test_dir/artwork-cache-tests"
+"$state_test_dir/artwork-cache-tests"
 
 step "running Rust unit tests offline"
 mise exec rust@stable -- cargo test \
