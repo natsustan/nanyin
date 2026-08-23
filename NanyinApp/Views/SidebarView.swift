@@ -283,6 +283,15 @@ struct SidebarView: View {
                         .foregroundStyle(theme.colors.tertiaryText)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, theme.metrics.sidebarInset)
+            .padding(.vertical, theme.metrics.compactFieldVerticalPadding)
+            .background(
+                isSelected
+                    ? theme.colors.rowSelected.swiftUIStyle
+                    : AnyShapeStyle(Color.clear)
+            )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .foregroundStyle(
@@ -290,14 +299,6 @@ struct SidebarView: View {
                 ? theme.colors.disabledText
                 : (isSelected ? theme.colors.primaryText : theme.colors.secondaryText)
         )
-        .padding(.horizontal, theme.metrics.sidebarInset)
-        .padding(.vertical, theme.metrics.compactFieldVerticalPadding)
-        .background(
-            isSelected
-                ? theme.colors.rowSelected.swiftUIStyle
-                : AnyShapeStyle(Color.clear)
-        )
-        .contentShape(Rectangle())
         .disabled(disabled || page == nil)
         .onHover { hovering in
             if hovering, !disabled {
