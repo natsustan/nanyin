@@ -349,19 +349,39 @@ private final class ClassicWindowButton: NSButton {
         oval.addClip()
         NSGradient(
             colorsAndLocations:
-                (base.blended(withFraction: 0.20, of: .black) ?? base, 0),
-                (base, 0.42),
-                (base.blended(withFraction: 0.20, of: .white) ?? base, 0.78),
-                (base.blended(withFraction: 0.58, of: .white) ?? base, 1)
+                (base.blended(withFraction: 0.24, of: .black) ?? base, 0),
+                (base.blended(withFraction: 0.08, of: .black) ?? base, 0.26),
+                (base.blended(withFraction: 0.10, of: .white) ?? base, 0.62),
+                (base.blended(withFraction: 0.28, of: .white) ?? base, 1)
         )?.draw(in: bounds, angle: 90)
 
-        NSColor.white.withAlphaComponent(active ? 0.58 : 0.30).setFill()
-        NSBezierPath(ovalIn: NSRect(x: 3.5, y: 9.5, width: 7, height: 2.5)).fill()
+        NSGradient(
+            colorsAndLocations:
+                (NSColor.white.withAlphaComponent(active ? 0.18 : 0.10), 0),
+                (NSColor.white.withAlphaComponent(active ? 0.48 : 0.22), 1)
+        )?.draw(
+            in: NSBezierPath(roundedRect: NSRect(x: 1.5, y: 1, width: 11, height: 4.5), xRadius: 2.25, yRadius: 2.25),
+            angle: 90
+        )
+
+        NSGradient(
+            colorsAndLocations:
+                (NSColor.white.withAlphaComponent(active ? 0.28 : 0.14), 0),
+                (NSColor.white.withAlphaComponent(active ? 0.86 : 0.38), 1)
+        )?.draw(
+            in: NSBezierPath(roundedRect: NSRect(x: 3.5, y: 9.25, width: 7, height: 3), xRadius: 1.5, yRadius: 1.5),
+            angle: 90
+        )
         NSGraphicsContext.restoreGraphicsState()
 
-        NSColor(calibratedWhite: 0.16, alpha: active ? 0.74 : 0.42).setStroke()
+        NSColor(calibratedWhite: 0.12, alpha: active ? 0.68 : 0.38).setStroke()
         oval.lineWidth = 0.8
         oval.stroke()
+
+        let innerRim = NSBezierPath(ovalIn: bounds.insetBy(dx: 1.25, dy: 1.25))
+        NSColor.white.withAlphaComponent(active ? 0.18 : 0.10).setStroke()
+        innerRim.lineWidth = 0.5
+        innerRim.stroke()
 
         if isHighlighted {
             NSColor.black.withAlphaComponent(0.22).setFill()

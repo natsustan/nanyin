@@ -58,7 +58,7 @@ struct ChromeButton: View {
         if isEnabled {
             0.78
         } else {
-            0.52
+            style.role == .titlebarNavigation ? 0.35 : 0.52
         }
     }
 }
