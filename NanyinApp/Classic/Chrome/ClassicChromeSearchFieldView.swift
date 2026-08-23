@@ -26,6 +26,7 @@ final class ClassicChromeSearchFieldView: NSView, NSSearchFieldDelegate {
         }
     }
 
+    private let borderLayer = BorderLayer()
     private let searchField = NSSearchField()
     private var lastFocusToken = 0
 
@@ -41,6 +42,7 @@ final class ClassicChromeSearchFieldView: NSView, NSSearchFieldDelegate {
         searchField.drawsBackground = false
         searchField.controlSize = .small
         searchField.setAccessibilityLabel("Search Nanyin")
+        layer?.addSublayer(borderLayer)
         addSubview(searchField)
         updateAppearance()
     }
@@ -60,6 +62,8 @@ final class ClassicChromeSearchFieldView: NSView, NSSearchFieldDelegate {
 
     override func layout() {
         super.layout()
+        borderLayer.frame = bounds
+        borderLayer.setNeedsLayout()
         searchField.frame = bounds.insetBy(dx: 9, dy: 2)
         layer?.shadowPath = nil
     }
@@ -130,19 +134,21 @@ final class ClassicChromeSearchFieldView: NSView, NSSearchFieldDelegate {
 
     private func updateAppearance() {
         guard let layer else { return }
-        layer.shape = ChouTiUI.Capsule(style: .circular)
+        let shape = ChouTiUI.Capsule(style: .circular)
+        layer.shape = shape
+        borderLayer.borderMask = .shape(shape)
         switch style.surface {
         case .content:
             // The inset fill is the deliberate ChouTiUI preset selected by the
             // Classic chrome token; text and border values still come from AppTheme.
             layer.setBackgroundColor(.concaveGray)
-            layer.borderColor = nsColor(style.palette.border).cgColor
-            layer.borderWidth = 1
+            borderLayer.borderContent = .color(nsColor(style.palette.border))
+            borderLayer.borderWidth = 1
             layer.shadowOpacity = 0
             searchField.appearance = nil
         case .titlebarAccessory:
             layer.setBackgroundColor(NSColor.clear)
-            layer.borderWidth = 0
+            borderLayer.borderWidth = 0
             layer.shadowOpacity = 0
             searchField.appearance = NSAppearance(named: .aqua)
         }

@@ -22,6 +22,7 @@ final class ClassicChromeSliderTrackView: NSView {
     var onEnded: (Double) -> Void = { _ in }
     var onCancelled: () -> Void = {}
 
+    private let borderLayer = BorderLayer()
     private let progressView = NSView()
     private var isDragging = false
 
@@ -32,6 +33,7 @@ final class ClassicChromeSliderTrackView: NSView {
         setAccessibilityRole(.slider)
         setAccessibilityLabel("Playback progress")
 
+        layer?.addSublayer(borderLayer)
         progressView.wantsLayer = true
         progressView.isHidden = true
         addSubview(progressView)
@@ -53,6 +55,8 @@ final class ClassicChromeSliderTrackView: NSView {
 
     override func layout() {
         super.layout()
+        borderLayer.frame = bounds
+        borderLayer.setNeedsLayout()
         let inset: CGFloat = 1
         let trackBounds = bounds.insetBy(dx: inset, dy: inset)
         let width = trackBounds.width * CGFloat(clampedFraction)
@@ -126,12 +130,14 @@ final class ClassicChromeSliderTrackView: NSView {
 
     private func updateAppearance() {
         guard let layer, let progressLayer = progressView.layer else { return }
-        layer.shape = ChouTiUI.Capsule(style: .circular)
+        let shape = ChouTiUI.Capsule(style: .circular)
+        layer.shape = shape
+        borderLayer.borderMask = .shape(shape)
         // ChouTiUI supplies the inset/track recipe; palette values own the
         // semantic edge and progress colors.
         layer.setBackgroundColor(.concaveGray)
-        layer.borderColor = nsColor(style.palette.sliderBorder).cgColor
-        layer.borderWidth = 1
+        borderLayer.borderContent = .color(nsColor(style.palette.sliderBorder))
+        borderLayer.borderWidth = 1
 
         progressLayer.shape = ChouTiUI.Capsule(style: .circular)
         progressLayer.backgroundColor = nsColor(style.palette.sliderProgress).cgColor

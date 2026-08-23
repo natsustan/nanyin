@@ -26,6 +26,7 @@ final class ClassicChromeButtonView: NSView {
 
     var action: () -> Void = {}
 
+    private let borderLayer = BorderLayer()
     private var isHovered = false
     private var isPressed = false
     private var trackingArea: NSTrackingArea?
@@ -33,6 +34,7 @@ final class ClassicChromeButtonView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
+        layer?.addSublayer(borderLayer)
         focusRingType = .default
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
@@ -51,19 +53,11 @@ final class ClassicChromeButtonView: NSView {
 
     override func layout() {
         super.layout()
-        layer?.shadowPath = switch (style.surface, style.role) {
-        case (.titlebarAccessory, .titlebarNavigation):
-            CGPath(
-                roundedRect: bounds,
-                cornerWidth: 4,
-                cornerHeight: 4,
-                transform: nil
-            )
-        case (.titlebarAccessory, _):
-            CGPath(ellipseIn: bounds, transform: nil)
-        case (.content, _):
-            nil
-        }
+        borderLayer.frame = bounds
+        borderLayer.setNeedsLayout()
+        layer?.shadowPath = style.surface == .titlebarAccessory
+            ? chromeShape.path(in: bounds)
+            : nil
     }
 
     override var acceptsFirstResponder: Bool {
@@ -125,7 +119,7 @@ final class ClassicChromeButtonView: NSView {
     }
 
     override func drawFocusRingMask() {
-        NSBezierPath(roundedRect: bounds, xRadius: bounds.height / 2, yRadius: bounds.height / 2).fill()
+        NSBezierPath(cgPath: chromeShape.path(in: bounds)).fill()
     }
 
     override var focusRingMaskBounds: NSRect {
@@ -142,24 +136,23 @@ final class ClassicChromeButtonView: NSView {
             state = style.interactionState
         }
 
-        switch style.role {
-        case .pill:
-            layer.shape = ChouTiUI.Capsule(style: .circular)
-        case .transport:
-            layer.shape = ChouTiUI.Ellipse()
-        case .titlebarNavigation:
-            layer.shape = ChouTiUI.Rectangle(cornerRadius: 4)
-        }
+        let shape = chromeShape
+        layer.shape = shape
+        // Inset the titlebar stroke so its antialiased corners are not clipped by the host shape mask.
+        borderLayer.borderMask = .shape(
+            shape,
+            offset: style.surface == .titlebarAccessory ? -0.5 : 0
+        )
 
         switch style.surface {
         case .content:
             // ChouTiUI owns the Classic convex/concave surface recipes; the
             // palette controls the semantic interaction edges around them.
             layer.setBackgroundColor(state == .pressed ? .concaveGray : .convexGray)
-            layer.borderColor = nsColor(
-                state == .hovered ? style.palette.controlHoverBorder : style.palette.controlBorder
-            ).cgColor
-            layer.borderWidth = 1
+            borderLayer.borderContent = .color(
+                nsColor(state == .hovered ? style.palette.controlHoverBorder : style.palette.controlBorder)
+            )
+            borderLayer.borderWidth = 1
             layer.shadowOpacity = 0
         case .titlebarAccessory:
             let colors: [NSColor]
@@ -177,18 +170,33 @@ final class ClassicChromeButtonView: NSView {
                 ]
             }
             layer.setBackgroundColor(LinearGradientColor(colors, [0, 0.52, 1]))
-            layer.borderColor = NSColor(
-                calibratedWhite: 0.24,
-                alpha: state == .hovered ? 0.58 : 0.44
-            ).cgColor
-            layer.borderWidth = 0.75
+            borderLayer.borderContent = .color(
+                NSColor(
+                    calibratedWhite: 0.24,
+                    alpha: state == .hovered ? 0.74 : 0.58
+                )
+            )
+            borderLayer.borderWidth = 0.5
             layer.shadowColor = NSColor.black.cgColor
             layer.shadowOpacity = 0.18
             layer.shadowRadius = 0.75
             layer.shadowOffset = CGSize(width: 0, height: -0.5)
         }
-        alphaValue = isEnabled ? 1 : style.palette.disabledAlpha
+        alphaValue = isEnabled
+            ? 1
+            : (style.surface == .titlebarAccessory ? 0.78 : style.palette.disabledAlpha)
         needsDisplay = true
+    }
+
+    private var chromeShape: any ChouTiUI.Shape {
+        switch style.role {
+        case .pill:
+            ChouTiUI.Capsule(style: .circular)
+        case .transport:
+            ChouTiUI.Ellipse()
+        case .titlebarNavigation:
+            ChouTiUI.Rectangle(cornerRadius: 5.75)
+        }
     }
 
     private func nsColor(_ color: ChromeColor) -> NSColor {

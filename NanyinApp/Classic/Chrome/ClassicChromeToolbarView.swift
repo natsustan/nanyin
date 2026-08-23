@@ -14,9 +14,12 @@ final class ClassicChromeToolbarView: NSView {
         }
     }
 
+    private let borderLayer = BorderLayer()
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
+        layer?.addSublayer(borderLayer)
         setAccessibilityElement(false)
         updateAppearance()
     }
@@ -30,9 +33,17 @@ final class ClassicChromeToolbarView: NSView {
         NSSize(width: NSView.noIntrinsicMetric, height: style.height)
     }
 
+    override func layout() {
+        super.layout()
+        borderLayer.frame = bounds
+        borderLayer.setNeedsLayout()
+    }
+
     private func updateAppearance() {
         guard let layer else { return }
-        layer.shape = ChouTiUI.Rectangle.rectangle
+        let shape = ChouTiUI.Rectangle.rectangle
+        layer.shape = shape
+        borderLayer.borderMask = .shape(shape)
         layer.setBackgroundColor(
             LinearGradientColor(
                 [
@@ -43,8 +54,8 @@ final class ClassicChromeToolbarView: NSView {
                 [0, 0.58, 1]
             )
         )
-        layer.borderColor = nsColor(style.palette.controlBorder).cgColor
-        layer.borderWidth = 1
+        borderLayer.borderContent = .color(nsColor(style.palette.controlBorder))
+        borderLayer.borderWidth = 1
         needsDisplay = true
     }
 
