@@ -197,9 +197,9 @@ private final class ClassicAquaTitleBarView: NSView {
         NSLayoutConstraint.activate([
             close.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 7),
             close.topAnchor.constraint(equalTo: topAnchor, constant: 10),
-            minimize.leadingAnchor.constraint(equalTo: close.trailingAnchor, constant: 8),
+            minimize.leadingAnchor.constraint(equalTo: close.trailingAnchor, constant: 7),
             minimize.centerYAnchor.constraint(equalTo: close.centerYAnchor),
-            zoom.leadingAnchor.constraint(equalTo: minimize.trailingAnchor, constant: 8),
+            zoom.leadingAnchor.constraint(equalTo: minimize.trailingAnchor, constant: 7),
             zoom.centerYAnchor.constraint(equalTo: close.centerYAnchor),
         ])
     }
@@ -213,10 +213,20 @@ private final class ClassicAquaTitleBarView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         NSGradient(
-            starting: NSColor(calibratedHue: 0.5694, saturation: 0.02, brightness: 0.84, alpha: 1),
-            ending: NSColor(calibratedHue: 0.5694, saturation: 0.02, brightness: 0.945, alpha: 1)
+            colorsAndLocations:
+                (NSColor(calibratedWhite: 0.46, alpha: 1), 0),
+                (NSColor(calibratedWhite: 0.53, alpha: 1), 0.08),
+                (NSColor(calibratedWhite: 0.56, alpha: 1), 0.22),
+                (NSColor(calibratedWhite: 0.61, alpha: 1), 0.58),
+                (NSColor(calibratedWhite: 0.66, alpha: 1), 0.85),
+                (NSColor(calibratedWhite: 0.70, alpha: 1), 1)
         )?.draw(in: bounds, angle: 90)
-        NSColor(calibratedWhite: 0.50, alpha: 1).setFill()
+
+        NSColor.white.withAlphaComponent(0.24).setFill()
+        NSRect(x: 0, y: bounds.maxY - 1, width: bounds.width, height: 1).fill()
+        NSColor.white.withAlphaComponent(0.12).setFill()
+        NSRect(x: 0, y: 1, width: bounds.width, height: 1).fill()
+        NSColor(calibratedWhite: 0.20, alpha: 1).setFill()
         NSRect(x: 0, y: 0, width: bounds.width, height: 1).fill()
     }
 
@@ -233,9 +243,9 @@ private final class ClassicWindowButton: NSButton {
 
         var color: NSColor {
             switch self {
-            case .close: NSColor(calibratedRed: 1.00, green: 0.40, blue: 0.37, alpha: 1)
-            case .minimize: NSColor(calibratedRed: 1.00, green: 0.74, blue: 0.20, alpha: 1)
-            case .zoom: NSColor(calibratedWhite: 0.90, alpha: 1)
+            case .close: NSColor(calibratedRed: 0.93, green: 0.23, blue: 0.20, alpha: 1)
+            case .minimize: NSColor(calibratedRed: 0.96, green: 0.62, blue: 0.12, alpha: 1)
+            case .zoom: NSColor(calibratedRed: 0.45, green: 0.76, blue: 0.25, alpha: 1)
             }
         }
 
@@ -254,15 +264,15 @@ private final class ClassicWindowButton: NSButton {
 
     init(kind: Kind) {
         self.kind = kind
-        super.init(frame: NSRect(x: 0, y: 0, width: 12, height: 12))
+        super.init(frame: NSRect(x: 0, y: 0, width: 14, height: 14))
         isBordered = false
         title = ""
         target = self
         action = #selector(performWindowAction)
         setAccessibilityLabel(kind.accessibilityLabel)
         NSLayoutConstraint.activate([
-            widthAnchor.constraint(equalToConstant: 12),
-            heightAnchor.constraint(equalToConstant: 12),
+            widthAnchor.constraint(equalToConstant: 14),
+            heightAnchor.constraint(equalToConstant: 14),
         ])
     }
 
@@ -323,18 +333,33 @@ private final class ClassicWindowButton: NSButton {
     override func draw(_ dirtyRect: NSRect) {
         let active = window?.isKeyWindow == true
         let oval = NSBezierPath(ovalIn: bounds.insetBy(dx: 0.5, dy: 0.5))
+        let base = active ? kind.color : NSColor(calibratedWhite: 0.58, alpha: 1)
+
         NSGraphicsContext.saveGraphicsState()
-        oval.addClip()
-        let base = active ? kind.color : NSColor(calibratedWhite: 0.72, alpha: 1)
-        NSGradient(
-            colorsAndLocations:
-                (base.blended(withFraction: 0.42, of: .white) ?? base, 0),
-                (base, 0.50),
-                (base.blended(withFraction: 0.62, of: .white) ?? base, 1)
-        )?.draw(in: bounds, angle: 90)
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor.black.withAlphaComponent(active ? 0.42 : 0.24)
+        shadow.shadowOffset = NSSize(width: 0, height: -1)
+        shadow.shadowBlurRadius = 1.5
+        shadow.set()
+        base.setFill()
+        oval.fill()
         NSGraphicsContext.restoreGraphicsState()
 
-        NSColor(calibratedWhite: 0.22, alpha: active ? 0.62 : 0.34).setStroke()
+        NSGraphicsContext.saveGraphicsState()
+        oval.addClip()
+        NSGradient(
+            colorsAndLocations:
+                (base.blended(withFraction: 0.20, of: .black) ?? base, 0),
+                (base, 0.42),
+                (base.blended(withFraction: 0.20, of: .white) ?? base, 0.78),
+                (base.blended(withFraction: 0.58, of: .white) ?? base, 1)
+        )?.draw(in: bounds, angle: 90)
+
+        NSColor.white.withAlphaComponent(active ? 0.58 : 0.30).setFill()
+        NSBezierPath(ovalIn: NSRect(x: 3.5, y: 9.5, width: 7, height: 2.5)).fill()
+        NSGraphicsContext.restoreGraphicsState()
+
+        NSColor(calibratedWhite: 0.16, alpha: active ? 0.74 : 0.42).setStroke()
         oval.lineWidth = 0.8
         oval.stroke()
 
@@ -349,16 +374,16 @@ private final class ClassicWindowButton: NSButton {
         mark.lineWidth = 1
         switch kind {
         case .close:
-            mark.move(to: NSPoint(x: 4, y: 4))
-            mark.line(to: NSPoint(x: 8, y: 8))
-            mark.move(to: NSPoint(x: 8, y: 4))
-            mark.line(to: NSPoint(x: 4, y: 8))
+            mark.move(to: NSPoint(x: 4.5, y: 4.5))
+            mark.line(to: NSPoint(x: 9.5, y: 9.5))
+            mark.move(to: NSPoint(x: 9.5, y: 4.5))
+            mark.line(to: NSPoint(x: 4.5, y: 9.5))
         case .minimize:
-            mark.move(to: NSPoint(x: 3.5, y: 6))
-            mark.line(to: NSPoint(x: 8.5, y: 6))
+            mark.move(to: NSPoint(x: 4, y: 7))
+            mark.line(to: NSPoint(x: 10, y: 7))
         case .zoom:
-            mark.move(to: NSPoint(x: 4, y: 8))
-            mark.line(to: NSPoint(x: 8, y: 4))
+            mark.move(to: NSPoint(x: 4.5, y: 9.5))
+            mark.line(to: NSPoint(x: 9.5, y: 4.5))
         }
         mark.stroke()
     }

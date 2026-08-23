@@ -32,18 +32,34 @@ struct ChromeButton: View {
             Group {
                 if let symbolName {
                     Image(systemName: symbolName)
-                        .font(.system(size: style.role == .transport ? 8 : 7, weight: .bold))
+                        .font(.system(size: symbolSize, weight: .bold))
                 } else {
                     Text(title)
                         .font(.system(size: 11, weight: .semibold))
                 }
             }
-            .foregroundStyle(.black.opacity(isEnabled ? 0.76 : 0.52))
+            .foregroundStyle(.black.opacity(symbolOpacity))
             .shadow(color: .white.opacity(0.55), radius: 0, y: 1)
             .allowsHitTesting(false)
             .accessibilityHidden(true)
         }
         .fixedSize()
+    }
+
+    private var symbolSize: CGFloat {
+        switch style.role {
+        case .transport: 8
+        case .titlebarNavigation: 9
+        case .pill: 7
+        }
+    }
+
+    private var symbolOpacity: Double {
+        if isEnabled {
+            0.78
+        } else {
+            0.52
+        }
     }
 }
 

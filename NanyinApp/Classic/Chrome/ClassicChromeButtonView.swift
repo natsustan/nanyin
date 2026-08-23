@@ -55,15 +55,13 @@ final class ClassicChromeButtonView: NSView {
 
     override func layout() {
         super.layout()
-        let backgroundInset: CGFloat = style.surface == .content ? 0.5 : 0
+        let backgroundInset: CGFloat = 0.5
         backgroundLayer.frame = bounds.insetBy(dx: backgroundInset, dy: backgroundInset)
         backgroundLayer.contentsScale = layer?.contentsScale ?? 2
         backgroundLayer.setNeedsLayout()
         borderLayer.frame = bounds
         borderLayer.setNeedsLayout()
-        layer?.shadowPath = style.surface == .titlebarAccessory
-            ? chromeShape.path(in: bounds)
-            : nil
+        layer?.shadowPath = chromeShape.path(in: bounds.insetBy(dx: 0.5, dy: 0.5))
     }
 
     override var acceptsFirstResponder: Bool {
@@ -146,56 +144,56 @@ final class ClassicChromeButtonView: NSView {
         // Keep the antialiased stroke inside the host shape mask. A centered
         // stroke loses its outer half and renders unevenly around ellipses.
         borderLayer.borderMask = .shape(shape, offset: -0.5)
-
-        switch style.surface {
-        case .content:
-            layer.shape = nil
-            layer.setBackgroundColor(NSColor.clear)
-            backgroundLayer.isHidden = false
-            backgroundLayer.shape = shape
-            let colors = state == .pressed
-                ? style.palette.controlPressedBackground
-                : style.palette.controlBackground
-            backgroundLayer.setBackgroundColor(LinearGradientColor(colors.map(nsColor)))
-            borderLayer.borderContent = .color(
-                nsColor(state == .hovered ? style.palette.controlHoverBorder : style.palette.controlBorder)
-            )
-            borderLayer.borderWidth = 0.5
-            layer.shadowOpacity = 0
-        case .titlebarAccessory:
-            backgroundLayer.isHidden = true
-            backgroundLayer.shape = nil
-            layer.shape = shape
-            let colors: [NSColor]
-            if state == .pressed {
-                colors = [
-                    NSColor(calibratedWhite: 0.76, alpha: 1),
-                    NSColor(calibratedWhite: 0.84, alpha: 1),
-                    NSColor(calibratedWhite: 0.91, alpha: 1),
-                ]
-            } else {
-                colors = [
-                    NSColor(calibratedWhite: 0.99, alpha: 1),
-                    NSColor(calibratedWhite: 0.87, alpha: 1),
-                    NSColor(calibratedWhite: 0.72, alpha: 1),
-                ]
-            }
-            layer.setBackgroundColor(LinearGradientColor(colors, [0, 0.52, 1]))
-            borderLayer.borderContent = .color(
-                NSColor(
-                    calibratedWhite: 0.24,
-                    alpha: state == .hovered ? 0.74 : 0.58
+        layer.shape = nil
+        layer.setBackgroundColor(NSColor.clear)
+        backgroundLayer.isHidden = false
+        backgroundLayer.shape = shape
+        if state == .pressed {
+            backgroundLayer.setBackgroundColor(
+                LinearGradientColor(
+                    [
+                        NSColor(calibratedWhite: 0.78, alpha: 1),
+                        NSColor(calibratedWhite: 0.86, alpha: 1),
+                        NSColor(calibratedWhite: 0.93, alpha: 1),
+                    ],
+                    [0, 0.48, 1],
+                    .bottom,
+                    .top
                 )
             )
-            borderLayer.borderWidth = 0.5
-            layer.shadowColor = NSColor.black.cgColor
-            layer.shadowOpacity = 0.18
-            layer.shadowRadius = 0.75
-            layer.shadowOffset = CGSize(width: 0, height: -0.5)
+        } else {
+            backgroundLayer.setBackgroundColor(
+                LinearGradientColor(
+                    [
+                        NSColor(calibratedWhite: 0.90, alpha: 1),
+                        NSColor(calibratedWhite: 0.80, alpha: 1),
+                        NSColor(calibratedWhite: 0.68, alpha: 1),
+                    ],
+                    [0, 0.48, 1],
+                    .bottom,
+                    .top
+                )
+            )
         }
-        alphaValue = isEnabled
-            ? 1
-            : (style.surface == .titlebarAccessory ? 0.78 : style.palette.disabledAlpha)
+        borderLayer.borderContent = .gradient(
+            .linearGradient(
+                LinearGradientColor(
+                    [
+                        NSColor.white.withAlphaComponent(state == .hovered ? 0.74 : 0.58),
+                        NSColor(calibratedWhite: 0.24, alpha: state == .hovered ? 0.58 : 0.38),
+                    ],
+                    nil,
+                    .bottom,
+                    .top
+                )
+            )
+        )
+        borderLayer.borderWidth = 0.5
+        layer.shadowColor = NSColor.black.cgColor
+        layer.shadowOpacity = 0.30
+        layer.shadowRadius = 1
+        layer.shadowOffset = CGSize(width: 0, height: -0.5)
+        alphaValue = isEnabled ? 1 : style.palette.disabledAlpha
         needsDisplay = true
     }
 
@@ -206,7 +204,7 @@ final class ClassicChromeButtonView: NSView {
         case .transport:
             ChouTiUI.Ellipse()
         case .titlebarNavigation:
-            ChouTiUI.Rectangle(cornerRadius: 5.75)
+            ChouTiUI.Capsule(style: .continuous)
         }
     }
 
