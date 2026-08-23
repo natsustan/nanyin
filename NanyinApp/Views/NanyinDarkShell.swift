@@ -36,17 +36,7 @@ private struct ShellPresentationModifier: ViewModifier {
     let kind: ShellPresentationKind
 
     func body(content: Content) -> some View {
-        VStack(spacing: 0) {
-            Group {
-                if kind == .classic2010 {
-                    ClassicToolbarView()
-                } else {
-                    Color.clear
-                }
-            }
-            .frame(height: kind == .classic2010 ? 38 : 0)
-            content
-        }
+        content
         .toolbar {
             if kind == .nanyinDark {
                 ToolbarItemGroup(placement: .navigation) {
@@ -96,7 +86,10 @@ private struct ShellContent: View {
                 .frame(height: theme.metrics.playerBarHeight)
         }
         .background(theme.colors.contentBackground.swiftUIStyle)
-        .ignoresSafeArea()
+        .ignoresSafeArea(
+            .container,
+            edges: theme.id == .classic2010 ? [.horizontal, .bottom] : .all
+        )
     }
 }
 

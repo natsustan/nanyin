@@ -49,6 +49,23 @@ final class ClassicChromeButtonView: NSView {
         style.size
     }
 
+    override func layout() {
+        super.layout()
+        layer?.shadowPath = switch (style.surface, style.role) {
+        case (.titlebarAccessory, .titlebarNavigation):
+            CGPath(
+                roundedRect: bounds,
+                cornerWidth: 4,
+                cornerHeight: 4,
+                transform: nil
+            )
+        case (.titlebarAccessory, _):
+            CGPath(ellipseIn: bounds, transform: nil)
+        case (.content, _):
+            nil
+        }
+    }
+
     override var acceptsFirstResponder: Bool {
         isEnabled
     }
@@ -130,14 +147,46 @@ final class ClassicChromeButtonView: NSView {
             layer.shape = ChouTiUI.Capsule(style: .circular)
         case .transport:
             layer.shape = ChouTiUI.Ellipse()
+        case .titlebarNavigation:
+            layer.shape = ChouTiUI.Rectangle(cornerRadius: 4)
         }
-        // ChouTiUI owns the Classic convex/concave surface recipes; the
-        // palette controls the semantic interaction edges around them.
-        layer.setBackgroundColor(state == .pressed ? .concaveGray : .convexGray)
-        layer.borderColor = nsColor(
-            state == .hovered ? style.palette.controlHoverBorder : style.palette.controlBorder
-        ).cgColor
-        layer.borderWidth = 1
+
+        switch style.surface {
+        case .content:
+            // ChouTiUI owns the Classic convex/concave surface recipes; the
+            // palette controls the semantic interaction edges around them.
+            layer.setBackgroundColor(state == .pressed ? .concaveGray : .convexGray)
+            layer.borderColor = nsColor(
+                state == .hovered ? style.palette.controlHoverBorder : style.palette.controlBorder
+            ).cgColor
+            layer.borderWidth = 1
+            layer.shadowOpacity = 0
+        case .titlebarAccessory:
+            let colors: [NSColor]
+            if state == .pressed {
+                colors = [
+                    NSColor(calibratedWhite: 0.76, alpha: 1),
+                    NSColor(calibratedWhite: 0.84, alpha: 1),
+                    NSColor(calibratedWhite: 0.91, alpha: 1),
+                ]
+            } else {
+                colors = [
+                    NSColor(calibratedWhite: 0.99, alpha: 1),
+                    NSColor(calibratedWhite: 0.87, alpha: 1),
+                    NSColor(calibratedWhite: 0.72, alpha: 1),
+                ]
+            }
+            layer.setBackgroundColor(LinearGradientColor(colors, [0, 0.52, 1]))
+            layer.borderColor = NSColor(
+                calibratedWhite: 0.24,
+                alpha: state == .hovered ? 0.58 : 0.44
+            ).cgColor
+            layer.borderWidth = 0.75
+            layer.shadowColor = NSColor.black.cgColor
+            layer.shadowOpacity = 0.18
+            layer.shadowRadius = 0.75
+            layer.shadowOffset = CGSize(width: 0, height: -0.5)
+        }
         alphaValue = isEnabled ? 1 : style.palette.disabledAlpha
         needsDisplay = true
     }

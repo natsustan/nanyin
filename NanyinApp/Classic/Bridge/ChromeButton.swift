@@ -8,6 +8,7 @@ import SwiftUI
 struct ChromeButton: View {
     let title: String
     var accessibilityLabel: String? = nil
+    var symbolName: String? = nil
     var style = ChromeStyle()
     var action: () -> Void = {}
 
@@ -28,12 +29,19 @@ struct ChromeButton: View {
             action: action
         )
         .overlay {
-            Text(title)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.black.opacity(isEnabled ? 0.82 : 0.58))
-                .shadow(color: .white.opacity(0.55), radius: 0, y: 1)
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
+            Group {
+                if let symbolName {
+                    Image(systemName: symbolName)
+                        .font(.system(size: 7, weight: .bold))
+                } else {
+                    Text(title)
+                        .font(.system(size: 11, weight: .semibold))
+                }
+            }
+            .foregroundStyle(.black.opacity(isEnabled ? 0.76 : 0.52))
+            .shadow(color: .white.opacity(0.55), radius: 0, y: 1)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
         }
         .fixedSize()
     }

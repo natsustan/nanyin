@@ -38,22 +38,16 @@ struct SearchView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if theme.id != .classic2010 {
-                searchField
-                Divider().overlay(theme.colors.divider)
-            }
+            searchField
+            Divider().overlay(theme.colors.divider)
             content
         }
         .background(theme.colors.contentBackground.swiftUIStyle)
         .onAppear {
-            if theme.id != .classic2010 {
-                focused = true
-            }
+            focused = true
         }
         .onChange(of: app.searchFocusToken) {
-            if theme.id != .classic2010 {
-                focused = true
-            }
+            focused = true
         }
     }
 

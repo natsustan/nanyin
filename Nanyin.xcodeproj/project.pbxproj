@@ -32,7 +32,6 @@
 		56EA31B8738E2B0828584E14 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9DA62671ECF8B9C27AA8947 /* KeychainStore.swift */; };
 		5E25110C2C6F2BB024C3BE81 /* AudioRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 218760DB55414E5851E389CE /* AudioRenderer.swift */; };
 		6C29F6E171F9CB86151B4812 /* NanyinDarkShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3EBD0B033D15141F13D914C /* NanyinDarkShell.swift */; };
-		7227A263DB40995625861871 /* ClassicToolbarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5441652B68A21A528AED8EEE /* ClassicToolbarView.swift */; };
 		7437C374A77C622C0833346E /* SearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE5EC6E22F04C69F48FC16FF /* SearchView.swift */; };
 		75D5195D94BEF277BDD3E662 /* ChromeSectionBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70085F48F4FA957D680D6FB5 /* ChromeSectionBar.swift */; };
 		762B77578549312AFA4EBA63 /* PlaybackStallDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2CC8CB2F66E24260D048945 /* PlaybackStallDetector.swift */; };
@@ -41,9 +40,11 @@
 		7A2B387407DA70ABD4E327CD /* AppContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02563A0C2D56F1756B874562 /* AppContentView.swift */; };
 		80CAD290E086617D8B2A3342 /* ChromeToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA12EC951690941451EA2E7A /* ChromeToolbar.swift */; };
 		840397300BB1399C8824A015 /* SavedAlbumCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A304C3165403EF8BCC680B91 /* SavedAlbumCache.swift */; };
+		866B96F9C71C95430D94F290 /* ClassicTitleBarBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D773E91A6DEB68D27AC2EA7 /* ClassicTitleBarBridge.swift */; };
 		881E3FDCED569E6CF81E5CE6 /* ClassicShellGeometryFixture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 403D18D55DD1CEF30C7EA2F9 /* ClassicShellGeometryFixture.swift */; };
 		8BA79311D06E4870F7108167 /* ChromeButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BE78A5C4C4901EC940FAD47 /* ChromeButton.swift */; };
 		A25B430D787B7E5F81AFEA3D /* ClassicChromeButtonView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6F7A03F72E05B94F8661242 /* ClassicChromeButtonView.swift */; };
+		A56F7ECEFC9FF398AF61C836 /* ClassicTitleBarControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22BE7BF3A6E1AE5C5985DB8D /* ClassicTitleBarControls.swift */; };
 		B096E4977747700C3EB6CC82 /* LocalPlaybackStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3D90AF51885C8E464B60FE5 /* LocalPlaybackStore.swift */; };
 		B4A205276406D7F4468DE96F /* NanyinApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D16BE0C19B1222A7FFFA360C /* NanyinApp.swift */; };
 		B4A7E0B8FA945E0D257077DB /* SpotifyAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3769801C838BE7FD6353F953 /* SpotifyAuth.swift */; };
@@ -76,9 +77,11 @@
 		196502AD5E98E680CB17BD1E /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		1EF680835CEF2B531A47F6E0 /* DebugLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugLog.swift; sourceTree = "<group>"; };
 		218760DB55414E5851E389CE /* AudioRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRenderer.swift; sourceTree = "<group>"; };
+		22BE7BF3A6E1AE5C5985DB8D /* ClassicTitleBarControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClassicTitleBarControls.swift; sourceTree = "<group>"; };
 		2639140FEC134E04BA4815ED /* SidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarView.swift; sourceTree = "<group>"; };
 		29BEE90D684497B3A17715BC /* ClassicChromeSectionBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClassicChromeSectionBarView.swift; sourceTree = "<group>"; };
 		29DF36B3CB2F281AC7CE3E9A /* SavedAlbumsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedAlbumsView.swift; sourceTree = "<group>"; };
+		2D773E91A6DEB68D27AC2EA7 /* ClassicTitleBarBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClassicTitleBarBridge.swift; sourceTree = "<group>"; };
 		35BBB8602E40346141A75FC2 /* NanyinCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NanyinCore.swift; sourceTree = "<group>"; };
 		3769801C838BE7FD6353F953 /* SpotifyAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotifyAuth.swift; sourceTree = "<group>"; };
 		3C34F9480C980947C6DBA66E /* MembershipMutation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MembershipMutation.swift; sourceTree = "<group>"; };
@@ -89,7 +92,6 @@
 		459B108E232139E1EFF71B79 /* ThemeVisualFixture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeVisualFixture.swift; sourceTree = "<group>"; };
 		46CBA0966AF2014CCAB3C2D3 /* PlaybackReconnectPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackReconnectPolicy.swift; sourceTree = "<group>"; };
 		5362EA9DE5C94A675FC10A2A /* NowPlayingManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingManager.swift; sourceTree = "<group>"; };
-		5441652B68A21A528AED8EEE /* ClassicToolbarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClassicToolbarView.swift; sourceTree = "<group>"; };
 		5B62F2FDF62B22A7F2438671 /* PlaylistLibraryMerge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistLibraryMerge.swift; sourceTree = "<group>"; };
 		61564C1B59DBCF7E35D071B3 /* QueueView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueView.swift; sourceTree = "<group>"; };
 		63B137ABBBF1D05325A8ED16 /* SpotifyClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotifyClient.swift; sourceTree = "<group>"; };
@@ -199,7 +201,7 @@
 				B5D5892A75C75A7736107AEE /* ArtworkView.swift */,
 				F3CB1BDED634D51131A94FB9 /* Classic2010Shell.swift */,
 				403D18D55DD1CEF30C7EA2F9 /* ClassicShellGeometryFixture.swift */,
-				5441652B68A21A528AED8EEE /* ClassicToolbarView.swift */,
+				22BE7BF3A6E1AE5C5985DB8D /* ClassicTitleBarControls.swift */,
 				AA6332196A87845CF96EBF8B /* HomeView.swift */,
 				DD9151ECFD94AFE44E6F5E27 /* LoginView.swift */,
 				D3EBD0B033D15141F13D914C /* NanyinDarkShell.swift */,
@@ -229,6 +231,7 @@
 				C4C7D21A04EED9DB1C9CFE42 /* ChromeStyle.swift */,
 				CA12EC951690941451EA2E7A /* ChromeToolbar.swift */,
 				F79877AF87B61E7E6245030C /* ClassicChromePreviewHarness.swift */,
+				2D773E91A6DEB68D27AC2EA7 /* ClassicTitleBarBridge.swift */,
 			);
 			path = Bridge;
 			sourceTree = "<group>";
@@ -411,7 +414,8 @@
 				EC8DC609E5BBBE60053D1B1C /* ClassicChromeSliderTrackView.swift in Sources */,
 				0AC335B8CE86D590B41732AE /* ClassicChromeToolbarView.swift in Sources */,
 				881E3FDCED569E6CF81E5CE6 /* ClassicShellGeometryFixture.swift in Sources */,
-				7227A263DB40995625861871 /* ClassicToolbarView.swift in Sources */,
+				866B96F9C71C95430D94F290 /* ClassicTitleBarBridge.swift in Sources */,
+				A56F7ECEFC9FF398AF61C836 /* ClassicTitleBarControls.swift in Sources */,
 				76A0FBCD808CE4272E6E9FF7 /* CredentialRevision.swift in Sources */,
 				D53EA805C18FC6BD2585A05E /* DebugLog.swift in Sources */,
 				3CD0F98412A26065319A48E8 /* HomeFeed.swift in Sources */,

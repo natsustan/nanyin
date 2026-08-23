@@ -103,7 +103,8 @@ for source in \
     "$ROOT_DIR/NanyinApp/Views/AppContentView.swift" \
     "$ROOT_DIR/NanyinApp/Views/NanyinDarkShell.swift" \
     "$ROOT_DIR/NanyinApp/Views/Classic2010Shell.swift" \
-    "$ROOT_DIR/NanyinApp/Views/ClassicToolbarView.swift" \
+    "$ROOT_DIR/NanyinApp/Views/ClassicTitleBarControls.swift" \
+    "$ROOT_DIR/NanyinApp/Classic/Bridge/ClassicTitleBarBridge.swift" \
     "$ROOT_DIR/NanyinApp/Views/ClassicShellGeometryFixture.swift"; do
     [[ -f "$source" ]] || fail "required shell source is missing: ${source##*/}"
 done
@@ -125,8 +126,8 @@ rg -q 'ClassicTrackRow' "$ROOT_DIR/NanyinApp/Views/TrackListView.swift" \
     || fail "Classic track table row is missing"
 rg -q 'classicArtistColumnWidth' "$ROOT_DIR/NanyinApp/Views/TrackListView.swift" \
     || fail "Classic track table is missing the dedicated artist column"
-rg -q 'theme\.id != \.classic2010' "$ROOT_DIR/NanyinApp/Views/SearchView.swift" \
-    || fail "SearchView does not reserve its page field for Nanyin Dark"
+rg -q 'searchField' "$ROOT_DIR/NanyinApp/Views/SearchView.swift" \
+    || fail "SearchView is missing its page-owned search field"
 for source in \
     "$ROOT_DIR/NanyinApp/Views/PlaylistDetailView.swift" \
     "$ROOT_DIR/NanyinApp/Views/ArtistDetailView.swift" \

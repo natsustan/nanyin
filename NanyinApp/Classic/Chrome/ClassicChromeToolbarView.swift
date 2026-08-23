@@ -33,9 +33,16 @@ final class ClassicChromeToolbarView: NSView {
     private func updateAppearance() {
         guard let layer else { return }
         layer.shape = ChouTiUI.Rectangle.rectangle
-        // silverChrome is the deliberate Classic graphite toolbar preset;
-        // palette values keep the boundary/theme contract semantic.
-        layer.setBackgroundColor(.silverChrome)
+        layer.setBackgroundColor(
+            LinearGradientColor(
+                [
+                    NSColor(calibratedWhite: 0.96, alpha: 1),
+                    NSColor(calibratedWhite: 0.88, alpha: 1),
+                    NSColor(calibratedWhite: 0.80, alpha: 1),
+                ],
+                [0, 0.58, 1]
+            )
+        )
         layer.borderColor = nsColor(style.palette.controlBorder).cgColor
         layer.borderWidth = 1
         needsDisplay = true

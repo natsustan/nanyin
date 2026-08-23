@@ -42,6 +42,13 @@ struct NanyinApp: App {
                 .environment(\.appTheme, AppTheme.resolve(selectedThemeID))
                 .preferredColorScheme(.dark)
                 .frame(minWidth: 900, minHeight: 600)
+                .background {
+                    ClassicTitleBarBridge(
+                        isClassic: selectedThemeID == .classic2010,
+                        app: delegate.appModel,
+                        theme: AppTheme.resolve(selectedThemeID)
+                    )
+                }
                 .onAppear {
                     delegate.appModel.start()
                 }
