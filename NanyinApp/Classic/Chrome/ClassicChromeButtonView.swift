@@ -27,7 +27,6 @@ final class ClassicChromeButtonView: NSView {
     var action: () -> Void = {}
 
     private let backgroundLayer = CALayer()
-    private let glossLayer = CALayer()
     private let borderLayer = BorderLayer()
     private var isHovered = false
     private var isPressed = false
@@ -37,7 +36,6 @@ final class ClassicChromeButtonView: NSView {
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.addSublayer(backgroundLayer)
-        layer?.addSublayer(glossLayer)
         layer?.addSublayer(borderLayer)
         focusRingType = .default
         setAccessibilityElement(true)
@@ -61,9 +59,6 @@ final class ClassicChromeButtonView: NSView {
         backgroundLayer.frame = bounds.insetBy(dx: backgroundInset, dy: backgroundInset)
         backgroundLayer.contentsScale = layer?.contentsScale ?? 2
         backgroundLayer.setNeedsLayout()
-        glossLayer.frame = backgroundLayer.frame
-        glossLayer.contentsScale = layer?.contentsScale ?? 2
-        glossLayer.setNeedsLayout()
         borderLayer.frame = bounds
         borderLayer.setNeedsLayout()
         layer?.shadowPath = chromeShape.path(in: bounds.insetBy(dx: 0.5, dy: 0.5))
@@ -153,18 +148,14 @@ final class ClassicChromeButtonView: NSView {
         layer.setBackgroundColor(NSColor.clear)
         backgroundLayer.isHidden = false
         backgroundLayer.shape = shape
-        glossLayer.isHidden = style.role != .titlebarNavigation
-        glossLayer.shape = shape
         if style.role == .titlebarNavigation, state == .pressed {
             backgroundLayer.setBackgroundColor(
                 LinearGradientColor(
                     [
-                        NSColor(calibratedWhite: 0.78, alpha: 1),
                         NSColor(calibratedWhite: 0.72, alpha: 1),
-                        NSColor(calibratedWhite: 0.84, alpha: 1),
-                        NSColor(calibratedWhite: 0.88, alpha: 1),
+                        NSColor(calibratedWhite: 0.66, alpha: 1),
                     ],
-                    [0, 0.49, 0.50, 1],
+                    nil,
                     .bottom,
                     .top
                 )
@@ -176,10 +167,10 @@ final class ClassicChromeButtonView: NSView {
                     [
                         NSColor(calibratedWhite: 0.94 + hoverLift, alpha: 1),
                         NSColor(calibratedWhite: 0.86 + hoverLift, alpha: 1),
-                        NSColor(calibratedWhite: 0.93 + hoverLift, alpha: 1),
-                        NSColor(calibratedWhite: 0.84 + hoverLift, alpha: 1),
+                        NSColor(calibratedWhite: 0.94 + hoverLift, alpha: 1),
+                        NSColor(calibratedWhite: 0.88 + hoverLift, alpha: 1),
                     ],
-                    [0, 0.49, 0.50, 1],
+                    [0, 0.50, 0.51, 1],
                     .bottom,
                     .top
                 )
@@ -198,36 +189,28 @@ final class ClassicChromeButtonView: NSView {
                 )
             )
         }
-        glossLayer.setBackgroundColor(
-            LinearGradientColor(
-                [
-                    NSColor.clear,
-                    NSColor.clear,
-                    NSColor.white.withAlphaComponent(state == .pressed ? 0.10 : 0.20),
-                    NSColor.white.withAlphaComponent(state == .pressed ? 0.22 : 0.46),
-                ],
-                [0, 0.49, 0.50, 1],
-                .bottom,
-                .top
-            )
-        )
-        borderLayer.borderContent = .gradient(
-            .linearGradient(
-                LinearGradientColor(
-                    [
-                        NSColor.white.withAlphaComponent(state == .hovered ? 0.74 : 0.58),
-                        NSColor(calibratedWhite: 0.24, alpha: state == .hovered ? 0.58 : 0.38),
-                    ],
-                    nil,
-                    .bottom,
-                    .top
+        if style.role == .titlebarNavigation {
+            borderLayer.borderContent = .color(NSColor.clear)
+            borderLayer.borderWidth = 0
+        } else {
+            borderLayer.borderContent = .gradient(
+                .linearGradient(
+                    LinearGradientColor(
+                        [
+                            NSColor.white.withAlphaComponent(state == .hovered ? 0.74 : 0.58),
+                            NSColor(calibratedWhite: 0.18, alpha: state == .hovered ? 0.68 : 0.52),
+                        ],
+                        nil,
+                        .bottom,
+                        .top
+                    )
                 )
             )
-        )
-        borderLayer.borderWidth = 0.5
+            borderLayer.borderWidth = 0.5
+        }
         layer.shadowColor = NSColor.black.cgColor
-        layer.shadowOpacity = style.role == .titlebarNavigation ? 0.26 : 0.30
-        layer.shadowRadius = style.role == .titlebarNavigation ? 1.5 : 1
+        layer.shadowOpacity = style.role == .titlebarNavigation ? 0 : 0.30
+        layer.shadowRadius = 1
         layer.shadowOffset = CGSize(width: 0, height: -1)
         alphaValue = isEnabled || style.role == .titlebarNavigation ? 1 : style.palette.disabledAlpha
         needsDisplay = true
@@ -240,7 +223,14 @@ final class ClassicChromeButtonView: NSView {
         case .transport:
             ChouTiUI.Ellipse()
         case .titlebarNavigation:
-            ChouTiUI.Capsule(style: .continuous)
+            switch style.segmentPosition {
+            case .standalone:
+                ChouTiUI.Rectangle(cornerRadius: 4)
+            case .leading:
+                ChouTiUI.Rectangle(cornerRadius: 4, roundingCorners: [.topLeft, .bottomLeft])
+            case .trailing:
+                ChouTiUI.Rectangle(cornerRadius: 4, roundingCorners: [.topRight, .bottomRight])
+            }
         }
     }
 

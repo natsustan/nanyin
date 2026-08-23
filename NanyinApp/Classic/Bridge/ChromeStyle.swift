@@ -102,6 +102,12 @@ enum ChromeSurface: Equatable {
     case titlebarAccessory
 }
 
+enum ChromeSegmentPosition: Equatable {
+    case standalone
+    case leading
+    case trailing
+}
+
 /// Plain Bridge↔Chrome configuration. It intentionally contains no ChouTiUI
 /// type so the SwiftUI layer cannot depend on the drawing implementation.
 struct ChromeStyle: Equatable {
@@ -109,6 +115,7 @@ struct ChromeStyle: Equatable {
     var size = CGSize(width: 88, height: 24)
     var interactionState: ChromeInteractionState = .automatic
     var surface = ChromeSurface.content
+    var segmentPosition = ChromeSegmentPosition.standalone
     var palette = ChromePalette.classic2010
 }
 

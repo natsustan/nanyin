@@ -197,9 +197,9 @@ private final class ClassicAquaTitleBarView: NSView {
         NSLayoutConstraint.activate([
             close.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 7),
             close.topAnchor.constraint(equalTo: topAnchor, constant: 10),
-            minimize.leadingAnchor.constraint(equalTo: close.trailingAnchor, constant: 7),
+            minimize.leadingAnchor.constraint(equalTo: close.trailingAnchor, constant: 8),
             minimize.centerYAnchor.constraint(equalTo: close.centerYAnchor),
-            zoom.leadingAnchor.constraint(equalTo: minimize.trailingAnchor, constant: 7),
+            zoom.leadingAnchor.constraint(equalTo: minimize.trailingAnchor, constant: 8),
             zoom.centerYAnchor.constraint(equalTo: close.centerYAnchor),
         ])
     }
@@ -241,11 +241,23 @@ private final class ClassicWindowButton: NSButton {
         case minimize
         case zoom
 
-        var color: NSColor {
+        var colors: (top: NSColor, bottom: NSColor) {
             switch self {
-            case .close: NSColor(calibratedRed: 0.93, green: 0.23, blue: 0.20, alpha: 1)
-            case .minimize: NSColor(calibratedRed: 0.96, green: 0.62, blue: 0.12, alpha: 1)
-            case .zoom: NSColor(calibratedRed: 0.45, green: 0.76, blue: 0.25, alpha: 1)
+            case .close:
+                (
+                    NSColor(calibratedRed: 0.76, green: 0.23, blue: 0.18, alpha: 1),
+                    NSColor(calibratedRed: 0.80, green: 0.29, blue: 0.20, alpha: 1)
+                )
+            case .minimize:
+                (
+                    NSColor(calibratedRed: 0.79, green: 0.51, blue: 0.05, alpha: 1),
+                    NSColor(calibratedRed: 0.99, green: 0.99, blue: 0.58, alpha: 1)
+                )
+            case .zoom:
+                (
+                    NSColor(calibratedRed: 0.44, green: 0.68, blue: 0.23, alpha: 1),
+                    NSColor(calibratedRed: 0.54, green: 0.75, blue: 0.20, alpha: 1)
+                )
             }
         }
 
@@ -264,15 +276,15 @@ private final class ClassicWindowButton: NSButton {
 
     init(kind: Kind) {
         self.kind = kind
-        super.init(frame: NSRect(x: 0, y: 0, width: 14, height: 14))
+        super.init(frame: NSRect(x: 0, y: 0, width: 13, height: 13))
         isBordered = false
         title = ""
         target = self
         action = #selector(performWindowAction)
         setAccessibilityLabel(kind.accessibilityLabel)
         NSLayoutConstraint.activate([
-            widthAnchor.constraint(equalToConstant: 14),
-            heightAnchor.constraint(equalToConstant: 14),
+            widthAnchor.constraint(equalToConstant: 13),
+            heightAnchor.constraint(equalToConstant: 13),
         ])
     }
 
@@ -332,16 +344,27 @@ private final class ClassicWindowButton: NSButton {
 
     override func draw(_ dirtyRect: NSRect) {
         let active = window?.isKeyWindow == true
-        let oval = NSBezierPath(ovalIn: bounds.insetBy(dx: 0.5, dy: 0.5))
-        let base = active ? kind.color : NSColor(calibratedWhite: 0.58, alpha: 1)
+        let oval = NSBezierPath(ovalIn: bounds)
+        let top = active ? kind.colors.top : NSColor(calibratedWhite: 0.62, alpha: 1)
+        let bottom = active ? kind.colors.bottom : NSColor(calibratedWhite: 0.78, alpha: 1)
 
         NSGraphicsContext.saveGraphicsState()
         let shadow = NSShadow()
-        shadow.shadowColor = NSColor.black.withAlphaComponent(active ? 0.42 : 0.24)
-        shadow.shadowOffset = NSSize(width: 0, height: -1)
-        shadow.shadowBlurRadius = 1.5
+        shadow.shadowColor = NSColor.black.withAlphaComponent(active ? 0.50 : 0.24)
+        shadow.shadowOffset = NSSize(width: 0, height: -2)
+        shadow.shadowBlurRadius = 2
         shadow.set()
-        base.setFill()
+        top.setFill()
+        oval.fill()
+        NSGraphicsContext.restoreGraphicsState()
+
+        NSGraphicsContext.saveGraphicsState()
+        let contactShadow = NSShadow()
+        contactShadow.shadowColor = NSColor.black.withAlphaComponent(active ? 0.40 : 0.20)
+        contactShadow.shadowOffset = NSSize(width: 0, height: -1)
+        contactShadow.shadowBlurRadius = 1
+        contactShadow.set()
+        top.setFill()
         oval.fill()
         NSGraphicsContext.restoreGraphicsState()
 
@@ -349,39 +372,36 @@ private final class ClassicWindowButton: NSButton {
         oval.addClip()
         NSGradient(
             colorsAndLocations:
-                (base.blended(withFraction: 0.24, of: .black) ?? base, 0),
-                (base.blended(withFraction: 0.08, of: .black) ?? base, 0.26),
-                (base.blended(withFraction: 0.10, of: .white) ?? base, 0.62),
-                (base.blended(withFraction: 0.28, of: .white) ?? base, 1)
+                (bottom, 0),
+                (top, 1)
         )?.draw(in: bounds, angle: 90)
 
         NSGradient(
             colorsAndLocations:
-                (NSColor.white.withAlphaComponent(active ? 0.18 : 0.10), 0),
-                (NSColor.white.withAlphaComponent(active ? 0.48 : 0.22), 1)
+                (NSColor.white.withAlphaComponent(active ? 0.26 : 0.12), 0),
+                (NSColor.clear, 0.42),
+                (NSColor.black.withAlphaComponent(active ? 0.26 : 0.14), 1)
         )?.draw(
-            in: NSBezierPath(roundedRect: NSRect(x: 1.5, y: 1, width: 11, height: 4.5), xRadius: 2.25, yRadius: 2.25),
-            angle: 90
+            fromCenter: NSPoint(x: bounds.midX, y: bounds.midY + 0.9),
+            radius: 0,
+            toCenter: NSPoint(x: bounds.midX, y: bounds.midY + 0.9),
+            radius: 6.4,
+            options: []
         )
 
         NSGradient(
             colorsAndLocations:
-                (NSColor.white.withAlphaComponent(active ? 0.28 : 0.14), 0),
-                (NSColor.white.withAlphaComponent(active ? 0.86 : 0.38), 1)
+                (NSColor.white.withAlphaComponent(active ? 0.16 : 0.08), 0),
+                (NSColor.white.withAlphaComponent(active ? 0.58 : 0.28), 1)
         )?.draw(
-            in: NSBezierPath(roundedRect: NSRect(x: 3.5, y: 9.25, width: 7, height: 3), xRadius: 1.5, yRadius: 1.5),
+            in: NSBezierPath(ovalIn: NSRect(x: 3.5, y: 9.5, width: 6, height: 2)),
             angle: 90
         )
         NSGraphicsContext.restoreGraphicsState()
 
-        NSColor(calibratedWhite: 0.12, alpha: active ? 0.68 : 0.38).setStroke()
-        oval.lineWidth = 0.8
+        NSColor.black.withAlphaComponent(active ? 0.30 : 0.24).setStroke()
+        oval.lineWidth = 0.5
         oval.stroke()
-
-        let innerRim = NSBezierPath(ovalIn: bounds.insetBy(dx: 1.25, dy: 1.25))
-        NSColor.white.withAlphaComponent(active ? 0.18 : 0.10).setStroke()
-        innerRim.lineWidth = 0.5
-        innerRim.stroke()
 
         if isHighlighted {
             NSColor.black.withAlphaComponent(0.22).setFill()

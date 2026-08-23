@@ -16,7 +16,7 @@ struct ClassicTitleBarControls: View {
                     title: "",
                     accessibilityLabel: "Back",
                     symbolName: "arrowtriangle.left.fill",
-                    style: navigationStyle,
+                    style: navigationStyle(position: .leading),
                     action: app.goBack
                 )
                 .disabled(!app.canGoBack)
@@ -27,11 +27,29 @@ struct ClassicTitleBarControls: View {
                     title: "",
                     accessibilityLabel: "Forward",
                     symbolName: "arrowtriangle.right.fill",
-                    style: navigationStyle,
+                    style: navigationStyle(position: .trailing),
                     action: app.goForward
                 )
                 .disabled(!app.canGoForward)
                 .help(app.canGoForward ? "Forward" : "No navigation history")
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .overlay {
+                RoundedRectangle(cornerRadius: 4)
+                    .strokeBorder(.black.opacity(0.40), lineWidth: 1)
+                    .allowsHitTesting(false)
+            }
+            .overlay {
+                Rectangle()
+                    .fill(.black.opacity(0.18))
+                    .frame(width: 1)
+                    .allowsHitTesting(false)
+            }
+            .background {
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(.white.opacity(0.01))
+                    .shadow(color: .black.opacity(0.30), radius: 1, y: 1)
+                    .shadow(color: .white.opacity(0.45), radius: 0, y: 1)
             }
 
             ChromeSearchField(
@@ -68,11 +86,12 @@ struct ClassicTitleBarControls: View {
         .offset(y: 4)
     }
 
-    private var navigationStyle: ChromeStyle {
+    private func navigationStyle(position: ChromeSegmentPosition) -> ChromeStyle {
         ChromeStyle(
             role: .titlebarNavigation,
             size: CGSize(width: 25, height: 20),
-            surface: .titlebarAccessory
+            surface: .titlebarAccessory,
+            segmentPosition: position
         )
     }
 }
