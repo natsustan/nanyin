@@ -195,11 +195,11 @@ private final class ClassicAquaTitleBarView: NSView {
         }
 
         NSLayoutConstraint.activate([
-            close.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 7),
-            close.topAnchor.constraint(equalTo: topAnchor, constant: 10),
-            minimize.leadingAnchor.constraint(equalTo: close.trailingAnchor, constant: 8),
+            close.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
+            close.topAnchor.constraint(equalTo: topAnchor, constant: 7),
+            minimize.leadingAnchor.constraint(equalTo: close.trailingAnchor, constant: 2),
             minimize.centerYAnchor.constraint(equalTo: close.centerYAnchor),
-            zoom.leadingAnchor.constraint(equalTo: minimize.trailingAnchor, constant: 8),
+            zoom.leadingAnchor.constraint(equalTo: minimize.trailingAnchor, constant: 2),
             zoom.centerYAnchor.constraint(equalTo: close.centerYAnchor),
         ])
     }
@@ -235,28 +235,177 @@ private final class ClassicAquaTitleBarView: NSView {
     }
 }
 
+/// Visual recipe for one Aqua gel button, ported from ryOS
+/// (TrafficLightButton.tsx): vertical two-stop gradient, layered outer drop
+/// shadows, a hairline rim, colored inner shadow + glow, then a top shine
+/// capsule and bottom white glow clipped to the circle.
+private struct AquaButtonStyle {
+    struct OuterShadow {
+        let color: NSColor
+        let offset: NSSize
+        let blur: CGFloat
+    }
+
+    struct InnerShadow {
+        let color: NSColor
+        let offset: NSSize
+        let blur: CGFloat
+        let spread: CGFloat
+    }
+
+    let top: NSColor
+    let bottom: NSColor
+    let outerShadows: [OuterShadow]
+    let innerShadows: [InnerShadow]
+    let icon: NSColor?
+
+    static func colored(
+        top: NSColor,
+        bottom: NSColor,
+        halo: NSColor,
+        innerShadow: NSColor,
+        innerGlow: NSColor,
+        icon: NSColor
+    ) -> AquaButtonStyle {
+        AquaButtonStyle(
+            top: top,
+            bottom: bottom,
+            outerShadows: [
+                OuterShadow(
+                    color: .black.withAlphaComponent(0.5),
+                    offset: NSSize(width: 0, height: -2),
+                    blur: 3.5
+                ),
+                OuterShadow(
+                    color: .black.withAlphaComponent(0.4),
+                    offset: NSSize(width: 0, height: -1),
+                    blur: 2
+                ),
+                OuterShadow(color: halo, offset: NSSize(width: 0, height: -1), blur: 1),
+            ],
+            innerShadows: [
+                InnerShadow(
+                    color: .black.withAlphaComponent(0.3),
+                    offset: .zero,
+                    blur: 0,
+                    spread: 0.5
+                ),
+                InnerShadow(
+                    color: innerShadow,
+                    offset: NSSize(width: 0, height: -1),
+                    blur: 3,
+                    spread: 0
+                ),
+                InnerShadow(
+                    color: innerGlow,
+                    offset: NSSize(width: 0, height: -2),
+                    blur: 4.5,
+                    spread: 1
+                ),
+                // Extra soft pass lifts the mid-body like the browser's
+                // wider inset-glow falloff.
+                InnerShadow(
+                    color: innerGlow.withAlphaComponent(innerGlow.alphaComponent * 0.5),
+                    offset: NSSize(width: 0, height: -3),
+                    blur: 5,
+                    spread: 1
+                ),
+            ],
+            icon: icon
+        )
+    }
+
+    // ryOS inactive gradient is semi-transparent gray→white; pre-blended here
+    // against the title bar's mid gray so shadow passes can fill opaquely.
+    static let inactive = AquaButtonStyle(
+        top: NSColor(calibratedWhite: 0.62, alpha: 1),
+        bottom: NSColor(calibratedWhite: 0.85, alpha: 1),
+        outerShadows: [
+            OuterShadow(
+                color: .black.withAlphaComponent(0.2),
+                offset: NSSize(width: 0, height: -2),
+                blur: 3
+            ),
+            OuterShadow(
+                color: .black.withAlphaComponent(0.3),
+                offset: NSSize(width: 0, height: -1),
+                blur: 1
+            ),
+        ],
+        innerShadows: [
+            InnerShadow(
+                color: .black.withAlphaComponent(0.3),
+                offset: .zero,
+                blur: 0,
+                spread: 0.5
+            ),
+            InnerShadow(
+                color: .black.withAlphaComponent(0.4),
+                offset: NSSize(width: 0, height: -1),
+                blur: 2,
+                spread: 0
+            ),
+            InnerShadow(
+                color: NSColor(calibratedWhite: 0.73, alpha: 1),
+                offset: NSSize(width: 0, height: -2),
+                blur: 3,
+                spread: 1
+            ),
+        ],
+        icon: nil
+    )
+}
+
 private final class ClassicWindowButton: NSButton {
     enum Kind {
         case close
         case minimize
         case zoom
 
-        var colors: (top: NSColor, bottom: NSColor) {
+        var style: AquaButtonStyle {
             switch self {
             case .close:
-                (
-                    NSColor(calibratedRed: 0.76, green: 0.23, blue: 0.18, alpha: 1),
-                    NSColor(calibratedRed: 0.80, green: 0.29, blue: 0.20, alpha: 1)
+                .colored(
+                    top: NSColor(srgbRed: 193 / 255, green: 58 / 255, blue: 45 / 255, alpha: 1),
+                    bottom: NSColor(srgbRed: 205 / 255, green: 73 / 255, blue: 52 / 255, alpha: 1),
+                    halo: NSColor(srgbRed: 225 / 255, green: 70 / 255, blue: 64 / 255, alpha: 0.5),
+                    innerShadow: NSColor(
+                        srgbRed: 150 / 255, green: 40 / 255, blue: 30 / 255, alpha: 0.8
+                    ),
+                    innerGlow: NSColor(
+                        srgbRed: 225 / 255, green: 70 / 255, blue: 64 / 255, alpha: 0.75
+                    ),
+                    icon: NSColor(srgbRed: 130 / 255, green: 30 / 255, blue: 20 / 255, alpha: 0.9)
                 )
             case .minimize:
-                (
-                    NSColor(calibratedRed: 0.79, green: 0.51, blue: 0.05, alpha: 1),
-                    NSColor(calibratedRed: 0.99, green: 0.99, blue: 0.58, alpha: 1)
+                .colored(
+                    top: NSColor(srgbRed: 202 / 255, green: 130 / 255, blue: 13 / 255, alpha: 1),
+                    bottom: NSColor(
+                        srgbRed: 253 / 255, green: 253 / 255, blue: 149 / 255, alpha: 1
+                    ),
+                    halo: NSColor(
+                        srgbRed: 223 / 255, green: 161 / 255, blue: 35 / 255, alpha: 0.5
+                    ),
+                    innerShadow: NSColor(
+                        srgbRed: 155 / 255, green: 78 / 255, blue: 21 / 255, alpha: 1
+                    ),
+                    innerGlow: NSColor(
+                        srgbRed: 241 / 255, green: 157 / 255, blue: 20 / 255, alpha: 1
+                    ),
+                    icon: NSColor(srgbRed: 130 / 255, green: 80 / 255, blue: 8 / 255, alpha: 0.9)
                 )
             case .zoom:
-                (
-                    NSColor(calibratedRed: 0.44, green: 0.68, blue: 0.23, alpha: 1),
-                    NSColor(calibratedRed: 0.54, green: 0.75, blue: 0.20, alpha: 1)
+                .colored(
+                    top: NSColor(srgbRed: 111 / 255, green: 174 / 255, blue: 58 / 255, alpha: 1),
+                    bottom: NSColor(srgbRed: 138 / 255, green: 192 / 255, blue: 50 / 255, alpha: 1),
+                    halo: NSColor(srgbRed: 59 / 255, green: 173 / 255, blue: 29 / 255, alpha: 0.5),
+                    innerShadow: NSColor(
+                        srgbRed: 53 / 255, green: 91 / 255, blue: 17 / 255, alpha: 1
+                    ),
+                    innerGlow: NSColor(
+                        srgbRed: 98 / 255, green: 187 / 255, blue: 19 / 255, alpha: 1
+                    ),
+                    icon: NSColor(srgbRed: 45 / 255, green: 90 / 255, blue: 18 / 255, alpha: 0.9)
                 )
             }
         }
@@ -274,17 +423,21 @@ private final class ClassicWindowButton: NSButton {
     private var hovering = false
     private var observers: [NSObjectProtocol] = []
 
+    // NSControl defaults to flipped coordinates; the Aqua layer math below is
+    // written y-up (shine at maxY, drop shadows toward minY).
+    override var isFlipped: Bool { false }
+
     init(kind: Kind) {
         self.kind = kind
-        super.init(frame: NSRect(x: 0, y: 0, width: 13, height: 13))
+        super.init(frame: NSRect(x: 0, y: 0, width: 19, height: 19))
         isBordered = false
         title = ""
         target = self
         action = #selector(performWindowAction)
         setAccessibilityLabel(kind.accessibilityLabel)
         NSLayoutConstraint.activate([
-            widthAnchor.constraint(equalToConstant: 13),
-            heightAnchor.constraint(equalToConstant: 13),
+            widthAnchor.constraint(equalToConstant: 19),
+            heightAnchor.constraint(equalToConstant: 19),
         ])
     }
 
@@ -344,86 +497,197 @@ private final class ClassicWindowButton: NSButton {
 
     override func draw(_ dirtyRect: NSRect) {
         let active = window?.isKeyWindow == true
-        let oval = NSBezierPath(ovalIn: bounds)
-        let top = active ? kind.colors.top : NSColor(calibratedWhite: 0.62, alpha: 1)
-        let bottom = active ? kind.colors.bottom : NSColor(calibratedWhite: 0.78, alpha: 1)
+        let circle = bounds.insetBy(dx: 3, dy: 3)
+        let oval = NSBezierPath(ovalIn: circle)
+        let style = active ? kind.style : AquaButtonStyle.inactive
 
-        NSGraphicsContext.saveGraphicsState()
-        let shadow = NSShadow()
-        shadow.shadowColor = NSColor.black.withAlphaComponent(active ? 0.50 : 0.24)
-        shadow.shadowOffset = NSSize(width: 0, height: -2)
-        shadow.shadowBlurRadius = 2
-        shadow.set()
-        top.setFill()
-        oval.fill()
-        NSGraphicsContext.restoreGraphicsState()
+        guard let cgContext = NSGraphicsContext.current?.cgContext else { return }
+        if !active {
+            cgContext.saveGState()
+            cgContext.setAlpha(0.7)
+            cgContext.beginTransparencyLayer(auxiliaryInfo: nil)
+        }
 
-        NSGraphicsContext.saveGraphicsState()
-        let contactShadow = NSShadow()
-        contactShadow.shadowColor = NSColor.black.withAlphaComponent(active ? 0.40 : 0.20)
-        contactShadow.shadowOffset = NSSize(width: 0, height: -1)
-        contactShadow.shadowBlurRadius = 1
-        contactShadow.set()
-        top.setFill()
-        oval.fill()
-        NSGraphicsContext.restoreGraphicsState()
+        // Outer drop shadows (two dark passes plus a colored halo when active).
+        for outer in style.outerShadows {
+            NSGraphicsContext.saveGraphicsState()
+            let shadow = NSShadow()
+            shadow.shadowColor = outer.color
+            shadow.shadowOffset = outer.offset
+            shadow.shadowBlurRadius = outer.blur
+            shadow.set()
+            style.top.setFill()
+            oval.fill()
+            NSGraphicsContext.restoreGraphicsState()
+        }
 
         NSGraphicsContext.saveGraphicsState()
         oval.addClip()
-        NSGradient(
-            colorsAndLocations:
-                (bottom, 0),
-                (top, 1)
-        )?.draw(in: bounds, angle: 90)
 
-        NSGradient(
-            colorsAndLocations:
-                (NSColor.white.withAlphaComponent(active ? 0.26 : 0.12), 0),
-                (NSColor.clear, 0.42),
-                (NSColor.black.withAlphaComponent(active ? 0.26 : 0.14), 1)
-        )?.draw(
-            fromCenter: NSPoint(x: bounds.midX, y: bounds.midY + 0.9),
-            radius: 0,
-            toCenter: NSPoint(x: bounds.midX, y: bounds.midY + 0.9),
-            radius: 6.4,
-            options: []
-        )
+        // Base gel: dark top color into lighter bottom color.
+        NSGradient(colorsAndLocations: (style.bottom, 0), (style.top, 1))?
+            .draw(in: circle, angle: 90)
 
-        NSGradient(
-            colorsAndLocations:
-                (NSColor.white.withAlphaComponent(active ? 0.16 : 0.08), 0),
-                (NSColor.white.withAlphaComponent(active ? 0.58 : 0.28), 1)
-        )?.draw(
-            in: NSBezierPath(ovalIn: NSRect(x: 3.5, y: 9.5, width: 6, height: 2)),
-            angle: 90
-        )
-        NSGraphicsContext.restoreGraphicsState()
-
-        NSColor.black.withAlphaComponent(active ? 0.30 : 0.24).setStroke()
-        oval.lineWidth = 0.5
-        oval.stroke()
-
-        if isHighlighted {
-            NSColor.black.withAlphaComponent(0.22).setFill()
-            oval.fill()
+        // Hairline rim, colored inner shadow, and colored inner glow.
+        for inner in style.innerShadows {
+            drawInnerShadow(
+                hole: circle.insetBy(dx: inner.spread, dy: inner.spread),
+                around: circle,
+                color: inner.color,
+                offset: inner.offset,
+                blur: inner.blur
+            )
         }
 
-        guard hovering, active else { return }
-        NSColor(calibratedWhite: 0.15, alpha: 0.72).setStroke()
+        // Bottom white glow: dome opening downward, hugging the lower arc.
+        let glowHeight = circle.height * 0.33
+        let glow = NSRect(
+            x: circle.midX - 5, y: circle.minY + 1, width: 10, height: glowHeight
+        )
+        NSGraphicsContext.saveGraphicsState()
+        Self.domePath(in: glow, roundedSide: .down).addClip()
+        NSGradient(
+            colorsAndLocations:
+                (NSColor.white.withAlphaComponent(0.5), 0),
+                (NSColor.white.withAlphaComponent(0.15), 1)
+        )?.draw(in: glow, angle: 90)
+        NSGraphicsContext.restoreGraphicsState()
+
+        // Top shine: dome hugging the upper arc. Feather passes fake the
+        // soft antialiased edge a browser gives this layer.
+        let shineHeight = circle.height * 0.30
+        let shine = NSRect(
+            x: circle.midX - 3.5,
+            y: circle.maxY - 1 - shineHeight,
+            width: 7,
+            height: shineHeight
+        )
+        let featherPasses: [(inset: CGFloat, alpha: CGFloat)] = [
+            (-1.0, 0.06), (-0.5, 0.10), (0, 1),
+        ]
+        for pass in featherPasses {
+            let rect = shine.insetBy(dx: pass.inset, dy: pass.inset)
+            NSGraphicsContext.saveGraphicsState()
+            Self.domePath(in: rect, roundedSide: .up).addClip()
+            NSGradient(
+                colorsAndLocations:
+                    (NSColor.white.withAlphaComponent(0.04 * pass.alpha), 0),
+                    (NSColor.white.withAlphaComponent(0.26 * pass.alpha), 0.45),
+                    (NSColor.white.withAlphaComponent(0.65 * pass.alpha), 1)
+            )?.draw(in: rect, angle: 90)
+            NSGraphicsContext.restoreGraphicsState()
+        }
+
+        if hovering, active {
+            NSColor.white.withAlphaComponent(0.1).setFill()
+            NSBezierPath(rect: circle).fill()
+        }
+        if isHighlighted {
+            NSColor.black.withAlphaComponent(0.22).setFill()
+            NSBezierPath(rect: circle).fill()
+        }
+        NSGraphicsContext.restoreGraphicsState()
+
+        if !active {
+            cgContext.endTransparencyLayer()
+            cgContext.restoreGState()
+        }
+
+        guard hovering, active, let iconColor = style.icon else { return }
+        drawGlyph(color: iconColor, center: NSPoint(x: circle.midX, y: circle.midY))
+    }
+
+    private enum RoundedSide {
+        case up
+        case down
+    }
+
+    /// Rect with one fully rounded side (radius = min(width/2, height)) and
+    /// one flat side — the shape CSS `border-radius: 6px 6px 0 0` gives the
+    /// shine layer.
+    private static func domePath(in rect: NSRect, roundedSide: RoundedSide) -> NSBezierPath {
+        let radius = min(rect.width / 2, rect.height)
+        let path = NSBezierPath()
+        switch roundedSide {
+        case .up:
+            path.move(to: NSPoint(x: rect.minX, y: rect.minY))
+            path.line(to: NSPoint(x: rect.minX, y: rect.maxY - radius))
+            path.appendArc(
+                withCenter: NSPoint(x: rect.minX + radius, y: rect.maxY - radius),
+                radius: radius, startAngle: 180, endAngle: 90, clockwise: true
+            )
+            path.line(to: NSPoint(x: rect.maxX - radius, y: rect.maxY))
+            path.appendArc(
+                withCenter: NSPoint(x: rect.maxX - radius, y: rect.maxY - radius),
+                radius: radius, startAngle: 90, endAngle: 0, clockwise: true
+            )
+            path.line(to: NSPoint(x: rect.maxX, y: rect.minY))
+        case .down:
+            path.move(to: NSPoint(x: rect.minX, y: rect.maxY))
+            path.line(to: NSPoint(x: rect.minX, y: rect.minY + radius))
+            path.appendArc(
+                withCenter: NSPoint(x: rect.minX + radius, y: rect.minY + radius),
+                radius: radius, startAngle: 180, endAngle: 270, clockwise: false
+            )
+            path.line(to: NSPoint(x: rect.maxX - radius, y: rect.minY))
+            path.appendArc(
+                withCenter: NSPoint(x: rect.maxX - radius, y: rect.minY + radius),
+                radius: radius, startAngle: 270, endAngle: 360, clockwise: false
+            )
+            path.line(to: NSPoint(x: rect.maxX, y: rect.maxY))
+        }
+        path.close()
+        return path
+    }
+
+    /// Casts `color` inward from the circle's edge (CSS inset box-shadow):
+    /// fills an even-odd ring outside `hole` so only its shadow lands inside
+    /// the current oval clip.
+    private func drawInnerShadow(
+        hole: NSRect,
+        around circle: NSRect,
+        color: NSColor,
+        offset: NSSize,
+        blur: CGFloat
+    ) {
+        NSGraphicsContext.saveGraphicsState()
+        let ring = NSBezierPath(rect: circle.insetBy(dx: -blur - 4, dy: -blur - 4))
+        ring.windingRule = .evenOdd
+        ring.append(NSBezierPath(ovalIn: hole))
+        // When the hole is inset (CSS spread), the sliver of ring inside the
+        // oval clip is painted too, so fill with the shadow color itself —
+        // opaque black here bled through as a harsh dark rim.
+        if blur > 0 || offset != .zero {
+            let shadow = NSShadow()
+            shadow.shadowColor = color
+            shadow.shadowOffset = offset
+            shadow.shadowBlurRadius = blur
+            shadow.set()
+        }
+        color.setFill()
+        ring.fill()
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    private func drawGlyph(color: NSColor, center: NSPoint) {
+        color.setStroke()
         let mark = NSBezierPath()
-        mark.lineWidth = 1
+        mark.lineWidth = 1.25
+        mark.lineCapStyle = .round
         switch kind {
         case .close:
-            mark.move(to: NSPoint(x: 4.5, y: 4.5))
-            mark.line(to: NSPoint(x: 9.5, y: 9.5))
-            mark.move(to: NSPoint(x: 9.5, y: 4.5))
-            mark.line(to: NSPoint(x: 4.5, y: 9.5))
+            mark.move(to: NSPoint(x: center.x - 2.3, y: center.y - 2.3))
+            mark.line(to: NSPoint(x: center.x + 2.3, y: center.y + 2.3))
+            mark.move(to: NSPoint(x: center.x - 2.3, y: center.y + 2.3))
+            mark.line(to: NSPoint(x: center.x + 2.3, y: center.y - 2.3))
         case .minimize:
-            mark.move(to: NSPoint(x: 4, y: 7))
-            mark.line(to: NSPoint(x: 10, y: 7))
+            mark.move(to: NSPoint(x: center.x - 2.8, y: center.y))
+            mark.line(to: NSPoint(x: center.x + 2.8, y: center.y))
         case .zoom:
-            mark.move(to: NSPoint(x: 4.5, y: 9.5))
-            mark.line(to: NSPoint(x: 9.5, y: 4.5))
+            mark.move(to: NSPoint(x: center.x - 2.8, y: center.y))
+            mark.line(to: NSPoint(x: center.x + 2.8, y: center.y))
+            mark.move(to: NSPoint(x: center.x, y: center.y - 2.8))
+            mark.line(to: NSPoint(x: center.x, y: center.y + 2.8))
         }
         mark.stroke()
     }
