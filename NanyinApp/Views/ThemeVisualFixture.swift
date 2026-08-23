@@ -360,36 +360,80 @@ struct ThemeVisualFixture: View {
     @ViewBuilder
     private var player: some View {
         if isClassic {
-            HStack(spacing: 8) {
-                ChromeButton(title: "◀", accessibilityLabel: "Previous track")
-                    .disabled(state == .disabled)
-                ChromeButton(title: state == .pressed ? "❚❚" : "▶", accessibilityLabel: state == .pressed ? "Pause" : "Play")
-                    .disabled(state == .disabled)
-                ChromeButton(title: "▶", accessibilityLabel: "Next track")
-                    .disabled(state == .disabled)
-                Rectangle()
-                    .fill(theme.colors.border)
-                    .frame(width: 1, height: 34)
-                Text("1:42")
-                    .font(theme.typography.mono)
-                    .foregroundStyle(theme.colors.primaryText)
-                ChromeSliderTrack(
-                    style: ChromeSliderStyle(
-                        size: CGSize(width: 180, height: 12),
-                        fraction: state == .current ? 0.58 : 0.42,
-                        isEnabled: state != .disabled
+            HStack(spacing: 0) {
+                HStack(spacing: 5) {
+                    ChromeButton(
+                        title: "",
+                        accessibilityLabel: "Previous track",
+                        symbolName: "backward.fill",
+                        style: ChromeStyle(role: .transport, size: CGSize(width: 24, height: 24))
                     )
-                )
-                Text("3:57")
-                    .font(theme.typography.mono)
-                    .foregroundStyle(theme.colors.primaryText)
+                    .disabled(state == .disabled)
+                    ChromeButton(
+                        title: "",
+                        accessibilityLabel: state == .pressed ? "Pause" : "Play",
+                        symbolName: state == .pressed ? "pause.fill" : "play.fill",
+                        style: ChromeStyle(role: .transport, size: CGSize(width: 28, height: 28))
+                    )
+                    .disabled(state == .disabled)
+                    ChromeButton(
+                        title: "",
+                        accessibilityLabel: "Next track",
+                        symbolName: "forward.fill",
+                        style: ChromeStyle(role: .transport, size: CGSize(width: 24, height: 24))
+                    )
+                    .disabled(state == .disabled)
+                    Spacer(minLength: 6)
+                    Capsule()
+                        .fill(theme.colors.sliderTrack)
+                        .frame(width: 68, height: 4)
+                    Image(systemName: "speaker.wave.2.fill")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(theme.colors.secondaryText)
+                }
+                .padding(.horizontal, 10)
+                .frame(width: theme.metrics.sidebarWidth)
+                .overlay(alignment: .trailing) {
+                    Rectangle()
+                        .fill(theme.colors.border)
+                        .frame(width: 1)
+                }
+
+                HStack(spacing: 8) {
+                    Text("1:42")
+                        .font(theme.typography.mono)
+                        .foregroundStyle(theme.colors.primaryText)
+                        .frame(width: 34, alignment: .trailing)
+                    ChromeSliderTrack(
+                        style: ChromeSliderStyle(
+                            size: CGSize(width: 180, height: 10),
+                            fraction: state == .current ? 0.58 : 0.42,
+                            isEnabled: state != .disabled
+                        ),
+                        fillsAvailableWidth: true
+                    )
+                    Text("3:57")
+                        .font(theme.typography.mono)
+                        .foregroundStyle(theme.colors.primaryText)
+                        .frame(width: 34, alignment: .leading)
+                }
+                .padding(.horizontal, 10)
+                .frame(maxWidth: .infinity)
                 Rectangle()
                     .fill(theme.colors.border)
-                    .frame(width: 1, height: 34)
-                ChromeButton(title: "Queue", accessibilityLabel: "Queue")
-                    .disabled(state == .disabled)
+                    .frame(width: 1)
+                ForEach(["shuffle", "repeat", "list.bullet"], id: \.self) { symbol in
+                    Image(systemName: symbol)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(theme.colors.secondaryText)
+                        .frame(width: 38, height: theme.metrics.playerBarHeight)
+                        .overlay(alignment: .trailing) {
+                            Rectangle()
+                                .fill(theme.colors.border.opacity(0.65))
+                                .frame(width: 1)
+                        }
+                }
             }
-            .padding(.horizontal, 10)
             .frame(height: theme.metrics.playerBarHeight)
             .background { ChromeSectionBar(style: ChromeSectionBarStyle(height: theme.metrics.playerBarHeight)) }
         } else {

@@ -460,7 +460,7 @@ struct AppTheme {
             controlHorizontalPadding: 18,
             controlVerticalPadding: 7,
             sidebarWidth: 210,
-            playerBarHeight: 72,
+            playerBarHeight: 40,
             toolbarSpacerHeight: 42,
             queueRowHeight: 30,
             shadowRadius: 3,

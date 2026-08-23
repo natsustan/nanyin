@@ -32,7 +32,7 @@ struct ChromeButton: View {
             Group {
                 if let symbolName {
                     Image(systemName: symbolName)
-                        .font(.system(size: 7, weight: .bold))
+                        .font(.system(size: style.role == .transport ? 8 : 7, weight: .bold))
                 } else {
                     Text(title)
                         .font(.system(size: 11, weight: .semibold))

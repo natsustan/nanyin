@@ -198,125 +198,136 @@ struct PlayerBar: View {
 
     private var classicContent: some View {
         HStack(spacing: 0) {
-            HStack(spacing: 4) {
-                Button {
-                    app.toggleShuffle()
-                } label: {
-                    Image(systemName: "shuffle")
-                        .font(theme.typography.compact)
-                        .foregroundStyle(
-                            app.shuffle ? theme.colors.accent : theme.colors.secondaryText
-                        )
-                        .frame(width: 22, height: 22)
-                }
-                .buttonStyle(ThemePressFeedbackButtonStyle())
-                .help("Shuffle")
-
+            HStack(spacing: 5) {
                 ChromeButton(
-                    title: "◀",
+                    title: "",
                     accessibilityLabel: "Previous track",
-                    style: ChromeStyle(role: .transport, size: CGSize(width: 28, height: 26)),
+                    symbolName: "backward.fill",
+                    style: ChromeStyle(role: .transport, size: CGSize(width: 24, height: 24)),
                     action: app.prev
                 )
                 ChromeButton(
-                    title: app.isPlaying ? "❚❚" : "▶",
+                    title: "",
                     accessibilityLabel: app.isPlaying ? "Pause" : "Play",
-                    style: ChromeStyle(role: .transport, size: CGSize(width: 32, height: 28)),
+                    symbolName: app.isPlaying ? "pause.fill" : "play.fill",
+                    style: ChromeStyle(role: .transport, size: CGSize(width: 28, height: 28)),
                     action: app.togglePlay
                 )
                 ChromeButton(
-                    title: "▶",
+                    title: "",
                     accessibilityLabel: "Next track",
-                    style: ChromeStyle(role: .transport, size: CGSize(width: 28, height: 26)),
+                    symbolName: "forward.fill",
+                    style: ChromeStyle(role: .transport, size: CGSize(width: 24, height: 24)),
                     action: app.next
                 )
 
-                Button {
-                    app.cycleRepeat()
-                } label: {
-                    Image(systemName: app.repeatMode == .one ? "repeat.1" : "repeat")
-                        .font(theme.typography.compact)
-                        .foregroundStyle(
-                            app.repeatMode == .off ? theme.colors.secondaryText : theme.colors.accent
-                        )
-                        .frame(width: 22, height: 22)
-                }
-                .buttonStyle(ThemePressFeedbackButtonStyle())
-                .help("Repeat")
-            }
-            .disabled(!app.isPlaybackReady)
-            .padding(.horizontal, 8)
-            .overlay(alignment: .trailing) {
-                Rectangle()
-                    .fill(theme.colors.border)
-                    .frame(width: 1, height: 40)
-            }
+                Spacer(minLength: 6)
 
-            VStack(spacing: 2) {
-                HStack(spacing: 7) {
-                    Text(PlaybackTimeFormatter.string(fromMilliseconds: effectivePosition))
-                        .font(theme.typography.mono)
-                        .foregroundStyle(theme.colors.secondaryText)
-                        .frame(width: 34, alignment: .trailing)
-
-                    ChromeSliderTrack(
-                        style: ChromeSliderStyle(
-                            fraction: progressFraction,
-                            isEnabled: app.isPlaybackReady
-                        ),
-                        onChanged: { draggingProgress = $0 },
-                        onEnded: {
-                            app.seek(to: $0)
-                            draggingProgress = nil
-                        },
-                        onCancelled: { draggingProgress = nil }
-                    )
-
-                    Text(PlaybackTimeFormatter.string(fromMilliseconds: max(app.durationMs, 0)))
-                        .font(theme.typography.mono)
-                        .foregroundStyle(theme.colors.secondaryText)
-                        .frame(width: 34, alignment: .leading)
-                }
-
-                Text(app.nowPlaying?.title ?? "Not playing")
-                    .font(theme.typography.compact)
-                    .foregroundStyle(theme.colors.tertiaryText)
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.horizontal, 8)
-            .overlay(alignment: .trailing) {
-                Rectangle()
-                    .fill(theme.colors.border)
-                    .frame(width: 1, height: 40)
-            }
-
-            HStack(spacing: 6) {
-                Image(systemName: "speaker.fill")
-                    .font(theme.typography.compact)
-                    .foregroundStyle(theme.colors.secondaryText)
                 Slider(value: Binding(
                     get: { app.volume },
                     set: { app.setVolume($0) }
                 ), in: 0 ... 1)
                 .controlSize(.mini)
-                .frame(width: 92)
+                .frame(width: 68)
                 .disabled(!app.isPlaybackReady)
 
-                ChromeButton(
-                    title: "Queue",
-                    accessibilityLabel: "Queue",
-                    style: ChromeStyle(size: CGSize(width: 54, height: 24)),
+                Image(systemName: "speaker.wave.2.fill")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(theme.colors.secondaryText)
+            }
+            .disabled(!app.isPlaybackReady)
+            .padding(.horizontal, 10)
+            .frame(width: theme.metrics.sidebarWidth)
+            .overlay(alignment: .trailing) {
+                Rectangle()
+                    .fill(theme.colors.shadow.opacity(0.48))
+                    .frame(width: 1)
+            }
+
+            HStack(spacing: 8) {
+                Text(PlaybackTimeFormatter.string(fromMilliseconds: effectivePosition))
+                    .font(theme.typography.mono)
+                    .foregroundStyle(theme.colors.secondaryText)
+                    .frame(width: 34, alignment: .trailing)
+
+                ChromeSliderTrack(
+                    style: ChromeSliderStyle(
+                        size: CGSize(width: 220, height: 10),
+                        fraction: progressFraction,
+                        isEnabled: app.isPlaybackReady
+                    ),
+                    fillsAvailableWidth: true,
+                    onChanged: { draggingProgress = $0 },
+                    onEnded: {
+                        app.seek(to: $0)
+                        draggingProgress = nil
+                    },
+                    onCancelled: { draggingProgress = nil }
+                )
+
+                Text(PlaybackTimeFormatter.string(fromMilliseconds: max(app.durationMs, 0)))
+                    .font(theme.typography.mono)
+                    .foregroundStyle(theme.colors.secondaryText)
+                    .frame(width: 34, alignment: .leading)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 10)
+            .overlay(alignment: .trailing) {
+                Rectangle()
+                    .fill(theme.colors.shadow.opacity(0.48))
+                    .frame(width: 1)
+            }
+
+            HStack(spacing: 0) {
+                classicActionButton(
+                    "shuffle",
+                    help: "Shuffle",
+                    isActive: app.shuffle,
+                    isEnabled: app.isPlaybackReady,
+                    action: app.toggleShuffle
+                )
+                classicActionButton(
+                    app.repeatMode == .one ? "repeat.1" : "repeat",
+                    help: "Repeat",
+                    isActive: app.repeatMode != .off,
+                    isEnabled: app.isPlaybackReady,
+                    action: app.cycleRepeat
+                )
+                classicActionButton(
+                    "list.bullet",
+                    help: "Queue",
+                    isActive: app.page == .queue,
                     action: { app.open(.queue) }
                 )
-                .help("Queue")
             }
-            .padding(.horizontal, 8)
         }
-        .padding(.horizontal, 10)
         .background {
             ChromeSectionBar(style: ChromeSectionBarStyle(height: theme.metrics.playerBarHeight))
         }
+    }
+
+    private func classicActionButton(
+        _ symbol: String,
+        help: String,
+        isActive: Bool,
+        isEnabled: Bool = true,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(isActive ? theme.colors.accent : theme.colors.secondaryText)
+                .frame(width: 38, height: theme.metrics.playerBarHeight)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(ThemePressFeedbackButtonStyle())
+        .disabled(!isEnabled)
+        .overlay(alignment: .trailing) {
+            Rectangle()
+                .fill(theme.colors.shadow.opacity(0.48))
+                .frame(width: 1)
+        }
+        .help(help)
     }
 
     private var effectivePosition: UInt32 {

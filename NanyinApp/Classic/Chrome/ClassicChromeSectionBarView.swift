@@ -43,10 +43,10 @@ final class ClassicChromeSectionBarView: NSView {
         guard let layer else { return }
         let shape = ChouTiUI.Rectangle.rectangle
         layer.shape = shape
-        borderLayer.borderMask = .shape(shape)
-        layer.setBackgroundColor(.convexGray)
+        borderLayer.borderMask = .shape(shape, offset: -0.5)
+        layer.setBackgroundColor(LinearGradientColor(style.palette.sectionBackground.map(nsColor)))
         borderLayer.borderContent = .color(nsColor(style.palette.controlBorder))
-        borderLayer.borderWidth = 1
+        borderLayer.borderWidth = 0.5
         needsDisplay = true
     }
 

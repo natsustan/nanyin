@@ -26,6 +26,7 @@ final class ClassicChromeButtonView: NSView {
 
     var action: () -> Void = {}
 
+    private let backgroundLayer = CALayer()
     private let borderLayer = BorderLayer()
     private var isHovered = false
     private var isPressed = false
@@ -34,6 +35,7 @@ final class ClassicChromeButtonView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
+        layer?.addSublayer(backgroundLayer)
         layer?.addSublayer(borderLayer)
         focusRingType = .default
         setAccessibilityElement(true)
@@ -53,6 +55,10 @@ final class ClassicChromeButtonView: NSView {
 
     override func layout() {
         super.layout()
+        let backgroundInset: CGFloat = style.surface == .content ? 0.5 : 0
+        backgroundLayer.frame = bounds.insetBy(dx: backgroundInset, dy: backgroundInset)
+        backgroundLayer.contentsScale = layer?.contentsScale ?? 2
+        backgroundLayer.setNeedsLayout()
         borderLayer.frame = bounds
         borderLayer.setNeedsLayout()
         layer?.shadowPath = style.surface == .titlebarAccessory
@@ -137,24 +143,29 @@ final class ClassicChromeButtonView: NSView {
         }
 
         let shape = chromeShape
-        layer.shape = shape
-        // Inset the titlebar stroke so its antialiased corners are not clipped by the host shape mask.
-        borderLayer.borderMask = .shape(
-            shape,
-            offset: style.surface == .titlebarAccessory ? -0.5 : 0
-        )
+        // Keep the antialiased stroke inside the host shape mask. A centered
+        // stroke loses its outer half and renders unevenly around ellipses.
+        borderLayer.borderMask = .shape(shape, offset: -0.5)
 
         switch style.surface {
         case .content:
-            // ChouTiUI owns the Classic convex/concave surface recipes; the
-            // palette controls the semantic interaction edges around them.
-            layer.setBackgroundColor(state == .pressed ? .concaveGray : .convexGray)
+            layer.shape = nil
+            layer.setBackgroundColor(NSColor.clear)
+            backgroundLayer.isHidden = false
+            backgroundLayer.shape = shape
+            let colors = state == .pressed
+                ? style.palette.controlPressedBackground
+                : style.palette.controlBackground
+            backgroundLayer.setBackgroundColor(LinearGradientColor(colors.map(nsColor)))
             borderLayer.borderContent = .color(
                 nsColor(state == .hovered ? style.palette.controlHoverBorder : style.palette.controlBorder)
             )
-            borderLayer.borderWidth = 1
+            borderLayer.borderWidth = 0.5
             layer.shadowOpacity = 0
         case .titlebarAccessory:
+            backgroundLayer.isHidden = true
+            backgroundLayer.shape = nil
+            layer.shape = shape
             let colors: [NSColor]
             if state == .pressed {
                 colors = [

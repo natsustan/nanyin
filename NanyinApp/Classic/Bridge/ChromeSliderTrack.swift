@@ -7,6 +7,7 @@ import SwiftUI
 
 struct ChromeSliderTrack: View {
     let style: ChromeSliderStyle
+    var fillsAvailableWidth = false
     var onChanged: (Double) -> Void = { _ in }
     var onEnded: (Double) -> Void = { _ in }
     var onCancelled: () -> Void = {}
@@ -18,14 +19,28 @@ struct ChromeSliderTrack: View {
         return resolved
     }
 
+    @ViewBuilder
     var body: some View {
-        ClassicChromeSliderTrackRepresentable(
-            style: resolvedStyle,
+        if fillsAvailableWidth {
+            GeometryReader { geometry in
+                track(width: geometry.size.width)
+            }
+            .frame(height: resolvedStyle.size.height)
+        } else {
+            track(width: resolvedStyle.size.width)
+        }
+    }
+
+    private func track(width: CGFloat) -> some View {
+        var layoutStyle = resolvedStyle
+        layoutStyle.size.width = width
+        return ClassicChromeSliderTrackRepresentable(
+            style: layoutStyle,
             onChanged: onChanged,
             onEnded: onEnded,
             onCancelled: onCancelled
         )
-        .frame(width: resolvedStyle.size.width, height: resolvedStyle.size.height)
+        .frame(width: width, height: layoutStyle.size.height)
     }
 }
 

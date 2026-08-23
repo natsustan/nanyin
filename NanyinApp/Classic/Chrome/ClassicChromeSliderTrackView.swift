@@ -132,12 +132,10 @@ final class ClassicChromeSliderTrackView: NSView {
         guard let layer, let progressLayer = progressView.layer else { return }
         let shape = ChouTiUI.Capsule(style: .circular)
         layer.shape = shape
-        borderLayer.borderMask = .shape(shape)
-        // ChouTiUI supplies the inset/track recipe; palette values own the
-        // semantic edge and progress colors.
-        layer.setBackgroundColor(.concaveGray)
+        borderLayer.borderMask = .shape(shape, offset: -0.5)
+        layer.setBackgroundColor(LinearGradientColor(style.palette.sliderBackground.map(nsColor)))
         borderLayer.borderContent = .color(nsColor(style.palette.sliderBorder))
-        borderLayer.borderWidth = 1
+        borderLayer.borderWidth = 0.5
 
         progressLayer.shape = ChouTiUI.Capsule(style: .circular)
         progressLayer.backgroundColor = nsColor(style.palette.sliderProgress).cgColor

@@ -139,27 +139,67 @@ struct ClassicShellGeometryFixture: View {
     }
 
     private var deck: some View {
-        HStack(spacing: 8) {
-            ChromeButton(title: "◀", accessibilityLabel: "Previous track")
-            ChromeButton(title: "▶", accessibilityLabel: "Play")
-            ChromeButton(title: "▶", accessibilityLabel: "Next track")
+        HStack(spacing: 0) {
+            HStack(spacing: 5) {
+                ChromeButton(
+                    title: "",
+                    accessibilityLabel: "Previous track",
+                    symbolName: "backward.fill",
+                    style: ChromeStyle(role: .transport, size: CGSize(width: 24, height: 24))
+                )
+                ChromeButton(
+                    title: "",
+                    accessibilityLabel: "Play",
+                    symbolName: "play.fill",
+                    style: ChromeStyle(role: .transport, size: CGSize(width: 28, height: 28))
+                )
+                ChromeButton(
+                    title: "",
+                    accessibilityLabel: "Next track",
+                    symbolName: "forward.fill",
+                    style: ChromeStyle(role: .transport, size: CGSize(width: 24, height: 24))
+                )
+                Spacer(minLength: 6)
+                Capsule()
+                    .fill(theme.colors.sliderTrack)
+                    .frame(width: 68, height: 4)
+                Image(systemName: "speaker.wave.2.fill")
+                    .font(.system(size: 9, weight: .medium))
+            }
+            .padding(.horizontal, 10)
+            .frame(width: theme.metrics.sidebarWidth)
             Rectangle()
                 .fill(theme.colors.border)
-                .frame(width: 1, height: 34)
-            Text("0:00")
-                .font(theme.typography.mono)
-            RoundedRectangle(cornerRadius: 4)
-                .fill(theme.colors.sliderTrack)
-                .frame(maxWidth: .infinity, maxHeight: 4)
-            Text("3:42")
-                .font(theme.typography.mono)
+                .frame(width: 1)
+            HStack(spacing: 8) {
+                Text("0:00")
+                    .font(theme.typography.mono)
+                    .frame(width: 34, alignment: .trailing)
+                ChromeSliderTrack(
+                    style: ChromeSliderStyle(size: CGSize(width: 220, height: 10), fraction: 0.42),
+                    fillsAvailableWidth: true
+                )
+                Text("3:42")
+                    .font(theme.typography.mono)
+                    .frame(width: 34, alignment: .leading)
+            }
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity)
             Rectangle()
                 .fill(theme.colors.border)
-                .frame(width: 1, height: 34)
-            Text("Volume")
-                .font(theme.typography.compact)
+                .frame(width: 1)
+            ForEach(["shuffle", "repeat", "list.bullet"], id: \.self) { symbol in
+                Image(systemName: symbol)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(theme.colors.secondaryText)
+                    .frame(width: 38, height: theme.metrics.playerBarHeight)
+                    .overlay(alignment: .trailing) {
+                        Rectangle()
+                            .fill(theme.colors.border.opacity(0.65))
+                            .frame(width: 1)
+                    }
+            }
         }
-        .padding(.horizontal, 10)
         .frame(height: theme.metrics.playerBarHeight)
         .background { ChromeSectionBar(style: ChromeSectionBarStyle(height: theme.metrics.playerBarHeight)) }
     }
