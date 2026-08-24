@@ -80,7 +80,9 @@ private struct ShellContent: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
 
-            Divider().overlay(theme.colors.playerBackground.swiftUIStyle)
+            if theme.id == .nanyinDark {
+                Divider().overlay(theme.colors.playerBackground.swiftUIStyle)
+            }
 
             PlayerBar()
                 .frame(height: theme.metrics.playerBarHeight)

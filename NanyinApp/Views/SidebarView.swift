@@ -19,6 +19,7 @@ struct SidebarView: View {
     /// Hover state for the New Playlist (+) button — local to the sidebar.
     @State private var plusHovering = false
     @State private var signOutHovering = false
+    @State private var isClassicNowPlayingCollapsed = false
 
     init(presentation: SidebarPresentation = .nanyinDark) {
         self.presentation = presentation
@@ -204,94 +205,154 @@ struct SidebarView: View {
             Divider()
                 .overlay(theme.colors.divider)
 
-            ZStack(alignment: .trailing) {
-                VStack(spacing: 2) {
-                    Text(app.nowPlaying?.title ?? "Not playing")
-                        .font(theme.typography.playerTitle)
-                        .foregroundStyle(theme.colors.inverseText.opacity(0.92))
-                        .lineLimit(1)
+            if isClassicNowPlayingCollapsed {
+                classicCompactNowPlaying
+            } else {
+                classicExpandedNowPlaying
+            }
+        }
+    }
 
-                    if let nowPlaying = app.nowPlaying {
-                        HStack(spacing: 3) {
-                            Button(nowPlaying.artist.isEmpty ? "—" : nowPlaying.artist) {
-                                app.openNowPlayingArtist()
-                            }
-                            .disabled(nowPlaying.artists.isEmpty)
-                            .help("Open artist")
+    private var classicExpandedNowPlaying: some View {
+        VStack(spacing: 0) {
+            classicNowPlayingMetadata
+                .frame(height: 44)
+                .background(classicMetalSurface)
+                .overlay(alignment: .bottom) {
+                    Rectangle()
+                        .fill(Color.black.opacity(0.52))
+                        .frame(height: 1)
+                }
 
-                            Text("(")
+            classicArtwork(size: theme.metrics.sidebarWidth)
+                .frame(width: theme.metrics.sidebarWidth, height: theme.metrics.sidebarWidth)
+                .clipped()
+        }
+    }
 
-                            Button(nowPlaying.album.isEmpty ? "—" : nowPlaying.album) {
-                                app.openNowPlayingAlbum()
-                            }
-                            .disabled(nowPlaying.albumId == nil)
-                            .help("Open album")
+    private var classicCompactNowPlaying: some View {
+        HStack(spacing: 8) {
+            classicArtwork(size: 52)
+                .frame(width: 52, height: 52)
+                .clipped()
 
-                            Text(")")
-                        }
-                        .buttonStyle(.plain)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(app.nowPlaying?.title ?? "Not playing")
+                    .font(theme.typography.playerTitle)
+                    .foregroundStyle(theme.colors.inverseText.opacity(0.92))
+                    .lineLimit(1)
+
+                classicNowPlayingArtistAndAlbum
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.trailing, 2)
+        .frame(height: 54)
+        .background(classicMetalSurface)
+        .overlay(alignment: .topTrailing) {
+            classicNowPlayingCollapseButton
+        }
+    }
+
+    private var classicNowPlayingMetadata: some View {
+        ZStack(alignment: .trailing) {
+            VStack(spacing: 2) {
+                Text(app.nowPlaying?.title ?? "Not playing")
+                    .font(theme.typography.playerTitle)
+                    .foregroundStyle(theme.colors.inverseText.opacity(0.92))
+                    .lineLimit(1)
+
+                classicNowPlayingArtistAndAlbum
+            }
+            .padding(.horizontal, 30)
+            .frame(maxWidth: .infinity)
+
+            if let nowPlaying = app.nowPlaying,
+               let id = SpotifyClient.trackId(from: nowPlaying.uri) {
+                let known = app.isLikeKnown(id)
+                let liked = app.likedIDs.contains(id)
+                Button {
+                    app.toggleLikePlaying()
+                } label: {
+                    Image(systemName: liked ? "heart.fill" : "heart")
                         .font(theme.typography.compact)
-                        .foregroundStyle(theme.colors.inverseText.opacity(0.68))
-                        .lineLimit(1)
-                    } else {
-                        Text("—")
-                            .font(theme.typography.compact)
-                            .foregroundStyle(theme.colors.inverseText.opacity(0.58))
-                    }
+                        .foregroundStyle(liked ? theme.colors.accent : theme.colors.inverseText.opacity(0.58))
+                        .frame(width: 26, height: 36)
+                        .contentShape(Rectangle())
                 }
-                .padding(.horizontal, 30)
-                .frame(maxWidth: .infinity)
-
-                if let nowPlaying = app.nowPlaying,
-                   let id = SpotifyClient.trackId(from: nowPlaying.uri) {
-                    let known = app.isLikeKnown(id)
-                    let liked = app.likedIDs.contains(id)
-                    Button {
-                        app.toggleLikePlaying()
-                    } label: {
-                        Image(systemName: liked ? "heart.fill" : "heart")
-                            .font(theme.typography.compact)
-                            .foregroundStyle(liked ? theme.colors.accent : theme.colors.inverseText.opacity(0.58))
-                            .frame(width: 26, height: 36)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!known)
-                    .opacity(known ? 1 : 0.35)
-                    .padding(.trailing, 2)
-                    .help(known ? (liked ? "Remove from Liked Songs" : "Save to Liked Songs") : "Checking Liked Songs…")
-                    .task(id: id) {
-                        app.requestLikedState(id)
-                    }
+                .buttonStyle(.plain)
+                .disabled(!known)
+                .opacity(known ? 1 : 0.35)
+                .padding(.trailing, 24)
+                .help(known ? (liked ? "Remove from Liked Songs" : "Save to Liked Songs") : "Checking Liked Songs…")
+                .task(id: id) {
+                    app.requestLikedState(id)
                 }
             }
-            .frame(height: 44)
-            .background(classicMetalSurface)
-            .overlay(alignment: .bottom) {
-                Rectangle()
-                    .fill(Color.black.opacity(0.52))
-                    .frame(height: 1)
-            }
 
-            ArtworkView(
-                url: app.nowPlaying?.artworkURL,
-                size: theme.metrics.sidebarWidth
-            ) {
-                Rectangle()
-                    .fill(theme.colors.placeholderBackground.swiftUIStyle)
-                    .overlay {
-                        Image("MusicIcon")
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(width: 42, height: 42)
-                            .foregroundStyle(theme.colors.secondaryText)
-                    }
+            classicNowPlayingCollapseButton
+        }
+    }
+
+    @ViewBuilder
+    private var classicNowPlayingArtistAndAlbum: some View {
+        if let nowPlaying = app.nowPlaying {
+            HStack(spacing: 3) {
+                Button(nowPlaying.artist.isEmpty ? "—" : nowPlaying.artist) {
+                    app.openNowPlayingArtist()
+                }
+                .disabled(nowPlaying.artists.isEmpty)
+                .help("Open artist")
+
+                Text("(")
+
+                Button(nowPlaying.album.isEmpty ? "—" : nowPlaying.album) {
+                    app.openNowPlayingAlbum()
+                }
+                .disabled(nowPlaying.albumId == nil)
+                .help("Open album")
+
+                Text(")")
             }
-            .frame(
-                width: theme.metrics.sidebarWidth,
-                height: theme.metrics.sidebarWidth
-            )
-            .clipped()
+            .buttonStyle(.plain)
+            .font(theme.typography.compact)
+            .foregroundStyle(theme.colors.inverseText.opacity(0.68))
+            .lineLimit(1)
+        } else {
+            Text("—")
+                .font(theme.typography.compact)
+                .foregroundStyle(theme.colors.inverseText.opacity(0.58))
+        }
+    }
+
+    private var classicNowPlayingCollapseButton: some View {
+        Button {
+            isClassicNowPlayingCollapsed.toggle()
+        } label: {
+            Image(systemName: isClassicNowPlayingCollapsed
+                ? "arrow.up.left.and.arrow.down.right"
+                : "arrow.down.right.and.arrow.up.left")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(theme.colors.inverseText.opacity(0.64))
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(isClassicNowPlayingCollapsed ? "Expand album artwork" : "Collapse album artwork")
+        .help(isClassicNowPlayingCollapsed ? "Expand album artwork" : "Collapse album artwork")
+    }
+
+    private func classicArtwork(size: CGFloat) -> some View {
+        ArtworkView(url: app.nowPlaying?.artworkURL, size: size) {
+            Rectangle()
+                .fill(theme.colors.placeholderBackground.swiftUIStyle)
+                .overlay {
+                    Image("MusicIcon")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: min(size * 0.33, 42), height: min(size * 0.33, 42))
+                        .foregroundStyle(theme.colors.secondaryText)
+                }
         }
     }
 
