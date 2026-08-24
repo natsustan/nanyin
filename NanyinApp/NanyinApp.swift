@@ -36,7 +36,7 @@ struct NanyinApp: App {
     private var storedThemeID = AppThemeID.nanyinDark.rawValue
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup("NanYin") {
             RootView()
                 .environment(delegate.appModel)
                 .environment(\.appTheme, AppTheme.resolve(selectedThemeID))

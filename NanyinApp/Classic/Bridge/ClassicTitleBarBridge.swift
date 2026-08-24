@@ -183,6 +183,8 @@ final class WindowAttachmentView: NSView {
 }
 
 private final class ClassicAquaTitleBarView: NSView {
+    private let titleField = NSTextField(labelWithString: "NanYin")
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
 
@@ -193,6 +195,13 @@ private final class ClassicAquaTitleBarView: NSView {
             button.translatesAutoresizingMaskIntoConstraints = false
             addSubview(button)
         }
+        titleField.translatesAutoresizingMaskIntoConstraints = false
+        titleField.font = NSFont(name: "Lucida Grande", size: 12)
+            ?? .systemFont(ofSize: 12, weight: .regular)
+        titleField.textColor = NSColor(calibratedWhite: 0.10, alpha: 1)
+        titleField.alignment = .center
+        titleField.lineBreakMode = .byClipping
+        addSubview(titleField)
 
         NSLayoutConstraint.activate([
             close.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
@@ -201,6 +210,8 @@ private final class ClassicAquaTitleBarView: NSView {
             minimize.centerYAnchor.constraint(equalTo: close.centerYAnchor),
             zoom.leadingAnchor.constraint(equalTo: minimize.trailingAnchor, constant: 2),
             zoom.centerYAnchor.constraint(equalTo: close.centerYAnchor),
+            titleField.centerXAnchor.constraint(equalTo: centerXAnchor),
+            titleField.centerYAnchor.constraint(equalTo: close.centerYAnchor),
         ])
     }
 
@@ -210,6 +221,11 @@ private final class ClassicAquaTitleBarView: NSView {
     }
 
     override var isOpaque: Bool { true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let hitView = super.hitTest(point)
+        return hitView === titleField ? self : hitView
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         NSGradient(
