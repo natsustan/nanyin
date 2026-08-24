@@ -34,11 +34,12 @@ struct SidebarView: View {
             }
 
             entry(.home, icon: Image(systemName: "house"), title: "Home")
+                .padding(.top, homeTopInset)
             entry(.search, icon: Image(systemName: "magnifyingglass"), title: "Search")
 
             Divider()
                 .overlay(theme.colors.playerBackground.swiftUIStyle)
-                .padding(.vertical, theme.metrics.dividerVerticalPadding)
+                .padding(.vertical, sidebarGroupGap)
                 .padding(.horizontal, theme.metrics.fieldHorizontalPadding)
 
             Text(presentation == .classic2010 ? "Library" : "Your Library")
@@ -46,7 +47,7 @@ struct SidebarView: View {
                 .tracking(1.2)
                 .foregroundStyle(theme.colors.secondaryText)
                 .padding(.horizontal, theme.metrics.sidebarInset)
-                .padding(.bottom, theme.metrics.smallPadding)
+                .padding(.bottom, sidebarHeaderToItemsGap)
 
             entry(.liked, icon: Image(systemName: "heart.fill"), title: "Songs", count: app.likedCount)
             entry(.savedAlbums, icon: Image(systemName: "opticaldisc"), title: "Albums", count: app.savedAlbumCount)
@@ -62,8 +63,8 @@ struct SidebarView: View {
                 newPlaylistButton
             }
             .padding(.horizontal, theme.metrics.sidebarInset)
-            .padding(.top, theme.metrics.sectionTopPadding - 2)
-            .padding(.bottom, theme.metrics.smallPadding)
+            .padding(.top, sidebarSubgroupGap)
+            .padding(.bottom, sidebarHeaderToItemsGap)
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -170,6 +171,28 @@ struct SidebarView: View {
 
     private var accountName: String {
         app.userDisplayName.isEmpty ? "Spotify account" : app.userDisplayName
+    }
+
+    /// Sidebar sections use a compact rhythm: navigation and Library remain
+    /// distinct, while Library items and Playlists read as a closer subgroup.
+    private var sidebarGroupGap: CGFloat {
+        presentation == .classic2010 ? 3 : 8
+    }
+
+    private var homeTopInset: CGFloat {
+        presentation == .classic2010 ? 2 : 0
+    }
+
+    private var sidebarSubgroupGap: CGFloat {
+        presentation == .classic2010 ? 6 : 10
+    }
+
+    private var sidebarHeaderToItemsGap: CGFloat {
+        presentation == .classic2010 ? 2 : 6
+    }
+
+    private var sidebarItemVerticalPadding: CGFloat {
+        presentation == .classic2010 ? 3 : 5
     }
 
     private func signOut() {
@@ -360,7 +383,7 @@ struct SidebarView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, theme.metrics.sidebarInset)
-            .padding(.vertical, theme.metrics.compactFieldVerticalPadding)
+            .padding(.vertical, sidebarItemVerticalPadding)
             .background(
                 isSelected
                     ? theme.colors.rowSelected.swiftUIStyle
