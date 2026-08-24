@@ -65,7 +65,7 @@ struct ClassicShellGeometryFixture: View {
                 .font(theme.typography.sectionHeader)
                 .foregroundStyle(theme.colors.secondaryText)
                 .padding(12)
-            ForEach(["Home", "Search", "Queue", "Liked Songs", "Saved Albums"], id: \.self) { title in
+            ForEach(["Home", "Search", "Songs", "Albums"], id: \.self) { title in
                 HStack(spacing: 8) {
                     Circle()
                         .fill(theme.colors.secondaryText)

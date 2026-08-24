@@ -35,7 +35,6 @@ struct SidebarView: View {
 
             entry(.home, icon: Image(systemName: "house"), title: "Home")
             entry(.search, icon: Image(systemName: "magnifyingglass"), title: "Search")
-            entry(.queue, icon: Image(systemName: "list.bullet"), title: "Queue")
 
             Divider()
                 .overlay(theme.colors.playerBackground.swiftUIStyle)
@@ -49,8 +48,8 @@ struct SidebarView: View {
                 .padding(.horizontal, theme.metrics.sidebarInset)
                 .padding(.bottom, theme.metrics.smallPadding)
 
-            entry(.liked, icon: Image(systemName: "heart.fill"), title: "Liked Songs", count: app.likedCount)
-            entry(.savedAlbums, icon: Image(systemName: "opticaldisc"), title: "Saved Albums", count: app.savedAlbumCount)
+            entry(.liked, icon: Image(systemName: "heart.fill"), title: "Songs", count: app.likedCount)
+            entry(.savedAlbums, icon: Image(systemName: "opticaldisc"), title: "Albums", count: app.savedAlbumCount)
 
             // One stable title row: Playlists + always-visible New
             // Playlist (+) button — present while loading and empty too.

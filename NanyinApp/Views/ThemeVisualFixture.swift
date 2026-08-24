@@ -125,7 +125,7 @@ struct ThemeVisualFixture: View {
                 .padding(.horizontal, theme.metrics.sidebarInset)
                 .padding(.vertical, theme.metrics.smallPadding + 2)
 
-            ForEach(["Home", "Search", "Queue", "Liked Songs", "Saved Albums"], id: \.self) { item in
+            ForEach(["Home", "Search", "Songs", "Albums"], id: \.self) { item in
                 let selected = state == .selected && item == "Search"
                 HStack(spacing: 8) {
                     Circle()
