@@ -90,7 +90,7 @@ final class ClassicChromeSearchFieldView: NSView, NSSearchFieldDelegate {
             )
             searchField.frame = NSRect(
                 x: 24,
-                y: 1,
+                y: -1,
                 width: max(0, submitButton.frame.minX - 26),
                 height: bounds.height - 2
             )

@@ -94,7 +94,6 @@ final class ClassicChromeButtonView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         guard isEnabled else { return }
-        window?.makeFirstResponder(self)
         isPressed = true
         updateAppearance()
     }

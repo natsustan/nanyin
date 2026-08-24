@@ -58,7 +58,7 @@ struct ClassicTitleBarControls: View {
                     set: { app.searchQuery = $0 }
                 ),
                 style: ChromeSearchStyle(
-                    size: CGSize(width: 230, height: 20),
+                    size: CGSize(width: 230, height: 22),
                     placeholder: "Search",
                     focusToken: app.searchFocusToken,
                     surface: .titlebarAccessory,
@@ -83,13 +83,13 @@ struct ClassicTitleBarControls: View {
         }
         .padding(.horizontal, 7)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .offset(y: 4)
+        .offset(y: 2)
     }
 
     private func navigationStyle(position: ChromeSegmentPosition) -> ChromeStyle {
         ChromeStyle(
             role: .titlebarNavigation,
-            size: CGSize(width: 25, height: 20),
+            size: CGSize(width: 25, height: 22),
             surface: .titlebarAccessory,
             segmentPosition: position
         )

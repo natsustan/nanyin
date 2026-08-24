@@ -164,7 +164,7 @@ struct ClassicShellGeometryFixture: View {
                     .fill(theme.colors.sliderTrack)
                     .frame(width: 68, height: 4)
                 Image(systemName: "speaker.wave.2.fill")
-                    .font(.system(size: 9, weight: .medium))
+                    .font(.system(size: 10, weight: .medium))
             }
             .padding(.horizontal, 10)
             .frame(width: theme.metrics.sidebarWidth)
@@ -190,9 +190,9 @@ struct ClassicShellGeometryFixture: View {
                 .frame(width: 1)
             ForEach(["shuffle", "repeat", "list.bullet"], id: \.self) { symbol in
                 Image(systemName: symbol)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(theme.colors.secondaryText)
-                    .frame(width: 38, height: theme.metrics.playerBarHeight)
+                    .frame(width: 40, height: theme.metrics.playerBarHeight)
                     .overlay(alignment: .trailing) {
                         Rectangle()
                             .fill(theme.colors.border.opacity(0.65))

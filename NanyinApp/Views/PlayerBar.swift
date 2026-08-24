@@ -232,7 +232,7 @@ struct PlayerBar: View {
                 .disabled(!app.isPlaybackReady)
 
                 Image(systemName: "speaker.wave.2.fill")
-                    .font(.system(size: 9, weight: .medium))
+                    .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(theme.colors.secondaryText)
             }
             .disabled(!app.isPlaybackReady)
@@ -315,9 +315,9 @@ struct PlayerBar: View {
     ) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(isActive ? theme.colors.accent : theme.colors.secondaryText)
-                .frame(width: 38, height: theme.metrics.playerBarHeight)
+                .frame(width: 40, height: theme.metrics.playerBarHeight)
                 .contentShape(Rectangle())
         }
         .buttonStyle(ThemePressFeedbackButtonStyle())

@@ -112,7 +112,7 @@ enum ChromeSegmentPosition: Equatable {
 /// type so the SwiftUI layer cannot depend on the drawing implementation.
 struct ChromeStyle: Equatable {
     var role: ChromeButtonRole = .pill
-    var size = CGSize(width: 88, height: 24)
+    var size = CGSize(width: 88, height: 28)
     var interactionState: ChromeInteractionState = .automatic
     var surface = ChromeSurface.content
     var segmentPosition = ChromeSegmentPosition.standalone

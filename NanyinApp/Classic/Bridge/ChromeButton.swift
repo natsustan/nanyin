@@ -35,7 +35,7 @@ struct ChromeButton: View {
                         .font(.system(size: symbolSize, weight: .bold))
                 } else {
                     Text(title)
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.system(size: 13, weight: .semibold))
                 }
             }
             .foregroundStyle(.black.opacity(symbolOpacity))
@@ -48,9 +48,9 @@ struct ChromeButton: View {
 
     private var symbolSize: CGFloat {
         switch style.role {
-        case .transport: 8
-        case .titlebarNavigation: 9
-        case .pill: 7
+        case .transport: 10
+        case .titlebarNavigation: 10
+        case .pill: 9
         }
     }
 
