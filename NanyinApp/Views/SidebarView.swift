@@ -18,6 +18,7 @@ struct SidebarView: View {
 
     /// Hover state for the New Playlist (+) button — local to the sidebar.
     @State private var plusHovering = false
+    @State private var signOutHovering = false
 
     init(presentation: SidebarPresentation = .nanyinDark) {
         self.presentation = presentation
@@ -28,6 +29,8 @@ struct SidebarView: View {
             if presentation == .nanyinDark {
                 // Keep navigation content below the title bar controls.
                 Color.clear.frame(height: theme.metrics.toolbarSpacerHeight)
+            } else {
+                classicAccountBar
             }
 
             entry(.home, icon: Image(systemName: "house"), title: "Home")
@@ -91,24 +94,26 @@ struct SidebarView: View {
                 classicNowPlayingPanel
             }
 
-            Divider()
-                .overlay(theme.colors.playerBackground.swiftUIStyle)
+            if presentation == .nanyinDark {
+                Divider()
+                    .overlay(theme.colors.playerBackground.swiftUIStyle)
 
-            HStack(spacing: 8) {
-                Text(app.userDisplayName.isEmpty ? "Spotify account" : app.userDisplayName)
-                    .font(theme.typography.secondary)
+                HStack(spacing: 8) {
+                    Text(accountName)
+                        .font(theme.typography.secondary)
+                        .foregroundStyle(theme.colors.secondaryText)
+                        .lineLimit(1)
+                    Spacer()
+                    Button("Sign Out") {
+                        signOut()
+                    }
+                    .buttonStyle(.plain)
+                    .font(theme.typography.fieldLabel)
                     .foregroundStyle(theme.colors.secondaryText)
-                    .lineLimit(1)
-                Spacer()
-                Button("Sign Out") {
-                    Task { await app.signOut() }
                 }
-                .buttonStyle(.plain)
-                .font(theme.typography.fieldLabel)
-                .foregroundStyle(theme.colors.secondaryText)
+                .padding(.horizontal, theme.metrics.sidebarInset)
+                .padding(.vertical, theme.metrics.fieldVerticalPadding + 1)
             }
-            .padding(.horizontal, theme.metrics.sidebarInset)
-            .padding(.vertical, theme.metrics.fieldVerticalPadding + 1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(theme.colors.sidebarBackground.swiftUIStyle)
@@ -120,93 +125,164 @@ struct SidebarView: View {
         }
     }
 
+    private var classicAccountBar: some View {
+        HStack(spacing: 0) {
+            Text(accountName)
+                .font(theme.typography.fieldLabel)
+                .foregroundStyle(theme.colors.inverseText.opacity(0.92))
+                .lineLimit(1)
+                .padding(.leading, 8)
+
+            Spacer(minLength: 6)
+
+            Button {
+                signOut()
+            } label: {
+                Image(systemName: "rectangle.portrait.and.arrow.right")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(theme.colors.inverseText.opacity(signOutHovering ? 0.95 : 0.72))
+                    .frame(width: 26, height: 24)
+                    .background(Color.black.opacity(signOutHovering ? 0.16 : 0.08))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .overlay(alignment: .leading) {
+                Rectangle()
+                    .fill(Color.black.opacity(0.32))
+                    .frame(width: 1)
+            }
+            .accessibilityLabel("Sign Out")
+            .help("Sign Out")
+            .onHover { signOutHovering = $0 }
+        }
+        .frame(height: 24)
+        .background(classicMetalSurface)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(Color.white.opacity(0.42))
+                .frame(height: 1)
+        }
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.black.opacity(0.58))
+                .frame(height: 1)
+        }
+    }
+
+    private var accountName: String {
+        app.userDisplayName.isEmpty ? "Spotify account" : app.userDisplayName
+    }
+
+    private func signOut() {
+        Task { await app.signOut() }
+    }
+
     private var classicNowPlayingPanel: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(spacing: 0) {
             Divider()
                 .overlay(theme.colors.divider)
 
-            Text("Now Playing")
-                .font(theme.typography.sectionHeader)
-                .tracking(1.1)
-                .foregroundStyle(theme.colors.secondaryText)
-                .padding(.horizontal, theme.metrics.sidebarInset)
-
-            HStack(spacing: 8) {
-                ArtworkView(url: app.nowPlaying?.artworkURL, size: 64) {
-                    Rectangle()
-                        .fill(theme.colors.placeholderBackground.swiftUIStyle)
-                        .overlay {
-                            Image("MusicIcon")
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .frame(width: 24, height: 24)
-                                .foregroundStyle(theme.colors.secondaryText)
-                        }
-                }
-                .frame(width: 64, height: 64)
-                .cornerRadius(theme.metrics.imageCornerRadius)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 4) {
-                        Text(app.nowPlaying?.title ?? "Not playing")
-                            .font(theme.typography.playerTitle)
-                            .foregroundStyle(theme.colors.primaryText)
-                            .lineLimit(2)
-
-                        if let nowPlaying = app.nowPlaying,
-                           let id = SpotifyClient.trackId(from: nowPlaying.uri) {
-                            let known = app.isLikeKnown(id)
-                            let liked = app.likedIDs.contains(id)
-                            Button {
-                                app.toggleLikePlaying()
-                            } label: {
-                                Image(systemName: liked ? "heart.fill" : "heart")
-                                    .font(theme.typography.compact)
-                                    .foregroundStyle(
-                                        liked ? theme.colors.accent : theme.colors.secondaryText
-                                    )
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(!known)
-                            .opacity(known ? 1 : 0.35)
-                            .help(known ? (liked ? "Remove from Liked Songs" : "Save to Liked Songs") : "Checking Liked Songs…")
-                            .task(id: id) {
-                                app.requestLikedState(id)
-                            }
-                        }
-                    }
+            ZStack(alignment: .trailing) {
+                VStack(spacing: 2) {
+                    Text(app.nowPlaying?.title ?? "Not playing")
+                        .font(theme.typography.playerTitle)
+                        .foregroundStyle(theme.colors.inverseText.opacity(0.92))
+                        .lineLimit(1)
 
                     if let nowPlaying = app.nowPlaying {
-                        Button(nowPlaying.artist.isEmpty ? "—" : nowPlaying.artist) {
-                            app.openNowPlayingArtist()
-                        }
-                        .buttonStyle(.plain)
-                        .font(theme.typography.secondary)
-                        .foregroundStyle(theme.colors.secondaryText)
-                        .lineLimit(1)
-                        .disabled(nowPlaying.artists.isEmpty)
-                        .help("Open artist")
+                        HStack(spacing: 3) {
+                            Button(nowPlaying.artist.isEmpty ? "—" : nowPlaying.artist) {
+                                app.openNowPlayingArtist()
+                            }
+                            .disabled(nowPlaying.artists.isEmpty)
+                            .help("Open artist")
 
-                        Button(nowPlaying.album.isEmpty ? "—" : nowPlaying.album) {
-                            app.openNowPlayingAlbum()
+                            Text("(")
+
+                            Button(nowPlaying.album.isEmpty ? "—" : nowPlaying.album) {
+                                app.openNowPlayingAlbum()
+                            }
+                            .disabled(nowPlaying.albumId == nil)
+                            .help("Open album")
+
+                            Text(")")
                         }
                         .buttonStyle(.plain)
                         .font(theme.typography.compact)
-                        .foregroundStyle(theme.colors.tertiaryText)
+                        .foregroundStyle(theme.colors.inverseText.opacity(0.68))
                         .lineLimit(1)
-                        .disabled(nowPlaying.albumId == nil)
-                        .help("Open album")
                     } else {
                         Text("—")
-                            .font(theme.typography.secondary)
-                            .foregroundStyle(theme.colors.secondaryText)
+                            .font(theme.typography.compact)
+                            .foregroundStyle(theme.colors.inverseText.opacity(0.58))
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 30)
+                .frame(maxWidth: .infinity)
+
+                if let nowPlaying = app.nowPlaying,
+                   let id = SpotifyClient.trackId(from: nowPlaying.uri) {
+                    let known = app.isLikeKnown(id)
+                    let liked = app.likedIDs.contains(id)
+                    Button {
+                        app.toggleLikePlaying()
+                    } label: {
+                        Image(systemName: liked ? "heart.fill" : "heart")
+                            .font(theme.typography.compact)
+                            .foregroundStyle(liked ? theme.colors.accent : theme.colors.inverseText.opacity(0.58))
+                            .frame(width: 26, height: 36)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!known)
+                    .opacity(known ? 1 : 0.35)
+                    .padding(.trailing, 2)
+                    .help(known ? (liked ? "Remove from Liked Songs" : "Save to Liked Songs") : "Checking Liked Songs…")
+                    .task(id: id) {
+                        app.requestLikedState(id)
+                    }
+                }
             }
-            .padding(.horizontal, theme.metrics.sidebarInset)
-            .padding(.bottom, theme.metrics.smallPadding)
+            .frame(height: 44)
+            .background(classicMetalSurface)
+            .overlay(alignment: .bottom) {
+                Rectangle()
+                    .fill(Color.black.opacity(0.52))
+                    .frame(height: 1)
+            }
+
+            ArtworkView(
+                url: app.nowPlaying?.artworkURL,
+                size: theme.metrics.sidebarWidth
+            ) {
+                Rectangle()
+                    .fill(theme.colors.placeholderBackground.swiftUIStyle)
+                    .overlay {
+                        Image("MusicIcon")
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 42, height: 42)
+                            .foregroundStyle(theme.colors.secondaryText)
+                    }
+            }
+            .frame(
+                width: theme.metrics.sidebarWidth,
+                height: theme.metrics.sidebarWidth
+            )
+            .clipped()
         }
+    }
+
+    private var classicMetalSurface: LinearGradient {
+        LinearGradient(
+            stops: [
+                .init(color: Color(white: 0.78), location: 0),
+                .init(color: Color(white: 0.68), location: 0.48),
+                .init(color: Color(white: 0.57), location: 1),
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
     }
 
     /// Plain + at the title row's right edge (M4.5). Keyboard- and
