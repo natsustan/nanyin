@@ -119,7 +119,7 @@ struct ThemeVisualFixture: View {
 
     private var sourceList: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(isClassic ? "LIBRARY" : "Library")
+            Text("Library")
                 .font(theme.typography.sectionHeader)
                 .foregroundStyle(theme.colors.secondaryText)
                 .padding(.horizontal, theme.metrics.sidebarInset)

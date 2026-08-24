@@ -79,7 +79,7 @@ struct QueueView: View {
             Image(systemName: "list.bullet")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(theme.colors.primaryText)
-            Text("QUEUE")
+            Text("Queue")
                 .font(theme.typography.sectionHeader)
                 .tracking(0.8)
                 .foregroundStyle(theme.colors.primaryText)
@@ -119,10 +119,10 @@ struct QueueView: View {
                 }
             }
             if !app.queueUpcoming.isEmpty {
-                queueSection("NEXT UP", items: app.queueUpcoming)
+                queueSection("Next Up", items: app.queueUpcoming)
             }
             if !app.queueRecent.isEmpty {
-                queueSection("RECENTLY PLAYED", items: app.queueRecent)
+                queueSection("Recently Played", items: app.queueRecent)
             }
         }
         .listStyle(.plain)
@@ -155,7 +155,7 @@ struct QueueView: View {
                 .listRowSeparator(.hidden)
             }
         } header: {
-            Text("NOW PLAYING")
+            Text("Now Playing")
                 .font(theme.typography.sectionHeader)
                 .tracking(0.8)
                 .foregroundStyle(theme.colors.secondaryText)

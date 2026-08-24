@@ -50,7 +50,7 @@ struct AppContentView: View {
                 subtitle: subtitle,
                 coverURL: artworkURL,
                 contextKey: AppModel.albumContextKey(id),
-                label: "ALBUM",
+                label: "Album",
                 albumId: id
             )
         }

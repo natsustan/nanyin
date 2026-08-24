@@ -120,7 +120,7 @@ struct ArtistDetailView: View {
                 .shadow(color: theme.colors.shadow.opacity(0.5), radius: theme.metrics.shadowRadius + 4, y: theme.metrics.shadowYOffset + 2)
 
             VStack(alignment: .leading, spacing: 10) {
-                Text("ARTIST")
+                Text("Artist")
                     .font(theme.typography.sectionHeader)
                     .tracking(1.2)
                     .foregroundStyle(theme.colors.secondaryText)
@@ -148,7 +148,7 @@ struct ArtistDetailView: View {
                 .frame(width: theme.metrics.detailArtworkSize, height: theme.metrics.detailArtworkSize)
 
             VStack(alignment: .leading, spacing: 5) {
-                Text("ARTIST")
+                Text("Artist")
                     .font(theme.typography.sectionHeader)
                     .tracking(0.8)
                     .foregroundStyle(theme.colors.secondaryText)
@@ -184,7 +184,7 @@ struct ArtistDetailView: View {
             HStack(spacing: 6) {
                 Image(systemName: "play.fill")
                     .font(.system(size: 11, weight: .bold))
-                Text("PLAY")
+                Text("Play")
                     .font(theme.typography.button)
                     .tracking(0.8)
             }

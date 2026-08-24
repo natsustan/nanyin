@@ -39,7 +39,7 @@ struct SidebarView: View {
                 .padding(.vertical, theme.metrics.dividerVerticalPadding)
                 .padding(.horizontal, theme.metrics.fieldHorizontalPadding)
 
-            Text(presentation == .classic2010 ? "LIBRARY" : "YOUR LIBRARY")
+            Text(presentation == .classic2010 ? "Library" : "Your Library")
                 .font(theme.typography.sectionHeader)
                 .tracking(1.2)
                 .foregroundStyle(theme.colors.secondaryText)
@@ -49,10 +49,10 @@ struct SidebarView: View {
             entry(.liked, icon: Image(systemName: "heart.fill"), title: "Liked Songs", count: app.likedCount)
             entry(.savedAlbums, icon: Image(systemName: "opticaldisc"), title: "Saved Albums", count: app.savedAlbumCount)
 
-            // One stable title row: PLAYLISTS + always-visible New
+            // One stable title row: Playlists + always-visible New
             // Playlist (+) button — present while loading and empty too.
             HStack(spacing: 6) {
-                Text("PLAYLISTS")
+                Text("Playlists")
                     .font(theme.typography.sectionHeader)
                     .tracking(1.2)
                     .foregroundStyle(theme.colors.secondaryText)
@@ -125,7 +125,7 @@ struct SidebarView: View {
             Divider()
                 .overlay(theme.colors.divider)
 
-            Text("NOW PLAYING")
+            Text("Now Playing")
                 .font(theme.typography.sectionHeader)
                 .tracking(1.1)
                 .foregroundStyle(theme.colors.secondaryText)

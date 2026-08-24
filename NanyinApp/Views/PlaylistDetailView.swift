@@ -6,7 +6,7 @@
 import SwiftUI
 
 /// Header (cover + name + count + play button) + track list.
-/// Used for playlists, Liked Songs, and album pages (label = "ALBUM",
+/// Used for playlists, Liked Songs, and album pages (label = "Album",
 /// albumId set). The header always stays mounted and interactive — track
 /// loading, empty, and error states render below it, never replacing it
 /// (M4.3: the album save control must remain reachable at all times).
@@ -19,8 +19,8 @@ struct PlaylistDetailView: View {
     let coverURL: URL?
     let contextKey: String
     var coverAssetName: String? = nil
-    /// Header eyebrow: PLAYLIST / ALBUM / …
-    var label = "PLAYLIST"
+    /// Header eyebrow: Playlist / Album / …
+    var label = "Playlist"
     /// Non-nil on album pages: enables the save control and context playback.
     var albumId: String? = nil
 
@@ -215,7 +215,7 @@ struct PlaylistDetailView: View {
             HStack(spacing: 6) {
                 Image(systemName: "play.fill")
                     .font(.system(size: 11, weight: .bold))
-                Text("PLAY")
+                Text("Play")
                     .font(theme.typography.button)
                     .tracking(0.8)
             }
@@ -281,7 +281,7 @@ private struct SaveAlbumButton: View {
             HStack(spacing: 6) {
                 Image(systemName: probeFailed ? "arrow.clockwise" : (isSaved ? "checkmark" : "plus"))
                     .font(.system(size: 11, weight: .bold))
-                Text(probeFailed ? "RETRY" : (isSaved ? "SAVED" : "SAVE ALBUM"))
+                Text(probeFailed ? "Retry" : (isSaved ? "Saved" : "Save Album"))
                     .font(theme.typography.button)
                     .tracking(0.8)
             }

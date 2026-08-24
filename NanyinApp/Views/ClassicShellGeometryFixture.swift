@@ -61,7 +61,7 @@ struct ClassicShellGeometryFixture: View {
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("LIBRARY")
+            Text("Library")
                 .font(theme.typography.sectionHeader)
                 .foregroundStyle(theme.colors.secondaryText)
                 .padding(12)

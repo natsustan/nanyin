@@ -79,7 +79,7 @@ struct LoginView: View {
         default:
             if theme.id == .classic2010 {
                 ChromeButton(
-                    title: "CONNECT WITH SPOTIFY",
+                    title: "Connect with Spotify",
                     accessibilityLabel: "Connect with Spotify",
                     style: ChromeStyle(role: .pill, size: CGSize(width: 188, height: 28)),
                     action: app.signIn
@@ -88,7 +88,7 @@ struct LoginView: View {
                 Button {
                     app.signIn()
                 } label: {
-                    Text("CONNECT WITH SPOTIFY")
+                    Text("Connect with Spotify")
                         .font(.system(size: 13, weight: .bold))
                         .tracking(0.8)
                         .foregroundStyle(theme.colors.inverseText)

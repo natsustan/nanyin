@@ -197,7 +197,7 @@ struct SearchView: View {
                 HStack(spacing: 6) {
                     Image(systemName: "play.fill")
                         .font(.system(size: 11, weight: .bold))
-                    Text("PLAY")
+                    Text("Play")
                         .font(theme.typography.button)
                         .tracking(0.8)
                 }
