@@ -261,10 +261,15 @@ struct SidebarView: View {
                     .font(theme.typography.playerTitle)
                     .foregroundStyle(theme.colors.inverseText.opacity(0.92))
                     .lineLimit(1)
+                    .truncationMode(.tail)
 
                 classicNowPlayingArtistAndAlbum
             }
-            .padding(.horizontal, 30)
+            // Keep the metadata out of the right-side action area: the like
+            // button occupies 26 pt plus its trailing inset, while the
+            // collapse button remains in the top-right corner.
+            .padding(.leading, 24)
+            .padding(.trailing, 58)
             .frame(maxWidth: .infinity)
 
             if let nowPlaying = app.nowPlaying,
