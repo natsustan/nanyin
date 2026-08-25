@@ -18,19 +18,20 @@ import SwiftUI
 /// scrolling, hover state stays card-local (UI perf rules).
 struct HomeView: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.appTheme) private var theme
 
     var body: some View {
         ScrollView(.vertical) {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: theme.metrics.sectionTopPadding + 8) {
                 header
                 partialErrorNotice
                 content
             }
-            .padding(.horizontal, 28)
-            .padding(.top, 24)
-            .padding(.bottom, 28)
+            .padding(.horizontal, theme.metrics.pageHorizontalInset)
+            .padding(.top, theme.metrics.pageTopInset)
+            .padding(.bottom, theme.metrics.homeBottomInset)
         }
-        .background(Theme.background)
+        .background(theme.colors.contentBackground.swiftUIStyle)
         .onAppear {
             // Cache-guarded: first entry after login loads once; revisits
             // are no-ops until a manual refresh or an account change.
@@ -57,8 +58,8 @@ struct HomeView: View {
     private var greeting: some View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
             Text(Self.greetingText(for: context.date))
-                .font(.system(size: 28, weight: .bold))
-                .foregroundStyle(.white)
+                .font(theme.typography.pageTitle)
+                .foregroundStyle(theme.colors.primaryText)
         }
     }
 
@@ -69,6 +70,7 @@ struct HomeView: View {
             if app.isLoadingHome {
                 ProgressView()
                     .controlSize(.small)
+                    .tint(theme.colors.accent)
             }
             RefreshButton(action: { app.loadHome(force: true) })
                 .disabled(app.isLoadingHome)
@@ -99,10 +101,10 @@ struct HomeView: View {
         if !app.homeErrors.isEmpty {
             HStack(spacing: 10) {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(theme.colors.warning)
                 Text("Couldn’t load some sections.")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Theme.textSecondary)
+                    .font(theme.typography.bannerText)
+                    .foregroundStyle(theme.colors.secondaryText)
                 Spacer()
                 // Non-force load retries exactly the failed sections —
                 // rendered sections keep their content.
@@ -110,23 +112,25 @@ struct HomeView: View {
                     app.loadHome()
                 }
                 .buttonStyle(.link)
+                .tint(theme.colors.accent)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(Color.orange.opacity(0.10))
+            .padding(.horizontal, theme.metrics.bannerHorizontalPadding)
+            .padding(.vertical, theme.metrics.bannerVerticalPadding)
+            .background(theme.colors.warningContainer.swiftUIStyle)
             .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(Color.orange.opacity(0.35), lineWidth: 1)
+                RoundedRectangle(cornerRadius: theme.metrics.bannerCornerRadius)
+                    .strokeBorder(theme.colors.warningBorder, lineWidth: 1)
             )
-            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .clipShape(RoundedRectangle(cornerRadius: theme.metrics.bannerCornerRadius))
         }
     }
 
     private var loadingState: some View {
         VStack(spacing: 12) {
             ProgressView()
+                .tint(theme.colors.accent)
             Text("Loading your home…")
-                .foregroundStyle(Theme.textSecondary)
+                .foregroundStyle(theme.colors.secondaryText)
         }
         .frame(maxWidth: .infinity, minHeight: 320)
     }
@@ -135,15 +139,15 @@ struct HomeView: View {
     private var freshAccountHint: some View {
         HStack(spacing: 10) {
             Image(systemName: "music.note.house")
-                .foregroundStyle(Theme.textSecondary)
+                .foregroundStyle(theme.colors.secondaryText)
             Text("Nothing here yet — play something and it will show up.")
                 .font(.system(size: 12))
-                .foregroundStyle(Theme.textSecondary)
+                .foregroundStyle(theme.colors.secondaryText)
             Spacer()
         }
-        .padding(14)
-        .background(Color(white: 0.09))
-        .cornerRadius(8)
+        .padding(theme.metrics.cardPadding)
+        .background(theme.colors.surface.swiftUIStyle)
+        .cornerRadius(theme.metrics.cardCornerRadius)
     }
 
     // MARK: - Sections
@@ -155,7 +159,7 @@ struct HomeView: View {
                 // Bounded horizontal strip (≤10 cards) — perpendicular to
                 // the page's single vertical scroll region.
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
+                    HStack(spacing: theme.metrics.smallPadding + 4) {
                         ForEach(app.homeRecentlyPlayed) { card in
                             RecentCard(card: card)
                         }
@@ -177,7 +181,8 @@ struct HomeView: View {
                         TrackRow(
                             track: track,
                             index: index,
-                            contextKey: AppModel.homeTopTracksContextKey
+                            contextKey: AppModel.homeTopTracksContextKey,
+                            presentation: rowPresentation
                         )
                     }
                 }
@@ -190,7 +195,7 @@ struct HomeView: View {
         if !app.homeTopArtists.isEmpty {
             section(title: "Top Artists", caption: "most played · last 6 months") {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
+                    HStack(spacing: theme.metrics.smallPadding + 4) {
                         ForEach(app.homeTopArtists) { artist in
                             ArtistTile(artist: artist)
                         }
@@ -204,8 +209,8 @@ struct HomeView: View {
     private var librarySection: some View {
         section(title: "Your Library", caption: "liked and saved") {
             LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 170), spacing: 16)],
-                spacing: 16
+                columns: [GridItem(.adaptive(minimum: theme.metrics.collectionGridMinimum), spacing: theme.metrics.smallPadding + 8)],
+                spacing: theme.metrics.smallPadding + 8
             ) {
                 likedSongsTile
                 ForEach(Array(app.savedAlbums.prefix(5))) { saved in
@@ -255,6 +260,10 @@ struct HomeView: View {
         )
     }
 
+    private var rowPresentation: TrackRowPresentation {
+        theme.id == .classic2010 ? .classic : .comfortable
+    }
+
     private func section<Content: View>(
         title: String,
         caption: String? = nil,
@@ -269,12 +278,12 @@ struct HomeView: View {
     private func sectionHeader(title: String, caption: String?) -> some View {
         HStack(spacing: 10) {
             Text(title)
-                .font(.system(size: 15, weight: .bold))
-                .foregroundStyle(.white)
+                .font(theme.typography.sectionTitle)
+                .foregroundStyle(theme.colors.primaryText)
             if let caption {
                 Text(caption)
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textSecondary)
+                    .font(theme.typography.secondary)
+                    .foregroundStyle(theme.colors.secondaryText)
             }
             Spacer()
         }
@@ -284,6 +293,7 @@ struct HomeView: View {
 // MARK: - Cards and tiles (hover state is card-local — never in the parent)
 
 private struct RefreshButton: View {
+    @Environment(\.appTheme) private var theme
     let action: () -> Void
 
     @State private var hovering = false
@@ -292,12 +302,14 @@ private struct RefreshButton: View {
         Button(action: action) {
             Image(systemName: "arrow.clockwise")
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(hovering ? .white : Theme.textSecondary)
+                .foregroundStyle(hovering ? theme.colors.primaryText : theme.colors.secondaryText)
                 .frame(width: 30, height: 30)
-                .background(hovering ? Color(white: 0.16) : Color(white: 0.13))
+                .background(
+                    hovering ? theme.colors.raisedSurface.swiftUIStyle : theme.colors.inputBackground.swiftUIStyle
+                )
                 .clipShape(Circle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ThemePressFeedbackButtonStyle())
         .help("Refresh Home")
         .onHover { hovering = $0 }
     }
@@ -307,6 +319,7 @@ private struct RefreshButton: View {
 /// context's page; hover play starts its server-resolved context.
 private struct RecentCard: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.appTheme) private var theme
     let card: HomeFeed.Card
 
     @State private var hovering = false
@@ -315,18 +328,20 @@ private struct RecentCard: View {
         VStack(alignment: .leading, spacing: 8) {
             cover
             Text(card.title)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.white)
+                .font(theme.typography.cardTitle)
+                .foregroundStyle(theme.colors.primaryText)
                 .lineLimit(1)
             Text(card.subtitle)
-                .font(.system(size: 11))
-                .foregroundStyle(Theme.textSecondary)
+                .font(theme.typography.secondary)
+                .foregroundStyle(theme.colors.secondaryText)
                 .lineLimit(1)
         }
-        .frame(width: 150, alignment: .leading)
-        .padding(8)
-        .background(hovering ? Color(white: 0.13) : .clear)
-        .cornerRadius(8)
+        .frame(width: theme.metrics.homeFeatureArtworkSize + theme.metrics.smallPadding * 2, alignment: .leading)
+        .padding(theme.metrics.smallPadding)
+        .background(
+            hovering ? theme.colors.cardHover.swiftUIStyle : AnyShapeStyle(Color.clear)
+        )
+        .cornerRadius(theme.metrics.cardCornerRadius)
         .contentShape(Rectangle())
         .onTapGesture(perform: open)
         .contextMenu { contextMenu }
@@ -390,15 +405,15 @@ private struct RecentCard: View {
     }
 
     private var cover: some View {
-        ArtworkView(url: card.artworkURL, size: 134) {
+        ArtworkView(url: card.artworkURL, size: theme.metrics.homeFeatureArtworkSize) {
             placeholderCover
         }
-        .frame(width: 134, height: 134)
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-        .shadow(color: .black.opacity(0.35), radius: 8, y: 4)
+        .frame(width: theme.metrics.homeFeatureArtworkSize, height: theme.metrics.homeFeatureArtworkSize)
+        .clipShape(RoundedRectangle(cornerRadius: theme.metrics.imageCornerRadius))
+        .shadow(color: theme.colors.shadow.opacity(0.35), radius: theme.metrics.shadowRadius, y: theme.metrics.shadowYOffset)
         .overlay(alignment: .bottomLeading) {
             if hovering, canPlay {
-                playButton.padding(8)
+                playButton.padding(theme.metrics.smallPadding)
             }
         }
     }
@@ -407,10 +422,10 @@ private struct RecentCard: View {
         Button(action: play) {
             Image(systemName: "play.fill")
                 .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(.black)
+                .foregroundStyle(theme.colors.inverseText)
                 .frame(width: 32, height: 32)
-                .background(Circle().fill(Theme.accent))
-                .shadow(color: .black.opacity(0.4), radius: 6, y: 2)
+                .background(Circle().fill(theme.colors.accent))
+                .shadow(color: theme.colors.shadow.opacity(0.4), radius: theme.metrics.smallCornerRadius * 2, y: 2)
         }
         .buttonStyle(.plain)
         .help("Play")
@@ -418,12 +433,13 @@ private struct RecentCard: View {
 
     private var placeholderCover: some View {
         ZStack {
-            Color(white: 0.14)
+            Rectangle()
+                .fill(theme.colors.placeholderBackground.swiftUIStyle)
             Image("MusicIcon")
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .frame(width: 34, height: 34)
-                .foregroundStyle(Theme.textSecondary)
+                .foregroundStyle(theme.colors.secondaryText)
         }
     }
 }
@@ -431,6 +447,7 @@ private struct RecentCard: View {
 /// Circular-portrait artist card (same shape as the search page's).
 private struct ArtistTile: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.appTheme) private var theme
     let artist: SpotifyClient.Artist
 
     @State private var hovering = false
@@ -439,26 +456,28 @@ private struct ArtistTile: View {
         Button {
             app.open(.artist(id: artist.id, name: artist.name, artworkURL: artist.artworkURL))
         } label: {
-            VStack(spacing: 8) {
-                ArtworkView(url: artist.artworkURL, size: 88) {
+            VStack(spacing: theme.metrics.smallPadding) {
+                ArtworkView(url: artist.artworkURL, size: theme.metrics.artistArtworkSize) {
                     placeholderPortrait
                 }
-                .frame(width: 88, height: 88)
+                .frame(width: theme.metrics.artistArtworkSize, height: theme.metrics.artistArtworkSize)
                 .clipShape(Circle())
-                .shadow(color: .black.opacity(0.4), radius: 8, y: 4)
+                .shadow(color: theme.colors.shadow.opacity(0.4), radius: theme.metrics.shadowRadius, y: theme.metrics.shadowYOffset)
                 Text(artist.name)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white)
+                    .font(theme.typography.tileTitle)
+                    .foregroundStyle(theme.colors.primaryText)
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Text("Artist")
-                    .font(.system(size: 10))
-                    .foregroundStyle(Theme.textSecondary)
+                    .font(theme.typography.tileSubtitle)
+                    .foregroundStyle(theme.colors.secondaryText)
             }
-            .frame(width: 104)
-            .padding(8)
-            .background(hovering ? Color(white: 0.13) : .clear)
-            .cornerRadius(6)
+            .frame(width: theme.metrics.artistArtworkSize + theme.metrics.smallPadding * 2)
+            .padding(theme.metrics.smallPadding)
+            .background(
+                hovering ? theme.colors.cardHover.swiftUIStyle : AnyShapeStyle(Color.clear)
+            )
+            .cornerRadius(theme.metrics.cardCornerRadius)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -468,10 +487,11 @@ private struct ArtistTile: View {
 
     private var placeholderPortrait: some View {
         ZStack {
-            Color(white: 0.14)
+            Rectangle()
+                .fill(theme.colors.placeholderBackground.swiftUIStyle)
             Image(systemName: "person.crop.circle.fill")
-                .font(.system(size: 40))
-                .foregroundStyle(Theme.textSecondary)
+                .font(.system(size: theme.metrics.artistArtworkSize * 0.45))
+                .foregroundStyle(theme.colors.secondaryText)
         }
     }
 }
@@ -480,6 +500,7 @@ private struct ArtistTile: View {
 /// Click opens the destination; hover play starts the whole context.
 private struct LibraryTile: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.appTheme) private var theme
     let title: String
     let subtitle: String
     let artworkURL: URL?
@@ -494,18 +515,20 @@ private struct LibraryTile: View {
         VStack(alignment: .leading, spacing: 8) {
             cover
             Text(title)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.white)
+                .font(theme.typography.cardTitle)
+                .foregroundStyle(theme.colors.primaryText)
                 .lineLimit(1)
             Text(subtitle)
-                .font(.system(size: 11))
-                .foregroundStyle(Theme.textSecondary)
+                .font(theme.typography.secondary)
+                .foregroundStyle(theme.colors.secondaryText)
                 .lineLimit(1)
         }
-        .padding(8)
+        .padding(theme.metrics.smallPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(hovering ? Color(white: 0.13) : .clear)
-        .cornerRadius(8)
+        .background(
+            hovering ? theme.colors.cardHover.swiftUIStyle : AnyShapeStyle(Color.clear)
+        )
+        .cornerRadius(theme.metrics.cardCornerRadius)
         .contentShape(Rectangle())
         .onTapGesture(perform: onOpen)
         .contextMenu {
@@ -535,40 +558,41 @@ private struct LibraryTile: View {
                     .resizable()
                     .scaledToFill()
             } else {
-                ArtworkView(url: artworkURL, size: 170) {
+                ArtworkView(url: artworkURL, size: theme.metrics.collectionArtworkSize) {
                     placeholderCover
                 }
             }
         }
         .aspectRatio(1, contentMode: .fit)
         .frame(maxWidth: .infinity)
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-        .shadow(color: .black.opacity(0.35), radius: 8, y: 4)
+        .clipShape(RoundedRectangle(cornerRadius: theme.metrics.imageCornerRadius))
+        .shadow(color: theme.colors.shadow.opacity(0.35), radius: theme.metrics.shadowRadius, y: theme.metrics.shadowYOffset)
         .overlay(alignment: .bottomLeading) {
             if hovering, let onPlay, app.isPlaybackReady {
                 Button(action: onPlay) {
                     Image(systemName: "play.fill")
                         .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(.black)
+                        .foregroundStyle(theme.colors.inverseText)
                         .frame(width: 32, height: 32)
-                        .background(Circle().fill(Theme.accent))
-                        .shadow(color: .black.opacity(0.4), radius: 6, y: 2)
+                        .background(Circle().fill(theme.colors.accent))
+                        .shadow(color: theme.colors.shadow.opacity(0.4), radius: theme.metrics.smallCornerRadius * 2, y: 2)
                 }
                 .buttonStyle(.plain)
                 .help("Play")
-                .padding(8)
+                        .padding(theme.metrics.smallPadding)
             }
         }
     }
 
     private var placeholderCover: some View {
         ZStack {
-            Color(white: 0.14)
+            Rectangle()
+                .fill(theme.colors.placeholderBackground.swiftUIStyle)
             Image("MusicIcon")
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .frame(width: 34, height: 34)
-                .foregroundStyle(Theme.textSecondary)
+                .foregroundStyle(theme.colors.secondaryText)
         }
     }
 }

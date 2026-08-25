@@ -6,20 +6,21 @@
 import SwiftUI
 
 /// Header (cover + name + count + play button) + track list.
-/// Used for playlists, Liked Songs, and album pages (label = "ALBUM",
+/// Used for playlists, Liked Songs, and album pages (label = "Album",
 /// albumId set). The header always stays mounted and interactive — track
 /// loading, empty, and error states render below it, never replacing it
 /// (M4.3: the album save control must remain reachable at all times).
 struct PlaylistDetailView: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.appTheme) private var theme
 
     let title: String
     let subtitle: String
     let coverURL: URL?
     let contextKey: String
     var coverAssetName: String? = nil
-    /// Header eyebrow: PLAYLIST / ALBUM / …
-    var label = "PLAYLIST"
+    /// Header eyebrow: Playlist / Album / …
+    var label = "Playlist"
     /// Non-nil on album pages: enables the save control and context playback.
     var albumId: String? = nil
 
@@ -61,10 +62,10 @@ struct PlaylistDetailView: View {
         // previous nested-ScrollView layout caused scroll jank).
         VStack(spacing: 0) {
             header
-            Divider().overlay(Color(white: 0.18))
+            Divider().overlay(theme.colors.divider)
             trackContent
         }
-        .background(Theme.background)
+        .background(theme.colors.contentBackground.swiftUIStyle)
         .task(id: albumId) {
             // Resolve the saved state for album pages on first appearance.
             if albumId != nil {
@@ -79,22 +80,22 @@ struct PlaylistDetailView: View {
             VStack(spacing: 12) {
                 Image(systemName: "exclamationmark.triangle")
                     .font(.system(size: 30))
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(theme.colors.warning)
                 Text(error)
                     .font(.system(size: 13))
-                    .foregroundStyle(Theme.textSecondary)
+                    .foregroundStyle(theme.colors.secondaryText)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal, 40)
+                    .padding(.horizontal, theme.metrics.pageHorizontalInset + 12)
                 Button {
                     app.retryCurrentPageLoad()
                 } label: {
                     Text("Retry")
                         .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(.black)
-                        .padding(.horizontal, 22)
-                        .padding(.vertical, 8)
-                        .background(Theme.accent)
-                        .cornerRadius(16)
+                        .foregroundStyle(theme.colors.inverseText)
+                        .padding(.horizontal, theme.metrics.controlHorizontalPadding)
+                        .padding(.vertical, theme.metrics.controlVerticalPadding - 1)
+                        .background(theme.colors.accent)
+                        .cornerRadius(theme.metrics.smallPillCornerRadius)
                 }
                 .buttonStyle(.plain)
             }
@@ -103,11 +104,12 @@ struct PlaylistDetailView: View {
             VStack(spacing: 12) {
                 if app.isLoadingTracks(contextKey: contextKey) {
                     ProgressView()
+                        .tint(theme.colors.accent)
                     Text("Loading tracks…")
-                        .foregroundStyle(Theme.textSecondary)
+                        .foregroundStyle(theme.colors.secondaryText)
                 } else {
                     Text("Nothing here yet")
-                        .foregroundStyle(Theme.textSecondary)
+                        .foregroundStyle(theme.colors.secondaryText)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -116,25 +118,34 @@ struct PlaylistDetailView: View {
         }
     }
 
+    @ViewBuilder
     private var header: some View {
+        if theme.id == .classic2010 {
+            classicHeader
+        } else {
+            darkHeader
+        }
+    }
+
+    private var darkHeader: some View {
         HStack(spacing: 24) {
-            cover
-                .frame(width: 140, height: 140)
-                .cornerRadius(6)
-                .shadow(color: .black.opacity(0.5), radius: 12, y: 6)
+            cover(size: theme.metrics.detailArtworkSize)
+                .frame(width: theme.metrics.detailArtworkSize, height: theme.metrics.detailArtworkSize)
+                .cornerRadius(theme.metrics.imageCornerRadius)
+                .shadow(color: theme.colors.shadow.opacity(0.5), radius: theme.metrics.shadowRadius + 4, y: theme.metrics.shadowYOffset + 2)
 
             VStack(alignment: .leading, spacing: 10) {
                 Text(label)
-                    .font(.system(size: 10, weight: .bold))
+                    .font(theme.typography.sectionHeader)
                     .tracking(1.2)
-                    .foregroundStyle(Theme.textSecondary)
+                    .foregroundStyle(theme.colors.secondaryText)
                 Text(title)
-                    .font(.system(size: 32, weight: .bold))
-                    .foregroundStyle(.white)
+                    .font(theme.typography.detailTitle)
+                    .foregroundStyle(theme.colors.primaryText)
                     .lineLimit(2)
                 Text(headerSubtitle)
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.textSecondary)
+                    .font(theme.typography.metadata)
+                    .foregroundStyle(theme.colors.secondaryText)
 
                 HStack(spacing: 12) {
                     playButton
@@ -145,10 +156,50 @@ struct PlaylistDetailView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 28)
-        .padding(.top, 24)
-        .padding(.bottom, 20)
-        .background(Theme.background)
+        .padding(.horizontal, theme.metrics.pageHorizontalInset)
+        .padding(.top, theme.metrics.pageTopInset)
+        .padding(.bottom, theme.metrics.pageBottomInset)
+        .background(theme.colors.contentBackground.swiftUIStyle)
+    }
+
+    private var classicHeader: some View {
+        HStack(spacing: 12) {
+            cover(size: theme.metrics.detailArtworkSize)
+                .frame(width: theme.metrics.detailArtworkSize, height: theme.metrics.detailArtworkSize)
+                .cornerRadius(theme.metrics.imageCornerRadius)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(label)
+                    .font(theme.typography.sectionHeader)
+                    .tracking(0.8)
+                    .foregroundStyle(theme.colors.secondaryText)
+                Text(title)
+                    .font(theme.typography.detailTitle)
+                    .foregroundStyle(theme.colors.primaryText)
+                    .lineLimit(1)
+                Text(headerSubtitle)
+                    .font(theme.typography.metadata)
+                    .foregroundStyle(theme.colors.secondaryText)
+                    .lineLimit(1)
+
+                HStack(spacing: 8) {
+                    playButton
+                    if albumId != nil {
+                        SaveAlbumButton(album: albumSeed)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, theme.metrics.pageHorizontalInset)
+        .padding(.vertical, theme.metrics.smallPadding + 2)
+        .background {
+            ChromeSectionBar(
+                style: ChromeSectionBarStyle(
+                    height: theme.metrics.detailArtworkSize + (theme.metrics.smallPadding + 2) * 2
+                )
+            )
+        }
     }
 
     /// Album pages play the server-resolved context directly (no dependency
@@ -164,15 +215,15 @@ struct PlaylistDetailView: View {
             HStack(spacing: 6) {
                 Image(systemName: "play.fill")
                     .font(.system(size: 11, weight: .bold))
-                Text("PLAY")
-                    .font(.system(size: 12, weight: .bold))
+                Text("Play")
+                    .font(theme.typography.button)
                     .tracking(0.8)
             }
-            .foregroundStyle(.black)
-            .padding(.horizontal, 22)
-            .padding(.vertical, 9)
-            .background(Theme.accent)
-            .cornerRadius(20)
+            .foregroundStyle(theme.colors.inverseText)
+            .padding(.horizontal, theme.metrics.controlHorizontalPadding)
+            .padding(.vertical, theme.metrics.controlVerticalPadding)
+            .background(theme.colors.accent)
+            .cornerRadius(theme.metrics.pillCornerRadius)
         }
         .buttonStyle(.plain)
         .disabled(!app.isPlaybackReady || (albumId == nil && tracks.isEmpty))
@@ -183,26 +234,27 @@ struct PlaylistDetailView: View {
     }
 
     @ViewBuilder
-    private var cover: some View {
+    private func cover(size: CGFloat) -> some View {
         if let coverAssetName {
             Image(coverAssetName)
                 .resizable()
                 .scaledToFill()
         } else {
-            ArtworkView(url: coverURL, size: 140) {
-                placeholderCover
+            ArtworkView(url: coverURL, size: size) {
+                placeholderCover(size: size)
             }
         }
     }
 
-    private var placeholderCover: some View {
+    private func placeholderCover(size: CGFloat) -> some View {
         ZStack {
-            Color(white: 0.14)
+            Rectangle()
+                .fill(theme.colors.placeholderBackground.swiftUIStyle)
             Image("MusicIcon")
                 .resizable()
                 .aspectRatio(contentMode: .fit)
-                .frame(width: 44, height: 44)
-                .foregroundStyle(Theme.textSecondary)
+                .frame(width: size * 0.32, height: size * 0.32)
+                .foregroundStyle(theme.colors.secondaryText)
         }
     }
 }
@@ -213,6 +265,7 @@ struct PlaylistDetailView: View {
 /// appearance, same discipline as the track like button).
 private struct SaveAlbumButton: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.appTheme) private var theme
     let album: SpotifyClient.SavedAlbum
 
     @State private var hovering = false
@@ -228,17 +281,19 @@ private struct SaveAlbumButton: View {
             HStack(spacing: 6) {
                 Image(systemName: probeFailed ? "arrow.clockwise" : (isSaved ? "checkmark" : "plus"))
                     .font(.system(size: 11, weight: .bold))
-                Text(probeFailed ? "RETRY" : (isSaved ? "SAVED" : "SAVE ALBUM"))
-                    .font(.system(size: 12, weight: .bold))
+                Text(probeFailed ? "Retry" : (isSaved ? "Saved" : "Save Album"))
+                    .font(theme.typography.button)
                     .tracking(0.8)
             }
-            .foregroundStyle(isSaved ? Theme.accent : .white)
-            .padding(.horizontal, 20)
-            .padding(.vertical, 9)
+            .foregroundStyle(isSaved ? theme.colors.accent : theme.colors.primaryText)
+            .padding(.horizontal, theme.metrics.controlHorizontalPadding - 2)
+            .padding(.vertical, theme.metrics.controlVerticalPadding)
             .background(
-                RoundedRectangle(cornerRadius: 20)
+                RoundedRectangle(cornerRadius: theme.metrics.pillCornerRadius)
                     .strokeBorder(
-                        hovering ? .white.opacity(isSaved ? 0.7 : 0.9) : Color(white: 0.4),
+                        hovering
+                            ? theme.colors.primaryText.opacity(isSaved ? 0.7 : 0.9)
+                            : theme.colors.border,
                         lineWidth: 1
                     )
             )

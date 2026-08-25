@@ -32,13 +32,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct NanyinApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
+    @AppStorage(AppThemeID.preferenceKey)
+    private var storedThemeID = AppThemeID.nanyinDark.rawValue
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup("NanYin") {
             RootView()
                 .environment(delegate.appModel)
+                .environment(\.appTheme, AppTheme.resolve(selectedThemeID))
                 .preferredColorScheme(.dark)
                 .frame(minWidth: 900, minHeight: 600)
+                .background {
+                    ClassicTitleBarBridge(
+                        isClassic: selectedThemeID == .classic2010,
+                        app: delegate.appModel,
+                        theme: AppTheme.resolve(selectedThemeID)
+                    )
+                }
                 .onAppear {
                     delegate.appModel.start()
                 }
@@ -63,6 +73,39 @@ struct NanyinApp: App {
                     .keyboardShortcut(.leftArrow, modifiers: .command)
                     .disabled(!delegate.appModel.isPlaybackReady)
             }
+            CommandMenu("Navigate") {
+                Button("Back") { delegate.appModel.goBack() }
+                    .keyboardShortcut("[", modifiers: .command)
+                    .disabled(!delegate.appModel.canGoBack)
+                Button("Forward") { delegate.appModel.goForward() }
+                    .keyboardShortcut("]", modifiers: .command)
+                    .disabled(!delegate.appModel.canGoForward)
+            }
+            CommandMenu("Theme") {
+                ForEach(AppThemeID.allCases) { themeID in
+                    Toggle(themeID.displayName, isOn: themeSelection(for: themeID))
+                }
+            }
         }
+
+        Settings {
+            ThemeSettingsView()
+                .preferredColorScheme(.dark)
+        }
+    }
+
+    private var selectedThemeID: AppThemeID {
+        AppThemeID(storedValue: storedThemeID)
+    }
+
+    private func themeSelection(for themeID: AppThemeID) -> Binding<Bool> {
+        Binding(
+            get: { selectedThemeID == themeID },
+            set: { selected in
+                if selected {
+                    storedThemeID = themeID.rawValue
+                }
+            }
+        )
     }
 }

@@ -11,8 +11,12 @@ import SwiftUI
 /// are small). Artists render as a horizontal card row → artist page.
 struct SearchView: View {
     @Environment(AppModel.self) private var app
-    @State private var query = ""
+    @Environment(\.appTheme) private var theme
     @FocusState private var focused: Bool
+
+    private var query: String {
+        app.searchQuery
+    }
 
     private var results: [SpotifyClient.Track] {
         app.tracksByContext["search"] ?? []
@@ -34,18 +38,19 @@ struct SearchView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            searchField
-            Divider().overlay(Color(white: 0.18))
+            if theme.id != .classic2010 {
+                searchField
+                    .onAppear {
+                        focused = true
+                    }
+                    .onChange(of: app.searchFocusToken) {
+                        focused = true
+                    }
+                Divider().overlay(theme.colors.divider)
+            }
             content
         }
-        .background(Theme.background)
-        .onAppear {
-            // Restore across page switches (view is destroyed by RootView's
-            // switch; the model keeps query + cached results in sync).
-            if query.isEmpty { query = app.searchQuery }
-            focused = true
-        }
-        .onChange(of: app.searchFocusToken) { focused = true }
+        .background(theme.colors.contentBackground.swiftUIStyle)
     }
 
     // MARK: - Search field
@@ -53,8 +58,19 @@ struct SearchView: View {
     private var searchField: some View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
-                .foregroundStyle(Theme.textSecondary)
-            TextField("Search for songs or artists", text: $query)
+                .foregroundStyle(theme.colors.secondaryText)
+            TextField(
+                "Search for songs or artists",
+                text: Binding(
+                    get: { app.searchQuery },
+                    set: { value in
+                        app.searchQuery = value
+                        if Self.pastedTrackLinkID(value) == nil {
+                            app.searchDebounced(value)
+                        }
+                    }
+                )
+            )
                 .textFieldStyle(.plain)
                 .font(.system(size: 15))
                 .focused($focused)
@@ -74,35 +90,33 @@ struct SearchView: View {
             if app.isSearching {
                 ProgressView()
                     .controlSize(.small)
+                    .tint(theme.colors.accent)
             } else if !query.isEmpty {
                 Button(action: clearQuery) {
                     Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(Theme.textSecondary)
+                        .foregroundStyle(theme.colors.secondaryText)
                 }
                 .buttonStyle(.plain)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(Color(white: 0.13))
+        .padding(.horizontal, theme.metrics.fieldHorizontalPadding)
+        .padding(.vertical, theme.metrics.fieldVerticalPadding)
+        .background(theme.colors.inputBackground.swiftUIStyle)
         .overlay(
-            RoundedRectangle(cornerRadius: 4)
-                .strokeBorder(focused ? Theme.accent : Color(white: 0.20), lineWidth: 1)
+            RoundedRectangle(cornerRadius: theme.metrics.cornerRadius)
+                .strokeBorder(
+                    focused ? theme.colors.focusRing : theme.colors.border,
+                    lineWidth: 1
+                )
         )
-        .clipShape(RoundedRectangle(cornerRadius: 4))
-        .padding(.horizontal, 28)
-        .padding(.top, 24)
-        .padding(.bottom, 20)
-        .onChange(of: query) { _, new in
-            app.searchQuery = new
-            if Self.pastedTrackLinkID(new) == nil {
-                app.searchDebounced(new)
-            }
-        }
+        .clipShape(RoundedRectangle(cornerRadius: theme.metrics.cornerRadius))
+        .padding(.horizontal, theme.metrics.pageHorizontalInset)
+        .padding(.top, theme.metrics.pageTopInset)
+        .padding(.bottom, theme.metrics.pageBottomInset)
     }
 
     private func clearQuery() {
-        query = ""
+        app.searchQuery = ""
         app.search("")
         focused = true
     }
@@ -114,7 +128,12 @@ struct SearchView: View {
         if Self.pastedTrackLinkID(query) != nil {
             linkPlayCard
         } else if let error = app.tracksError["search"] {
-            messageState(icon: Image(systemName: "exclamationmark.triangle"), text: error, tint: .orange)
+            messageState(
+                icon: Image(systemName: "exclamationmark.triangle"),
+                text: error,
+                tint: theme.colors.error,
+                isError: true
+            )
         } else if trimmedQuery.isEmpty {
             messageState(
                 icon: Image(systemName: "magnifyingglass"),
@@ -125,8 +144,9 @@ struct SearchView: View {
             if app.isSearching {
                 VStack(spacing: 12) {
                     ProgressView()
+                        .tint(theme.colors.accent)
                     Text("Searching…")
-                        .foregroundStyle(Theme.textSecondary)
+                        .foregroundStyle(theme.colors.secondaryText)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -148,15 +168,15 @@ struct SearchView: View {
     private var resultsHeader: some View {
         HStack(spacing: 10) {
             Text("Songs")
-                .font(.system(size: 14, weight: .bold))
+                .font(theme.typography.sectionLabel)
             Text("\(results.count) results")
                 .font(.system(size: 11))
-                .foregroundStyle(Theme.textSecondary)
+                .foregroundStyle(theme.colors.secondaryText)
             Spacer()
         }
-        .padding(.horizontal, 28)
-        .padding(.top, 18)
-        .padding(.bottom, 6)
+        .padding(.horizontal, theme.metrics.pageHorizontalInset)
+        .padding(.top, theme.metrics.sectionTopPadding + 2)
+        .padding(.bottom, theme.metrics.sectionBottomPadding)
     }
 
     /// Direct play affordance for a pasted track link (URI box successor).
@@ -164,13 +184,13 @@ struct SearchView: View {
         VStack(spacing: 14) {
             Image(systemName: "link.circle.fill")
                 .font(.system(size: 40))
-                .foregroundStyle(Theme.textSecondary)
+                .foregroundStyle(theme.colors.secondaryText)
             Text("Track Link")
                 .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(theme.colors.primaryText)
             Text("Paste any Spotify track link or URI (https://open.spotify.com/track/… or spotify:track:…) and play it directly.")
                 .font(.system(size: 12))
-                .foregroundStyle(Theme.textSecondary)
+                .foregroundStyle(theme.colors.secondaryText)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 380)
             Button {
@@ -179,15 +199,19 @@ struct SearchView: View {
                 HStack(spacing: 6) {
                     Image(systemName: "play.fill")
                         .font(.system(size: 11, weight: .bold))
-                    Text("PLAY")
-                        .font(.system(size: 12, weight: .bold))
+                    Text("Play")
+                        .font(theme.typography.button)
                         .tracking(0.8)
                 }
-                .foregroundStyle(.black)
-                .padding(.horizontal, 22)
-                .padding(.vertical, 9)
-                .background(app.isPlaybackReady ? Theme.accent : Theme.accent.opacity(0.4))
-                .cornerRadius(20)
+                .foregroundStyle(theme.colors.inverseText)
+                .padding(.horizontal, theme.metrics.controlHorizontalPadding)
+                .padding(.vertical, theme.metrics.controlVerticalPadding)
+                .background(
+                    app.isPlaybackReady
+                        ? AnyShapeStyle(theme.colors.accent)
+                        : theme.colors.disabledSurface.swiftUIStyle
+                )
+                .cornerRadius(theme.metrics.pillCornerRadius)
             }
             .buttonStyle(.plain)
             .disabled(!app.isPlaybackReady)
@@ -195,7 +219,7 @@ struct SearchView: View {
             if let note = app.connectionNote {
                 Text(note)
                     .font(.system(size: 11))
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(theme.colors.warning)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -205,47 +229,59 @@ struct SearchView: View {
         icon: Image,
         text: String,
         subtext: String? = nil,
-        tint: Color = Theme.textSecondary
+        tint: Color? = nil,
+        isError: Bool = false
     ) -> some View {
         VStack(spacing: 10) {
             icon
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .frame(width: 34, height: 34)
-                .foregroundStyle(tint)
+                .foregroundStyle(tint ?? theme.colors.secondaryText)
             Text(text)
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(Theme.textSecondary)
+                .font(theme.typography.messageTitle)
+                .foregroundStyle(theme.colors.secondaryText)
             if let subtext {
                 Text(subtext)
                     .font(.system(size: 12))
-                    .foregroundStyle(Theme.textSecondary.opacity(0.7))
+                    .foregroundStyle(theme.colors.secondaryText.opacity(0.7))
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(
+            isError
+                ? theme.colors.errorContainer.swiftUIStyle
+                : AnyShapeStyle(Color.clear)
+        )
+        .overlay {
+            if isError {
+                RoundedRectangle(cornerRadius: theme.metrics.bannerCornerRadius)
+                    .strokeBorder(theme.colors.errorBorder, lineWidth: 1)
+            }
+        }
     }
     // MARK: - Artists
 
     private var artistsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Artists")
-                .font(.system(size: 14, weight: .bold))
-                .padding(.horizontal, 28)
+                .font(theme.typography.sectionLabel)
+                .padding(.horizontal, theme.metrics.pageHorizontalInset)
             // Horizontal strip above the vertical List — perpendicular axes,
             // so the single-scroll-region rule (no same-axis nesting) holds.
             // Capped at 10: the row is not lazy; every card mounts immediately.
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 12) {
+                HStack(spacing: theme.metrics.smallPadding + 4) {
                     ForEach(app.searchArtists.prefix(10)) { artist in
                         ArtistCard(artist: artist)
                     }
                 }
-                .padding(.horizontal, 28)
+                .padding(.horizontal, theme.metrics.pageHorizontalInset)
             }
             .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.top, 18)
-        .padding(.bottom, 4)
+        .padding(.top, theme.metrics.sectionTopPadding + 2)
+        .padding(.bottom, theme.metrics.sectionBottomPadding - 2)
     }
 }
 
@@ -253,9 +289,12 @@ struct SearchView: View {
 /// track rows — never in the list parent).
 private struct ArtistCard: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.appTheme) private var theme
     let artist: SpotifyClient.Artist
 
     @State private var hovering = false
+
+    private var artworkSize: CGFloat { theme.metrics.artistArtworkSize }
 
     var body: some View {
         Button {
@@ -264,18 +303,20 @@ private struct ArtistCard: View {
             VStack(spacing: 8) {
                 portrait
                 Text(artist.name)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white)
+                    .font(theme.typography.tileTitle)
+                    .foregroundStyle(theme.colors.primaryText)
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Text("Artist")
-                    .font(.system(size: 10))
-                    .foregroundStyle(Theme.textSecondary)
+                    .font(theme.typography.tileSubtitle)
+                    .foregroundStyle(theme.colors.secondaryText)
             }
-            .frame(width: 104)
-            .padding(8)
-            .background(hovering ? Color(white: 0.13) : .clear)
-            .cornerRadius(6)
+            .frame(width: artworkSize + theme.metrics.smallPadding * 2)
+            .padding(theme.metrics.smallPadding)
+            .background(
+                hovering ? theme.colors.cardHover.swiftUIStyle : AnyShapeStyle(Color.clear)
+            )
+            .cornerRadius(theme.metrics.cardCornerRadius)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -287,20 +328,21 @@ private struct ArtistCard: View {
 
     @ViewBuilder
     private var portrait: some View {
-        ArtworkView(url: artist.artworkURL, size: 88) {
+        ArtworkView(url: artist.artworkURL, size: artworkSize) {
             placeholderPortrait
         }
-        .frame(width: 88, height: 88)
+        .frame(width: artworkSize, height: artworkSize)
         .clipShape(Circle())
-        .shadow(color: .black.opacity(0.4), radius: 8, y: 4)
+        .shadow(color: theme.colors.shadow.opacity(0.4), radius: theme.metrics.shadowRadius, y: theme.metrics.shadowYOffset)
     }
 
     private var placeholderPortrait: some View {
         ZStack {
-            Color(white: 0.14)
+            Rectangle()
+                .fill(theme.colors.placeholderBackground.swiftUIStyle)
             Image(systemName: "person.crop.circle.fill")
-                .font(.system(size: 40))
-                .foregroundStyle(Theme.textSecondary)
+                .font(.system(size: artworkSize * 0.45))
+                .foregroundStyle(theme.colors.secondaryText)
         }
     }
 }

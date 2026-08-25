@@ -9,7 +9,16 @@ private enum TrackTableLayout {
     static let indexColumnWidth: CGFloat = 64
     static let albumColumnWidth: CGFloat = 260
     static let durationColumnWidth: CGFloat = 56
-    static let rowHorizontalInset: CGFloat = 24
+    static let classicIndexColumnWidth: CGFloat = 32
+    static let classicArtistColumnWidth: CGFloat = 170
+    static let classicAlbumColumnWidth: CGFloat = 220
+    static let classicDurationColumnWidth: CGFloat = 56
+    static let classicLikeColumnWidth: CGFloat = 30
+}
+
+enum TrackRowPresentation: Equatable {
+    case comfortable
+    case classic
 }
 
 /// Stable identity for one occurrence of a track. Playlists permit the same
@@ -44,6 +53,7 @@ private struct TrackOccurrence: Identifiable {
 /// Single click selects, double-click plays from the context.
 struct TrackListView: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.appTheme) private var theme
     let tracks: [SpotifyClient.Track]
     let contextKey: String
 
@@ -56,7 +66,9 @@ struct TrackListView: View {
                     TrackRow(
                         track: row.track,
                         index: row.index,
-                        contextKey: contextKey
+                        contextKey: contextKey,
+                        presentation: rowPresentation,
+                        isSelected: rowPresentation == .classic && selectedRowID == row.id
                     )
                     .tag(row.id)
                     .listRowInsets(EdgeInsets())
@@ -70,10 +82,28 @@ struct TrackListView: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
-        .environment(\.defaultMinListRowHeight, 40)
+        .environment(
+            \.defaultMinListRowHeight,
+            rowPresentation == .classic
+                ? theme.metrics.compactRowHeight
+                : theme.metrics.standardRowHeight
+        )
     }
 
+    private var rowPresentation: TrackRowPresentation {
+        theme.id == .classic2010 ? .classic : .comfortable
+    }
+
+    @ViewBuilder
     private var header: some View {
+        if rowPresentation == .classic {
+            classicHeader
+        } else {
+            darkHeader
+        }
+    }
+
+    private var darkHeader: some View {
         HStack(spacing: 0) {
             Text("#")
                 .frame(width: TrackTableLayout.indexColumnWidth, alignment: .center)
@@ -85,14 +115,41 @@ struct TrackListView: View {
                 .font(.system(size: 13, weight: .semibold))
                 .frame(width: TrackTableLayout.durationColumnWidth, alignment: .trailing)
         }
-        .font(.system(size: 10, weight: .bold))
+        .font(theme.typography.sectionHeader)
         .tracking(0.8)
-        .foregroundStyle(Theme.textSecondary)
-        .padding(.horizontal, TrackTableLayout.rowHorizontalInset)
-        .padding(.vertical, 8)
-        .background(Theme.background)
+        .foregroundStyle(theme.colors.secondaryText)
+        .padding(.horizontal, theme.metrics.sectionHorizontalInset)
+        .padding(.vertical, theme.metrics.smallPadding)
+        .background(theme.colors.contentBackground.swiftUIStyle)
         .overlay(alignment: .bottom) {
-            Divider().overlay(Color(white: 0.18))
+            Divider().overlay(theme.colors.divider)
+        }
+    }
+
+    private var classicHeader: some View {
+        HStack(spacing: 0) {
+            Text("#")
+                .frame(width: TrackTableLayout.classicIndexColumnWidth, alignment: .center)
+            Text("Track")
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text("Artist")
+                .frame(width: TrackTableLayout.classicArtistColumnWidth, alignment: .leading)
+            Text("Album")
+                .frame(width: TrackTableLayout.classicAlbumColumnWidth, alignment: .leading)
+            Text("Time")
+                .frame(width: TrackTableLayout.classicDurationColumnWidth, alignment: .trailing)
+            Image(systemName: "heart")
+                .accessibilityLabel("Liked Songs")
+                .frame(width: TrackTableLayout.classicLikeColumnWidth, alignment: .center)
+        }
+        .font(theme.typography.sectionHeader)
+        .tracking(0.5)
+        .foregroundStyle(theme.colors.secondaryText)
+        .padding(.horizontal, theme.metrics.sectionHorizontalInset)
+        .padding(.vertical, theme.metrics.smallPadding)
+        .background(theme.colors.raisedSurface.swiftUIStyle)
+        .overlay(alignment: .bottom) {
+            Divider().overlay(theme.colors.divider)
         }
     }
 }
@@ -100,7 +157,31 @@ struct TrackListView: View {
 /// Shared row (also used by ArtistDetailView's 10-row top-tracks list, which
 /// renders in a plain VStack inside a ScrollView — no NSTableView there).
 struct TrackRow: View {
+    let track: SpotifyClient.Track
+    let index: Int
+    let contextKey: String
+    var presentation: TrackRowPresentation = .comfortable
+    var isSelected = false
+
+    @ViewBuilder
+    var body: some View {
+        switch presentation {
+        case .comfortable:
+            ComfortableTrackRow(track: track, index: index, contextKey: contextKey)
+        case .classic:
+            ClassicTrackRow(
+                track: track,
+                index: index,
+                contextKey: contextKey,
+                isSelected: isSelected
+            )
+        }
+    }
+}
+
+private struct ComfortableTrackRow: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.appTheme) private var theme
     let track: SpotifyClient.Track
     let index: Int
     let contextKey: String
@@ -121,26 +202,26 @@ struct TrackRow: View {
                 } else if hovering {
                     Image(systemName: "play.fill")
                         .font(.system(size: 9))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(theme.colors.primaryText)
                 } else {
                     Text("\(index + 1)")
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(Theme.textSecondary)
+                        .font(theme.typography.trackIndex)
+                        .foregroundStyle(theme.colors.secondaryText)
                 }
             }
             .frame(width: TrackTableLayout.indexColumnWidth, alignment: .center)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(track.name)
-                    .font(.system(size: 13, weight: isCurrent ? .semibold : .regular))
-                    .foregroundStyle(isCurrent ? Theme.accent : .white)
+                    .font(isCurrent ? theme.typography.nowPlayingTitle : theme.typography.body)
+                    .foregroundStyle(isCurrent ? theme.colors.accent : theme.colors.primaryText)
                     .lineLimit(1)
                 if !track.artists.isEmpty {
                     artistLine
                 } else if let artist = track.artistDisplayText, !artist.isEmpty {
                     Text(artist)
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.textSecondary)
+                        .font(theme.typography.secondary)
+                        .foregroundStyle(theme.colors.secondaryText)
                         .lineLimit(1)
                 }
             }
@@ -149,9 +230,9 @@ struct TrackRow: View {
             albumCell
                 .frame(width: TrackTableLayout.albumColumnWidth, alignment: .leading)
 
-            Text(Theme.fmtTime(UInt32(track.durationMs)))
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(Theme.textSecondary)
+            Text(PlaybackTimeFormatter.string(fromMilliseconds: UInt32(track.durationMs)))
+                .font(theme.typography.duration)
+                .foregroundStyle(theme.colors.secondaryText)
                 .frame(width: TrackTableLayout.durationColumnWidth, alignment: .trailing)
 
             // Like toggle (M4.2): always visible when liked, ghost on hover.
@@ -160,7 +241,7 @@ struct TrackRow: View {
             } label: {
                 Image(systemName: isLiked ? "heart.fill" : "heart")
                     .font(.system(size: 11))
-                    .foregroundStyle(isLiked ? Theme.accent : Theme.textSecondary)
+                    .foregroundStyle(isLiked ? theme.colors.accent : theme.colors.secondaryText)
             }
             .buttonStyle(.plain)
             .disabled(!isLikeKnown)
@@ -168,55 +249,18 @@ struct TrackRow: View {
             .frame(width: 32, alignment: .center)
             .help(isLikeKnown ? (isLiked ? "Remove from Liked Songs" : "Save to Liked Songs") : "Checking Liked Songs…")
         }
-        .padding(.horizontal, TrackTableLayout.rowHorizontalInset)
-        .padding(.vertical, 7)
+        .padding(.horizontal, theme.metrics.sectionHorizontalInset)
+        .padding(.vertical, theme.metrics.trackRowVerticalPadding)
         .background(rowBackground)
         .contentShape(Rectangle())
         .contextMenu {
-            Button {
-                app.play(track: track, contextKey: contextKey, index: index)
-            } label: {
-                Label("Play", systemImage: "play")
-            }
-            .disabled(!app.isPlaybackReady)
-            Button {
-                app.addToQueue(track)
-            } label: {
-                Label("Add to Queue", systemImage: "text.badge.plus")
-            }
-            .disabled(!app.isPlaybackReady)
-            if !app.ownedPlaylists.isEmpty {
-                Menu {
-                    ForEach(app.ownedPlaylists) { playlist in
-                        Button {
-                            app.addToPlaylist(track, playlist: playlist)
-                        } label: {
-                            Text(playlist.name)
-                        }
-                        .disabled(app.isPlaylistAddInFlight(playlist.id))
-                    }
-                } label: {
-                    Label("Add to Playlist", systemImage: "music.note.list")
-                }
-            }
-            if isLikeKnown {
-                Button {
-                    app.toggleLike(track)
-                } label: {
-                    Label(
-                        isLiked ? "Remove from Liked Songs" : "Save to Liked Songs",
-                        systemImage: isLiked ? "heart.slash" : "heart"
-                    )
-                }
-            }
-            Divider()
-            Button {
-                let url = "https://open.spotify.com/track/\(track.id)"
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(url, forType: .string)
-            } label: {
-                Label("Copy Song Link", systemImage: "link")
-            }
+            TrackContextMenu(
+                track: track,
+                index: index,
+                contextKey: contextKey,
+                isLikeKnown: isLikeKnown,
+                isLiked: isLiked
+            )
         }
         .onTapGesture(count: 2) {
             // Mutating @Observable state synchronously here runs List's
@@ -242,19 +286,21 @@ struct TrackRow: View {
             ForEach(Array(track.artists.enumerated()), id: \.element.id) { index, artist in
                 if index > 0 {
                     Text(", ")
-                        .foregroundStyle(Theme.textSecondary)
+                        .foregroundStyle(theme.colors.secondaryText)
                 }
                 Button {
                     app.open(.artist(id: artist.id, name: artist.name, artworkURL: artist.artworkURL))
                 } label: {
                     Text(artist.name)
-                        .foregroundStyle(hovering ? .white : Theme.textSecondary)
+                        .foregroundStyle(
+                            hovering ? theme.colors.primaryText : theme.colors.secondaryText
+                        )
                 }
                 .buttonStyle(.plain)
                 .linkCursor()
             }
         }
-        .font(.system(size: 11))
+        .font(theme.typography.secondary)
         .lineLimit(1)
     }
 
@@ -270,29 +316,281 @@ struct TrackRow: View {
                     ))
                 } label: {
                     Text(track.albumName)
-                        .font(.system(size: 12))
-                        .foregroundStyle(hovering ? .white : Theme.textSecondary)
+                        .font(theme.typography.metadata)
+                        .foregroundStyle(
+                            hovering ? theme.colors.primaryText : theme.colors.secondaryText
+                        )
                         .lineLimit(1)
                 }
                 .buttonStyle(.plain)
                 .linkCursor()
             } else {
                 Text(track.albumName)
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.textSecondary)
+                    .font(theme.typography.metadata)
+                    .foregroundStyle(theme.colors.secondaryText)
                     .lineLimit(1)
             }
         }
     }
 
-    private var rowBackground: Color {
-        if hovering && !isCurrent { return Theme.hover }
-        return .clear
+    private var rowBackground: AnyShapeStyle {
+        if isCurrent { return theme.colors.rowCurrent.swiftUIStyle }
+        if hovering { return theme.colors.rowHover.swiftUIStyle }
+        return AnyShapeStyle(Color.clear)
+    }
+}
+
+/// Classic one-line table row. The table keeps the same List recycling and
+/// interaction contract as the comfortable presentation while assigning
+/// artist and album to their own truncating columns.
+private struct ClassicTrackRow: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.appTheme) private var theme
+    let track: SpotifyClient.Track
+    let index: Int
+    let contextKey: String
+    let isSelected: Bool
+
+    @State private var hovering = false
+
+    private var isCurrent: Bool { app.nowPlaying?.uri == track.uri }
+    private var isLikeKnown: Bool { app.isLikeKnown(track.id) }
+    private var isLiked: Bool { app.likedIDs.contains(track.id) }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            stateCell
+                .frame(width: TrackTableLayout.classicIndexColumnWidth)
+
+            Text(track.name)
+                .font(isCurrent ? theme.typography.nowPlayingTitle : theme.typography.body)
+                .foregroundStyle(isCurrent ? theme.colors.accent : theme.colors.primaryText)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .clipped()
+
+            artistCell
+                .frame(width: TrackTableLayout.classicArtistColumnWidth, alignment: .leading)
+                .clipped()
+
+            albumCell
+                .frame(width: TrackTableLayout.classicAlbumColumnWidth, alignment: .leading)
+                .clipped()
+
+            Text(PlaybackTimeFormatter.string(fromMilliseconds: UInt32(track.durationMs)))
+                .font(theme.typography.duration)
+                .foregroundStyle(theme.colors.secondaryText)
+                .frame(width: TrackTableLayout.classicDurationColumnWidth, alignment: .trailing)
+
+            likeButton
+                .frame(width: TrackTableLayout.classicLikeColumnWidth, alignment: .center)
+        }
+        .padding(.horizontal, theme.metrics.sectionHorizontalInset)
+        .padding(.vertical, theme.metrics.trackRowVerticalPadding)
+        .background(rowBackground)
+        .overlay(alignment: .leading) {
+            if isSelected {
+                Rectangle()
+                    .fill(theme.colors.focusRing)
+                    .frame(width: 2)
+            }
+        }
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .contain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityLabel(accessibilitySummary)
+        .accessibilityHint("Double-click to play. Use the context menu for more actions.")
+        .contextMenu {
+            TrackContextMenu(
+                track: track,
+                index: index,
+                contextKey: contextKey,
+                isLikeKnown: isLikeKnown,
+                isLiked: isLiked
+            )
+        }
+        .onTapGesture(count: 2) {
+            Task { @MainActor in
+                app.play(track: track, contextKey: contextKey, index: index)
+            }
+        }
+        .onHover { hovering = $0 }
+        .onAppear {
+            app.requestLikedState(track.id)
+        }
+    }
+
+    private var stateCell: some View {
+        Group {
+            if isCurrent, app.isPlaying {
+                EqIndicator()
+                    .frame(width: 14, height: 14)
+            } else if hovering {
+                Image(systemName: "play.fill")
+                    .font(.system(size: 8))
+                    .foregroundStyle(theme.colors.primaryText)
+            } else {
+                Text("\(index + 1)")
+                    .font(theme.typography.trackIndex)
+                    .foregroundStyle(theme.colors.secondaryText)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
+        .accessibilityLabel(isCurrent && app.isPlaying ? "Currently playing" : "Track \(index + 1)")
+    }
+
+    @ViewBuilder
+    private var artistCell: some View {
+        if track.artists.isEmpty {
+            Text(track.artistDisplayText ?? "")
+                .font(theme.typography.metadata)
+                .foregroundStyle(theme.colors.secondaryText)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        } else {
+            HStack(spacing: 0) {
+                ForEach(Array(track.artists.enumerated()), id: \.element.id) { index, artist in
+                    if index > 0 {
+                        Text(", ")
+                            .foregroundStyle(theme.colors.secondaryText)
+                    }
+                    Button {
+                        app.open(.artist(id: artist.id, name: artist.name, artworkURL: artist.artworkURL))
+                    } label: {
+                        Text(artist.name)
+                            .foregroundStyle(hovering ? theme.colors.primaryText : theme.colors.secondaryText)
+                            .lineLimit(1)
+                    }
+                    .buttonStyle(.plain)
+                    .linkCursor()
+                }
+            }
+            .font(theme.typography.metadata)
+            .lineLimit(1)
+            .clipped()
+        }
+    }
+
+    private var albumCell: some View {
+        Group {
+            if let albumID = track.albumId, !albumID.isEmpty {
+                Button {
+                    app.open(.album(
+                        id: albumID,
+                        name: track.albumName,
+                        subtitle: track.artists.map(\.name).joined(separator: ", "),
+                        artworkURL: track.artworkURL
+                    ))
+                } label: {
+                    Text(track.albumName)
+                        .font(theme.typography.metadata)
+                        .foregroundStyle(hovering ? theme.colors.primaryText : theme.colors.secondaryText)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                .buttonStyle(.plain)
+                .linkCursor()
+            } else {
+                Text(track.albumName)
+                    .font(theme.typography.metadata)
+                    .foregroundStyle(theme.colors.secondaryText)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+        }
+        .clipped()
+    }
+
+    private var likeButton: some View {
+        Button {
+            app.toggleLike(track)
+        } label: {
+            Image(systemName: isLiked ? "heart.fill" : "heart")
+                .font(.system(size: 10))
+                .foregroundStyle(isLiked ? theme.colors.accent : theme.colors.secondaryText)
+        }
+        .buttonStyle(.plain)
+        .disabled(!isLikeKnown)
+        .opacity(isLikeKnown ? (isLiked || hovering ? 1 : 0) : 0)
+        .help(isLikeKnown ? (isLiked ? "Remove from Liked Songs" : "Save to Liked Songs") : "Checking Liked Songs…")
+        .accessibilityLabel(isLiked ? "Remove from Liked Songs" : "Save to Liked Songs")
+    }
+
+    private var rowBackground: AnyShapeStyle {
+        if isSelected { return theme.colors.rowSelected.swiftUIStyle }
+        if isCurrent { return theme.colors.rowCurrent.swiftUIStyle }
+        if hovering { return theme.colors.rowHover.swiftUIStyle }
+        return AnyShapeStyle(Color.clear)
+    }
+
+    private var accessibilitySummary: String {
+        let artist = track.artistDisplayText ?? "Unknown artist"
+        return "\(track.name), \(artist), \(track.albumName), \(PlaybackTimeFormatter.string(fromMilliseconds: UInt32(track.durationMs)))"
+    }
+}
+
+private struct TrackContextMenu: View {
+    @Environment(AppModel.self) private var app
+    let track: SpotifyClient.Track
+    let index: Int
+    let contextKey: String
+    let isLikeKnown: Bool
+    let isLiked: Bool
+
+    @ViewBuilder
+    var body: some View {
+        Button {
+            app.play(track: track, contextKey: contextKey, index: index)
+        } label: {
+            Label("Play", systemImage: "play")
+        }
+        .disabled(!app.isPlaybackReady)
+        Button {
+            app.addToQueue(track)
+        } label: {
+            Label("Add to Queue", systemImage: "text.badge.plus")
+        }
+        .disabled(!app.isPlaybackReady)
+        if !app.ownedPlaylists.isEmpty {
+            Menu {
+                ForEach(app.ownedPlaylists) { playlist in
+                    Button {
+                        app.addToPlaylist(track, playlist: playlist)
+                    } label: {
+                        Text(playlist.name)
+                    }
+                    .disabled(app.isPlaylistAddInFlight(playlist.id))
+                }
+            } label: {
+                Label("Add to Playlist", systemImage: "music.note.list")
+            }
+        }
+        if isLikeKnown {
+            Button {
+                app.toggleLike(track)
+            } label: {
+                Label(
+                    isLiked ? "Remove from Liked Songs" : "Save to Liked Songs",
+                    systemImage: isLiked ? "heart.slash" : "heart"
+                )
+            }
+        }
+        Divider()
+        Button {
+            let url = "https://open.spotify.com/track/\(track.id)"
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(url, forType: .string)
+        } label: {
+            Label("Copy Song Link", systemImage: "link")
+        }
     }
 }
 
 /// The classic three-bar equalizer animation for the playing row.
 private struct EqIndicator: View {
+    @Environment(\.appTheme) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var animate = false
 
     var body: some View {
@@ -307,13 +605,15 @@ private struct EqIndicator: View {
 
     private func bar(phase: CGFloat, delay: Double) -> some View {
         RoundedRectangle(cornerRadius: 1)
-            .fill(Theme.accent)
+            .fill(theme.colors.accent)
             .frame(width: 3, height: 12)
-            .scaleEffect(y: animate ? phase : 0.8, anchor: .bottom)
+            .scaleEffect(y: reduceMotion ? 1 : (animate ? phase : 0.8), anchor: .bottom)
             .animation(
-                animate
-                    ? .easeInOut(duration: 0.35).repeatForever(autoreverses: true).delay(delay)
-                    : .default,
+                reduceMotion
+                    ? nil
+                    : (animate
+                        ? .easeInOut(duration: 0.35).repeatForever(autoreverses: true).delay(delay)
+                        : .default),
                 value: animate
             )
     }

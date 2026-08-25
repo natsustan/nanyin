@@ -12,6 +12,10 @@ LIBRESPOT_PATCHES=(
     "$ROOT_DIR/patches/librespot-auth-error-classification.patch"
     "$ROOT_DIR/patches/librespot-audio-progress.patch"
 )
+source "$ROOT_DIR/script/vendor_choutiui.sh"
+CHOUTIUI_DIR="$ROOT_DIR/research-repos/ChouTiUI"
+CHOUTI_DIR="$ROOT_DIR/research-repos/ChouTi"
+COMPOSEUI_DIR="$ROOT_DIR/research-repos/ComposeUI"
 XCODE_PROJECT_FILE="$ROOT_DIR/Nanyin.xcodeproj/project.pbxproj"
 
 export PATH="$HOME/.local/share/mise/shims:$HOME/.cargo/bin:$PATH"
@@ -45,6 +49,121 @@ for patch in "${LIBRESPOT_PATCHES[@]}"; do
         || fail "required librespot patch is not applied exactly: ${patch##*/}"
 done
 
+step "checking vendored ChouTiUI wiring"
+[[ -d "$CHOUTIUI_DIR/.git" ]] || fail "research-repos/ChouTiUI checkout is missing; run script/vendor_choutiui.sh"
+[[ -d "$CHOUTI_DIR/.git" ]] || fail "research-repos/ChouTi checkout is missing; run script/vendor_choutiui.sh"
+[[ -d "$COMPOSEUI_DIR/.git" ]] || fail "research-repos/ComposeUI checkout is missing; run script/vendor_choutiui.sh"
+[[ "$(git -C "$CHOUTIUI_DIR" rev-parse HEAD^)" == "$CHOUTIUI_SHA" ]] \
+    || fail "ChouTiUI is not based on the pinned revision"
+[[ "$(git -C "$CHOUTI_DIR" rev-parse HEAD)" == "$CHOUTI_SHA" ]] \
+    || fail "ChouTi is not at the pinned revision"
+[[ "$(git -C "$COMPOSEUI_DIR" rev-parse HEAD)" == "$COMPOSEUI_SHA" ]] \
+    || fail "ComposeUI is not at the pinned revision"
+for checkout in "$CHOUTIUI_DIR" "$CHOUTI_DIR" "$COMPOSEUI_DIR"; do
+    [[ -z "$(git -C "$checkout" status --porcelain)" ]] \
+        || fail "${checkout##*/} vendored checkout has local changes"
+done
+git -C "$CHOUTIUI_DIR" apply --reverse --check "$CHOUTIUI_PATCH" \
+    || fail "required ChouTiUI path-dependency patch is not applied exactly"
+rg -q '\.package\(path: "\.\./ChouTi"\)' "$CHOUTIUI_DIR/Package.swift" \
+    || fail "ChouTiUI is not wired to the vendored ChouTi checkout"
+rg -q '\.package\(path: "\.\./ComposeUI"\)' "$CHOUTIUI_DIR/Package.swift" \
+    || fail "ChouTiUI is not wired to the vendored ComposeUI checkout"
+rg -q 'path: research-repos/ChouTiUI' "$ROOT_DIR/project.yml" \
+    || fail "project.yml is not wired to the vendored ChouTiUI package"
+while IFS= read -r source; do
+    [[ "$source" == "$ROOT_DIR/NanyinApp/Classic/Chrome/"* ]] \
+        || fail "ChouTiUI import escaped Classic/Chrome: ${source#"$ROOT_DIR/"}"
+    ! rg -q '^import SwiftUI$' "$source" \
+        || fail "file imports both ChouTiUI and SwiftUI: ${source#"$ROOT_DIR/"}"
+done < <(rg -l '^import ChouTiUI$' "$ROOT_DIR/NanyinApp" -g '*.swift')
+
+step "checking offline Classic Chrome preview harness"
+CHROME_PREVIEW="$ROOT_DIR/NanyinApp/Classic/Bridge/ClassicChromePreviewHarness.swift"
+CHROME_STYLE="$ROOT_DIR/NanyinApp/Classic/Bridge/ChromeStyle.swift"
+[[ -f "$CHROME_PREVIEW" ]] || fail "Classic Chrome preview harness is missing"
+[[ -f "$CHROME_STYLE" ]] || fail "Classic Chrome style contract is missing"
+! rg -q '^import (SwiftUI|ChouTiUI)$' "$CHROME_STYLE" \
+    || fail "Classic Chrome style contract depends on a UI framework"
+rg -q 'ClassicChromePreviewHarness' "$CHROME_PREVIEW" \
+    || fail "Classic Chrome preview harness declaration is missing"
+for state in Default Hovered Pressed Disabled; do
+    rg -q "$state" "$CHROME_PREVIEW" \
+        || fail "Classic Chrome preview harness is missing a required state"
+done
+rg -q 'List' "$CHROME_PREVIEW" \
+    || fail "Classic Chrome preview harness does not exercise List independence"
+rg -q 'fixedSize\(\)' "$ROOT_DIR/NanyinApp/Classic/Bridge/ChromeButton.swift" \
+    || fail "Classic Chrome button preview does not exercise intrinsic sizing"
+! rg -q 'ClassicChromeButtonConfiguration' "$ROOT_DIR/NanyinApp/Classic" \
+    || fail "Classic Chrome bridge still exposes the old implementation configuration"
+
+step "checking shell and playback ownership seams"
+for source in \
+    "$ROOT_DIR/NanyinApp/Views/AppContentView.swift" \
+    "$ROOT_DIR/NanyinApp/Views/NanyinDarkShell.swift" \
+    "$ROOT_DIR/NanyinApp/Views/Classic2010Shell.swift" \
+    "$ROOT_DIR/NanyinApp/Views/ClassicTitleBarControls.swift" \
+    "$ROOT_DIR/NanyinApp/Classic/Bridge/ClassicTitleBarBridge.swift" \
+    "$ROOT_DIR/NanyinApp/Views/ClassicShellGeometryFixture.swift"; do
+    [[ -f "$source" ]] || fail "required shell source is missing: ${source##*/}"
+done
+rg -q 'AppContentView\(\)' "$ROOT_DIR/NanyinApp/Views/NanyinDarkShell.swift" \
+    || fail "shared AppContentView is not owned by the shell scaffold"
+rg -q 'app\.searchQuery' "$ROOT_DIR/NanyinApp/Views/SearchView.swift" \
+    || fail "SearchView is not bound to the shared search query"
+rg -q 'ChromeSliderTrack' "$ROOT_DIR/NanyinApp/Views/PlayerBar.swift" \
+    || fail "Classic playback deck is missing the chrome slider bridge"
+[[ "$(rg -c 'task\(id: app\.nowPlaying\?\.uri\)' "$ROOT_DIR/NanyinApp/Views/PlayerBar.swift")" == "1" ]] \
+    || fail "PlayerBar must retain exactly one local playback-position ticker"
+for size in '900, height: 600' '1280, height: 800' '1600, height: 900'; do
+    rg -q "$size" "$ROOT_DIR/NanyinApp/Views/ClassicShellGeometryFixture.swift" \
+        || fail "Classic shell geometry fixture is missing a required canvas size"
+done
+
+step "checking Classic content seams"
+rg -q 'ClassicTrackRow' "$ROOT_DIR/NanyinApp/Views/TrackListView.swift" \
+    || fail "Classic track table row is missing"
+rg -q 'classicArtistColumnWidth' "$ROOT_DIR/NanyinApp/Views/TrackListView.swift" \
+    || fail "Classic track table is missing the dedicated artist column"
+rg -q 'searchField' "$ROOT_DIR/NanyinApp/Views/SearchView.swift" \
+    || fail "SearchView is missing its page-owned search field"
+for source in \
+    "$ROOT_DIR/NanyinApp/Views/PlaylistDetailView.swift" \
+    "$ROOT_DIR/NanyinApp/Views/ArtistDetailView.swift" \
+    "$ROOT_DIR/NanyinApp/Views/QueueView.swift" \
+    "$ROOT_DIR/NanyinApp/Views/LoginView.swift" \
+    "$ROOT_DIR/NanyinApp/Views/NewPlaylistSheet.swift"; do
+    rg -q 'classic2010|ChromeSectionBar' "$source" \
+        || fail "Classic content presentation is missing: ${source##*/}"
+done
+rg -q 'collectionGridMinimum' "$ROOT_DIR/NanyinApp/Views/HomeView.swift" \
+    || fail "Home library grid is not theme-density aware"
+rg -q 'collectionGridMinimum' "$ROOT_DIR/NanyinApp/Views/SavedAlbumsView.swift" \
+    || fail "Saved Albums grid is not theme-density aware"
+
+step "checking offline visual calibration fixture"
+VISUAL_FIXTURE="$ROOT_DIR/NanyinApp/Views/ThemeVisualFixture.swift"
+[[ -f "$VISUAL_FIXTURE" ]] || fail "offline theme visual fixture is missing"
+rg -q 'ThemeVisualStateMatrix' "$VISUAL_FIXTURE" \
+    || fail "offline theme state matrix is missing"
+! rg -q 'AppModel|SpotifyClient|KeychainStore|SpotifyAuth|NanyinCore' "$VISUAL_FIXTURE" \
+    || fail "offline visual fixture depends on runtime or credential state"
+for state in Default Hovered Pressed Disabled Selected Current Empty Loading Error 'Long text'; do
+    rg -q "$state" "$VISUAL_FIXTURE" \
+        || fail "offline visual fixture is missing state: $state"
+done
+for scale in 'displayScale, 1' 'displayScale, 2'; do
+    rg -q "$scale" "$VISUAL_FIXTURE" \
+        || fail "offline visual fixture is missing backing-scale preview: $scale"
+done
+rg -q 'accessibilityReduceMotion' "$ROOT_DIR/NanyinApp/Views/ArtworkView.swift" \
+    || fail "artwork transitions do not honor Reduce Motion"
+rg -q 'accessibilityReduceMotion' "$ROOT_DIR/NanyinApp/Views/TrackListView.swift" \
+    || fail "track current-playing animation does not honor Reduce Motion"
+rg -q 'accessibilityReduceMotion' "$ROOT_DIR/NanyinApp/Views/QueueView.swift" \
+    || fail "queue current-playing animation does not honor Reduce Motion"
+
 command -v mise >/dev/null 2>&1 || fail "mise is required"
 command -v xcrun >/dev/null 2>&1 || fail "Xcode command-line tools are required"
 
@@ -76,6 +195,16 @@ xcrun swiftc \
     "$ROOT_DIR/Tests/StateReducerTests.swift" \
     -o "$state_test_dir/state-reducer-tests"
 "$state_test_dir/state-reducer-tests"
+
+step "running theme preference tests"
+xcrun swiftc \
+    "$ROOT_DIR/NanyinApp/Classic/Bridge/ChromeStyle.swift" \
+    "$ROOT_DIR/NanyinApp/Views/Theme.swift" \
+    "$ROOT_DIR/Tests/ThemePreferenceTests.swift" \
+    -framework AppKit \
+    -framework SwiftUI \
+    -o "$state_test_dir/theme-preference-tests"
+"$state_test_dir/theme-preference-tests"
 
 step "running artwork cache tests"
 xcrun swiftc \

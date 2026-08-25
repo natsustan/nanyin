@@ -7,6 +7,7 @@ import SwiftUI
 
 struct PlayerBar: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.appTheme) private var theme
     @State private var draggingProgress: Double?
     /// Now-playing block hover — brightens the artist link (M4.1).
     @State private var npHover = false
@@ -15,30 +16,62 @@ struct PlayerBar: View {
     @State private var displayPosition: UInt32 = 0
 
     var body: some View {
+        content
+            .task(id: app.nowPlaying?.uri) {
+                displayPosition = app.playbackPositionMs
+                while !Task.isCancelled {
+                    if draggingProgress == nil {
+                        let p = app.playbackPositionMs
+                        if p != displayPosition { displayPosition = p }
+                    }
+                    try? await Task.sleep(for: .milliseconds(400))
+                }
+            }
+            .onChange(of: app.isPlaybackReady) { _, ready in
+                if !ready { draggingProgress = nil }
+            }
+            .onChange(of: app.nowPlaying?.uri) { _, _ in
+                draggingProgress = nil
+            }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch theme.id {
+        case .nanyinDark:
+            darkContent
+        case .classic2010:
+            classicContent
+        }
+    }
+
+    private var darkContent: some View {
         HStack(spacing: 0) {
             // Now playing (left)
             HStack(spacing: 12) {
                 artwork
                     .frame(width: 52, height: 52)
-                    .cornerRadius(4)
+                    .cornerRadius(theme.metrics.cornerRadius)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(app.nowPlaying?.title ?? "Not playing")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .font(theme.typography.playerTitle)
+                        .foregroundStyle(theme.colors.primaryText)
                         .lineLimit(1)
                     if let np = app.nowPlaying {
                         if np.artist.isEmpty {
                             Text("—")
-                                .font(.system(size: 11))
-                                .foregroundStyle(Theme.textSecondary)
+                                .font(theme.typography.secondary)
+                                .foregroundStyle(theme.colors.secondaryText)
                                 .lineLimit(1)
                         } else {
                             Button {
                                 app.openNowPlayingArtist()
                             } label: {
                                 Text(np.artist)
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(npHover ? .white : Theme.textSecondary)
+                                    .font(theme.typography.secondary)
+                                    .foregroundStyle(
+                                        npHover ? theme.colors.primaryText : theme.colors.secondaryText
+                                    )
                                     .lineLimit(1)
                             }
                             .buttonStyle(.plain)
@@ -46,8 +79,8 @@ struct PlayerBar: View {
                         }
                     } else {
                         Text("—")
-                            .font(.system(size: 11))
-                            .foregroundStyle(Theme.textSecondary)
+                            .font(theme.typography.secondary)
+                            .foregroundStyle(theme.colors.secondaryText)
                             .lineLimit(1)
                     }
                 }
@@ -61,12 +94,12 @@ struct PlayerBar: View {
                     } label: {
                         Image(systemName: liked ? "heart.fill" : "heart")
                             .font(.system(size: 12))
-                            .foregroundStyle(liked ? Theme.accent : Theme.textSecondary)
+                            .foregroundStyle(liked ? theme.colors.accent : theme.colors.secondaryText)
                     }
                     .buttonStyle(.plain)
                     .disabled(!known)
                     .opacity(known ? 1 : 0.35)
-                    .padding(.leading, 4)
+                    .padding(.leading, theme.metrics.likeButtonLeadingPadding)
                     .help(known ? (liked ? "Remove from Liked Songs" : "Save to Liked Songs") : "Checking Liked Songs…")
                     .task(id: id) {
                         app.requestLikedState(id)
@@ -74,7 +107,7 @@ struct PlayerBar: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.leading, 16)
+            .padding(.leading, theme.metrics.sidebarInset)
             .onHover { npHover = $0 }
 
             // Transport (center)
@@ -84,8 +117,8 @@ struct PlayerBar: View {
                         app.toggleShuffle()
                     } label: {
                         Image(systemName: "shuffle")
-                            .font(.system(size: 11))
-                            .foregroundStyle(app.shuffle ? Theme.accent : Theme.textSecondary)
+                            .font(theme.typography.compact)
+                            .foregroundStyle(app.shuffle ? theme.colors.accent : theme.colors.secondaryText)
                     }
                     .buttonStyle(.plain)
 
@@ -95,7 +128,7 @@ struct PlayerBar: View {
                     } label: {
                         Image(systemName: app.isPlaying ? "pause.fill" : "play.fill")
                             .font(.system(size: 18, weight: .bold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(theme.colors.primaryText)
                     }
                     .buttonStyle(.plain)
                     button("forward.fill") { app.next() }
@@ -104,25 +137,29 @@ struct PlayerBar: View {
                         app.cycleRepeat()
                     } label: {
                         Image(systemName: app.repeatMode == .one ? "repeat.1" : "repeat")
-                            .font(.system(size: 11))
-                            .foregroundStyle(app.repeatMode == .off ? Theme.textSecondary : Theme.accent)
+                            .font(theme.typography.secondary)
+                            .foregroundStyle(
+                                app.repeatMode == .off
+                                    ? theme.colors.secondaryText
+                                    : theme.colors.accent
+                            )
                     }
                     .buttonStyle(.plain)
                 }
                 .disabled(!app.isPlaybackReady)
 
                 HStack(spacing: 8) {
-                    Text(Theme.fmtTime(effectivePosition))
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(Theme.textSecondary)
+                    Text(PlaybackTimeFormatter.string(fromMilliseconds: effectivePosition))
+                        .font(theme.typography.mono)
+                        .foregroundStyle(theme.colors.secondaryText)
                         .frame(width: 34, alignment: .trailing)
 
                     slider
                         .allowsHitTesting(app.isPlaybackReady)
 
-                    Text(Theme.fmtTime(max(app.durationMs, 0)))
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(Theme.textSecondary)
+                    Text(PlaybackTimeFormatter.string(fromMilliseconds: max(app.durationMs, 0)))
+                        .font(theme.typography.mono)
+                        .foregroundStyle(theme.colors.secondaryText)
                         .frame(width: 34, alignment: .leading)
                 }
             }
@@ -136,15 +173,15 @@ struct PlayerBar: View {
                     Image(systemName: "list.bullet")
                         .font(.system(size: 12))
                         .foregroundStyle(
-                            app.page == .queue ? Theme.accent : Theme.textSecondary
+                            app.page == .queue ? theme.colors.accent : theme.colors.secondaryText
                         )
                 }
                 .buttonStyle(.plain)
                 .help("Queue")
 
                 Image(systemName: "speaker.fill")
-                    .font(.system(size: 10))
-                    .foregroundStyle(Theme.textSecondary)
+                    .font(theme.typography.compact)
+                    .foregroundStyle(theme.colors.secondaryText)
                 Slider(value: Binding(
                     get: { app.volume },
                     set: { app.setVolume($0) }
@@ -154,33 +191,162 @@ struct PlayerBar: View {
                 .disabled(!app.isPlaybackReady)
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
-            .padding(.trailing, 16)
+            .padding(.trailing, theme.metrics.sidebarInset)
         }
-        .background(Theme.playerBar)
-        .task(id: app.nowPlaying?.uri) {
-            displayPosition = 0
-            while !Task.isCancelled {
-                if draggingProgress == nil {
-                    let p = app.playbackPositionMs
-                    if p != displayPosition { displayPosition = p }
-                }
-                try? await Task.sleep(for: .milliseconds(400))
+        .background(theme.colors.playerBackground.swiftUIStyle)
+    }
+
+    private var classicContent: some View {
+        HStack(spacing: 0) {
+            HStack(spacing: 5) {
+                ChromeButton(
+                    title: "",
+                    accessibilityLabel: "Previous track",
+                    symbolName: "backward.fill",
+                    style: ChromeStyle(role: .transport, size: CGSize(width: 24, height: 24)),
+                    action: app.prev
+                )
+                ChromeButton(
+                    title: "",
+                    accessibilityLabel: app.isPlaying ? "Pause" : "Play",
+                    symbolName: app.isPlaying ? "pause.fill" : "play.fill",
+                    style: ChromeStyle(role: .transport, size: CGSize(width: 28, height: 28)),
+                    action: app.togglePlay
+                )
+                ChromeButton(
+                    title: "",
+                    accessibilityLabel: "Next track",
+                    symbolName: "forward.fill",
+                    style: ChromeStyle(role: .transport, size: CGSize(width: 24, height: 24)),
+                    action: app.next
+                )
+
+                Spacer(minLength: 6)
+
+                Slider(value: Binding(
+                    get: { app.volume },
+                    set: { app.setVolume($0) }
+                ), in: 0 ... 1)
+                .controlSize(.mini)
+                .frame(width: 68)
+                .disabled(!app.isPlaybackReady)
+
+                Image(systemName: "speaker.wave.2.fill")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(theme.colors.secondaryText)
+            }
+            .disabled(!app.isPlaybackReady)
+            .padding(.horizontal, 10)
+            .frame(width: theme.metrics.sidebarWidth)
+            .overlay(alignment: .trailing) {
+                Rectangle()
+                    .fill(theme.colors.shadow.opacity(0.48))
+                    .frame(width: 1)
+            }
+
+            HStack(spacing: 8) {
+                Text(PlaybackTimeFormatter.string(fromMilliseconds: effectivePosition))
+                    .font(theme.typography.mono)
+                    .foregroundStyle(theme.colors.secondaryText)
+                    .frame(width: 34, alignment: .trailing)
+
+                ChromeSliderTrack(
+                    style: ChromeSliderStyle(
+                        size: CGSize(width: 220, height: 10),
+                        fraction: progressFraction,
+                        isEnabled: app.isPlaybackReady
+                    ),
+                    fillsAvailableWidth: true,
+                    onChanged: { draggingProgress = $0 },
+                    onEnded: {
+                        app.seek(to: $0)
+                        draggingProgress = nil
+                    },
+                    onCancelled: { draggingProgress = nil }
+                )
+
+                Text(PlaybackTimeFormatter.string(fromMilliseconds: max(app.durationMs, 0)))
+                    .font(theme.typography.mono)
+                    .foregroundStyle(theme.colors.secondaryText)
+                    .frame(width: 34, alignment: .leading)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 10)
+            .overlay(alignment: .trailing) {
+                Rectangle()
+                    .fill(theme.colors.shadow.opacity(0.48))
+                    .frame(width: 1)
+            }
+
+            HStack(spacing: 0) {
+                classicActionButton(
+                    "shuffle",
+                    help: "Shuffle",
+                    isActive: app.shuffle,
+                    isEnabled: app.isPlaybackReady,
+                    action: app.toggleShuffle
+                )
+                classicActionButton(
+                    app.repeatMode == .one ? "repeat.1" : "repeat",
+                    help: "Repeat",
+                    isActive: app.repeatMode != .off,
+                    isEnabled: app.isPlaybackReady,
+                    action: app.cycleRepeat
+                )
+                classicActionButton(
+                    "list.bullet",
+                    help: "Queue",
+                    isActive: app.page == .queue,
+                    action: { app.open(.queue) }
+                )
             }
         }
+        .background {
+            ChromeSectionBar(style: ChromeSectionBarStyle(height: theme.metrics.playerBarHeight))
+        }
+    }
+
+    private func classicActionButton(
+        _ symbol: String,
+        help: String,
+        isActive: Bool,
+        isEnabled: Bool = true,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(isActive ? theme.colors.accent : theme.colors.secondaryText)
+                .frame(width: 40, height: theme.metrics.playerBarHeight)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(ThemePressFeedbackButtonStyle())
+        .disabled(!isEnabled)
+        .overlay(alignment: .trailing) {
+            Rectangle()
+                .fill(theme.colors.shadow.opacity(0.48))
+                .frame(width: 1)
+        }
+        .help(help)
     }
 
     private var effectivePosition: UInt32 {
         min(draggingProgress.map { UInt32($0 * Double(max(app.durationMs, 1))) } ?? displayPosition, max(app.durationMs, 0))
     }
 
+    private var progressFraction: Double {
+        guard app.durationMs > 0 else { return 0 }
+        return min(max(Double(effectivePosition) / Double(app.durationMs), 0), 1)
+    }
+
     private var slider: some View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
                 Capsule()
-                    .fill(Color(white: 0.28))
+                    .fill(theme.colors.sliderTrack)
                     .frame(height: 4)
                 Capsule()
-                    .fill(Theme.accent)
+                    .fill(theme.colors.accent)
                     .frame(width: progressWidth(geo), height: 4)
             }
             .frame(height: geo.size.height)
@@ -199,6 +365,27 @@ struct PlayerBar: View {
             )
         }
         .frame(width: 220, height: 12)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Playback progress")
+        .accessibilityValue(
+            Text(
+                "\(PlaybackTimeFormatter.string(fromMilliseconds: effectivePosition)) of "
+                    + PlaybackTimeFormatter.string(fromMilliseconds: max(app.durationMs, 0))
+            )
+        )
+        .disabled(!app.isPlaybackReady)
+        .accessibilityAdjustableAction { direction in
+            guard app.isPlaybackReady, app.durationMs > 0 else { return }
+            let step = 0.05
+            switch direction {
+            case .increment:
+                app.seek(to: min(progressFraction + step, 1))
+            case .decrement:
+                app.seek(to: max(progressFraction - step, 0))
+            @unknown default:
+                break
+            }
+        }
     }
 
     private func progressWidth(_ geo: GeometryProxy) -> CGFloat {
@@ -216,20 +403,21 @@ struct PlayerBar: View {
 
     private var placeholderArtwork: some View {
         ZStack {
-            Color(white: 0.14)
-            Image("MusicIcon")
+            Rectangle()
+                .fill(theme.colors.placeholderBackground.swiftUIStyle)
+                Image("MusicIcon")
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .frame(width: 20, height: 20)
-                .foregroundStyle(Theme.textSecondary)
+                .foregroundStyle(theme.colors.secondaryText)
         }
     }
 
     private func button(_ icon: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: icon)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Theme.textSecondary)
+                .font(theme.typography.controlLabel)
+                .foregroundStyle(theme.colors.secondaryText)
         }
         .buttonStyle(.plain)
     }

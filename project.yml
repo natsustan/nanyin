@@ -12,6 +12,10 @@ settings:
     CODE_SIGN_STYLE: Automatic
     CODE_SIGNING_ALLOWED: "NO"
 
+packages:
+  ChouTiUI:
+    path: research-repos/ChouTiUI
+
 targets:
   Nanyin:
     type: application
@@ -20,6 +24,7 @@ targets:
       - NanyinApp
     dependencies:
       - sdk: SystemConfiguration.framework
+      - package: ChouTiUI
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.nanyin.app

@@ -1,0 +1,44 @@
+diff --git a/Package.resolved b/Package.resolved
+deleted file mode 100644
+index 5d4ee83..0000000
+--- a/Package.resolved
++++ /dev/null
+@@ -1,23 +0,0 @@
+-{
+-  "pins" : [
+-    {
+-      "identity" : "chouti",
+-      "kind" : "remoteSourceControl",
+-      "location" : "https://github.com/honghaoz/ChouTi",
+-      "state" : {
+-        "branch" : "master",
+-        "revision" : "d4fdd8716716070d8f0a5f4cdcef5286b9ae842f"
+-      }
+-    },
+-    {
+-      "identity" : "composeui",
+-      "kind" : "remoteSourceControl",
+-      "location" : "https://github.com/honghaoz/ComposeUI",
+-      "state" : {
+-        "branch" : "master",
+-        "revision" : "cc8a5c225f7db2a5e587f090320ef1ec6321bd17"
+-      }
+-    }
+-  ],
+-  "version" : 2
+-}
+diff --git a/Package.swift b/Package.swift
+index a12d779..7dab924 100644
+--- a/Package.swift
++++ b/Package.swift
+@@ -14,8 +14,8 @@ let package = Package(
+     .library(name: "ChouTiUI", targets: ["ChouTiUI"]),
+   ],
+   dependencies: [
+-    .package(url: "https://github.com/honghaoz/ChouTi", branch: "master"),
+-    .package(url: "https://github.com/honghaoz/ComposeUI", branch: "master"),
++    .package(path: "../ChouTi"),
++    .package(path: "../ComposeUI"),
+   ],
+   targets: [
+     .target(name: "ChouTiUI", dependencies: ["ChouTi", "ComposeUI"], path: "ChouTiUI/Sources"),

@@ -17,6 +17,7 @@ struct ArtworkView<Placeholder: View>: View {
     @ViewBuilder let placeholder: () -> Placeholder
 
     @State private var loaded: (id: TaskID, image: NSImage)?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var taskID: TaskID {
         TaskID(url: url, size: size)
@@ -33,7 +34,7 @@ struct ArtworkView<Placeholder: View>: View {
                 Image(nsImage: image)
                     .resizable()
                     .scaledToFill()
-                    .transition(.opacity)
+                    .transition(reduceMotion ? .identity : .opacity)
             } else {
                 placeholder()
             }
@@ -42,8 +43,12 @@ struct ArtworkView<Placeholder: View>: View {
             guard cached == nil, let url,
                   let image = await ArtworkCache.shared.image(for: url, targetSize: size),
                   !Task.isCancelled else { return }
-            withAnimation(.easeOut(duration: 0.16)) {
+            if reduceMotion {
                 loaded = (taskID, image)
+            } else {
+                withAnimation(.easeOut(duration: 0.16)) {
+                    loaded = (taskID, image)
+                }
             }
         }
     }
