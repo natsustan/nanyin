@@ -1,6 +1,6 @@
 /// Pure state machine for one id's serialized optimistic membership writes
-/// (Liked Songs tracks, saved albums). Latest local intent always wins over
-/// confirmed server state.
+/// (Liked Songs tracks, saved albums, followed artists). Latest local intent
+/// always wins over confirmed server state.
 ///
 /// `confirmedSaved` is the last state known to have reached Spotify.
 /// `desiredSaved` is the user's latest intent. They must remain separate:

@@ -55,6 +55,12 @@ struct SidebarView: View {
 
             entry(.liked, icon: Image(systemName: "heart.fill"), title: "Songs", count: app.likedCount)
             entry(.savedAlbums, icon: Image(systemName: "opticaldisc"), title: "Albums", count: app.savedAlbumCount)
+            entry(
+                .followedArtists,
+                icon: Image(systemName: "person.2.fill"),
+                title: "Artists",
+                count: app.followedArtistCount
+            )
 
             // One stable title row: Playlists + always-visible New
             // Playlist (+) button — present while loading and empty too.

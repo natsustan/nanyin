@@ -22,6 +22,10 @@ struct ArtistDetailView: View {
         artworkURL ?? app.artistsByID[artistID]?.artworkURL
     }
 
+    private var artist: SpotifyClient.Artist {
+        SpotifyClient.Artist(id: artistID, name: title, artworkURL: resolvedArtworkURL)
+    }
+
     private var tracks: [SpotifyClient.Track] {
         app.tracksByContext[contextKey] ?? []
     }
@@ -55,6 +59,7 @@ struct ArtistDetailView: View {
             if artworkURL == nil {
                 app.loadArtistProfileIfNeeded(id: artistID)
             }
+            app.requestArtistFollowState(artist)
         }
     }
 
@@ -132,7 +137,7 @@ struct ArtistDetailView: View {
                     .font(theme.typography.metadata)
                     .foregroundStyle(theme.colors.secondaryText)
 
-                playButton
+                actionButtons
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -160,7 +165,7 @@ struct ArtistDetailView: View {
                     .font(theme.typography.metadata)
                     .foregroundStyle(theme.colors.secondaryText)
                     .lineLimit(1)
-                playButton
+                actionButtons
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -200,6 +205,48 @@ struct ArtistDetailView: View {
         .onHover { hovering in
             if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
         }
+    }
+
+    private var actionButtons: some View {
+        HStack(spacing: 10) {
+            playButton
+            followButton
+        }
+    }
+
+    private var followButton: some View {
+        let known = app.isArtistFollowKnown(artistID)
+        let followed = app.isArtistFollowed(artistID)
+        let probeFailed = app.didArtistFollowProbeFail(artistID)
+        return Button {
+            if known {
+                app.toggleArtistFollow(artist)
+            } else {
+                app.requestArtistFollowState(artist)
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: followed ? "checkmark" : (probeFailed ? "arrow.clockwise" : "plus"))
+                    .font(.system(size: 10, weight: .bold))
+                Text(known ? (followed ? "Following" : "Follow") : (probeFailed ? "Retry" : "Checking…"))
+                    .font(theme.typography.button)
+                    .tracking(0.5)
+            }
+            .foregroundStyle(followed ? theme.colors.accent : theme.colors.primaryText)
+            .padding(.horizontal, theme.metrics.controlHorizontalPadding)
+            .padding(.vertical, theme.metrics.controlVerticalPadding)
+            .overlay(
+                RoundedRectangle(cornerRadius: theme.metrics.pillCornerRadius)
+                    .strokeBorder(
+                        followed ? theme.colors.accent : theme.colors.border,
+                        lineWidth: 1
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(!known && !probeFailed)
+        .opacity(!known && !probeFailed ? 0.55 : 1)
+        .help(known ? (followed ? "Unfollow Artist" : "Follow Artist") : "Check follow state")
     }
 
     private var headerStats: String {
