@@ -49,15 +49,15 @@ struct PlayerBar: View {
         HStack(spacing: 0) {
             // Now playing (left)
             HStack(spacing: 12) {
-                artwork
-                    .frame(width: 52, height: 52)
-                    .cornerRadius(theme.metrics.cornerRadius)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(app.nowPlaying?.title ?? "Not playing")
-                        .font(theme.typography.playerTitle)
-                        .foregroundStyle(theme.colors.primaryText)
-                        .lineLimit(1)
-                    if let np = app.nowPlaying {
+                if let np = app.nowPlaying {
+                    artwork
+                        .frame(width: 52, height: 52)
+                        .cornerRadius(theme.metrics.cornerRadius)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(np.title)
+                            .font(theme.typography.playerTitle)
+                            .foregroundStyle(theme.colors.primaryText)
+                            .lineLimit(1)
                         if np.artist.isEmpty {
                             Text("—")
                                 .font(theme.typography.secondary)
@@ -77,32 +77,27 @@ struct PlayerBar: View {
                             .buttonStyle(.plain)
                             .linkCursor()
                         }
-                    } else {
-                        Text("—")
-                            .font(theme.typography.secondary)
-                            .foregroundStyle(theme.colors.secondaryText)
-                            .lineLimit(1)
                     }
-                }
 
-                // Like the playing track (M4.2).
-                if let np = app.nowPlaying, let id = SpotifyClient.trackId(from: np.uri) {
-                    let known = app.isLikeKnown(id)
-                    let liked = app.likedIDs.contains(id)
-                    Button {
-                        app.toggleLikePlaying()
-                    } label: {
-                        Image(systemName: liked ? "heart.fill" : "heart")
-                            .font(.system(size: 12))
-                            .foregroundStyle(liked ? theme.colors.accent : theme.colors.secondaryText)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!known)
-                    .opacity(known ? 1 : 0.35)
-                    .padding(.leading, theme.metrics.likeButtonLeadingPadding)
-                    .help(known ? (liked ? "Remove from Liked Songs" : "Save to Liked Songs") : "Checking Liked Songs…")
-                    .task(id: id) {
-                        app.requestLikedState(id)
+                    // Like the playing track (M4.2).
+                    if let id = SpotifyClient.trackId(from: np.uri) {
+                        let known = app.isLikeKnown(id)
+                        let liked = app.likedIDs.contains(id)
+                        Button {
+                            app.toggleLikePlaying()
+                        } label: {
+                            Image(systemName: liked ? "heart.fill" : "heart")
+                                .font(.system(size: 12))
+                                .foregroundStyle(liked ? theme.colors.accent : theme.colors.secondaryText)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!known)
+                        .opacity(known ? 1 : 0.35)
+                        .padding(.leading, theme.metrics.likeButtonLeadingPadding)
+                        .help(known ? (liked ? "Remove from Liked Songs" : "Save to Liked Songs") : "Checking Liked Songs…")
+                        .task(id: id) {
+                            app.requestLikedState(id)
+                        }
                     }
                 }
             }
@@ -148,19 +143,21 @@ struct PlayerBar: View {
                 }
                 .disabled(!app.isPlaybackReady)
 
-                HStack(spacing: 8) {
-                    Text(PlaybackTimeFormatter.string(fromMilliseconds: effectivePosition))
-                        .font(theme.typography.mono)
-                        .foregroundStyle(theme.colors.secondaryText)
-                        .frame(width: 34, alignment: .trailing)
+                if app.nowPlaying != nil {
+                    HStack(spacing: 8) {
+                        Text(PlaybackTimeFormatter.string(fromMilliseconds: effectivePosition))
+                            .font(theme.typography.mono)
+                            .foregroundStyle(theme.colors.secondaryText)
+                            .frame(width: 34, alignment: .trailing)
 
-                    slider
-                        .allowsHitTesting(app.isPlaybackReady)
+                        slider
+                            .allowsHitTesting(app.isPlaybackReady)
 
-                    Text(PlaybackTimeFormatter.string(fromMilliseconds: max(app.durationMs, 0)))
-                        .font(theme.typography.mono)
-                        .foregroundStyle(theme.colors.secondaryText)
-                        .frame(width: 34, alignment: .leading)
+                        Text(PlaybackTimeFormatter.string(fromMilliseconds: max(app.durationMs, 0)))
+                            .font(theme.typography.mono)
+                            .foregroundStyle(theme.colors.secondaryText)
+                            .frame(width: 34, alignment: .leading)
+                    }
                 }
             }
             .frame(maxWidth: .infinity)
@@ -244,31 +241,35 @@ struct PlayerBar: View {
                     .frame(width: 1)
             }
 
-            HStack(spacing: 8) {
-                Text(PlaybackTimeFormatter.string(fromMilliseconds: effectivePosition))
-                    .font(theme.typography.mono)
-                    .foregroundStyle(theme.colors.secondaryText)
-                    .frame(width: 34, alignment: .trailing)
+            ZStack {
+                if app.nowPlaying != nil {
+                    HStack(spacing: 8) {
+                        Text(PlaybackTimeFormatter.string(fromMilliseconds: effectivePosition))
+                            .font(theme.typography.mono)
+                            .foregroundStyle(theme.colors.secondaryText)
+                            .frame(width: 34, alignment: .trailing)
 
-                ChromeSliderTrack(
-                    style: ChromeSliderStyle(
-                        size: CGSize(width: 220, height: 10),
-                        fraction: progressFraction,
-                        isEnabled: app.isPlaybackReady
-                    ),
-                    fillsAvailableWidth: true,
-                    onChanged: { draggingProgress = $0 },
-                    onEnded: {
-                        app.seek(to: $0)
-                        draggingProgress = nil
-                    },
-                    onCancelled: { draggingProgress = nil }
-                )
+                        ChromeSliderTrack(
+                            style: ChromeSliderStyle(
+                                size: CGSize(width: 220, height: 10),
+                                fraction: progressFraction,
+                                isEnabled: app.isPlaybackReady
+                            ),
+                            fillsAvailableWidth: true,
+                            onChanged: { draggingProgress = $0 },
+                            onEnded: {
+                                app.seek(to: $0)
+                                draggingProgress = nil
+                            },
+                            onCancelled: { draggingProgress = nil }
+                        )
 
-                Text(PlaybackTimeFormatter.string(fromMilliseconds: max(app.durationMs, 0)))
-                    .font(theme.typography.mono)
-                    .foregroundStyle(theme.colors.secondaryText)
-                    .frame(width: 34, alignment: .leading)
+                        Text(PlaybackTimeFormatter.string(fromMilliseconds: max(app.durationMs, 0)))
+                            .font(theme.typography.mono)
+                            .foregroundStyle(theme.colors.secondaryText)
+                            .frame(width: 34, alignment: .leading)
+                    }
+                }
             }
             .frame(maxWidth: .infinity)
             .padding(.horizontal, 10)

@@ -100,7 +100,7 @@ struct SidebarView: View {
                     .padding(.bottom, theme.metrics.smallPadding)
             }
 
-            if presentation == .classic2010 {
+            if presentation == .classic2010, app.nowPlaying != nil {
                 classicNowPlayingPanel
             }
 
@@ -245,15 +245,17 @@ struct SidebarView: View {
                 .frame(width: 52, height: 52)
                 .clipped()
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(app.nowPlaying?.title ?? "Not playing")
-                    .font(theme.typography.playerTitle)
-                    .foregroundStyle(theme.colors.inverseText.opacity(0.92))
-                    .lineLimit(1)
+            if let nowPlaying = app.nowPlaying {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(nowPlaying.title)
+                        .font(theme.typography.playerTitle)
+                        .foregroundStyle(theme.colors.inverseText.opacity(0.92))
+                        .lineLimit(1)
 
-                classicNowPlayingArtistAndAlbum
+                    classicNowPlayingArtistAndAlbum
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.trailing, 2)
         .frame(height: 54)
@@ -265,21 +267,23 @@ struct SidebarView: View {
 
     private var classicNowPlayingMetadata: some View {
         ZStack(alignment: .trailing) {
-            VStack(spacing: 2) {
-                Text(app.nowPlaying?.title ?? "Not playing")
-                    .font(theme.typography.playerTitle)
-                    .foregroundStyle(theme.colors.inverseText.opacity(0.92))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+            if let nowPlaying = app.nowPlaying {
+                VStack(spacing: 2) {
+                    Text(nowPlaying.title)
+                        .font(theme.typography.playerTitle)
+                        .foregroundStyle(theme.colors.inverseText.opacity(0.92))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
 
-                classicNowPlayingArtistAndAlbum
+                    classicNowPlayingArtistAndAlbum
+                }
+                // Keep the metadata out of the right-side action area: the like
+                // button occupies 26 pt plus its trailing inset, while the
+                // collapse button remains in the top-right corner.
+                .padding(.leading, 24)
+                .padding(.trailing, 58)
+                .frame(maxWidth: .infinity)
             }
-            // Keep the metadata out of the right-side action area: the like
-            // button occupies 26 pt plus its trailing inset, while the
-            // collapse button remains in the top-right corner.
-            .padding(.leading, 24)
-            .padding(.trailing, 58)
-            .frame(maxWidth: .infinity)
 
             if let nowPlaying = app.nowPlaying,
                let id = SpotifyClient.trackId(from: nowPlaying.uri) {
