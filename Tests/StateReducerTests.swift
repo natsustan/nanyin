@@ -48,6 +48,7 @@ private enum StateReducerTests {
         testFollowedArtistsCursorPageDecodes()
         testFollowedArtistsPaginationCompletesPastFifty()
         testFollowedArtistsCompleteSnapshotReplacesPartialFallback()
+        testFollowedArtistsPartialFallbackInvalidatesCompleteness()
         testStaleFollowedArtistsPrefixCannotUndoUnfollow()
         testFollowedArtistsPartialTotalDoesNotDoubleAdjustUnfollow()
         testFollowedArtistsRollbackRetainsCountCompensation()
@@ -787,6 +788,19 @@ private enum StateReducerTests {
             cache.artists.map(\.id) == ["b", "c", "a"],
             "completion publishes cursor order without an intermediate reorder"
         )
+    }
+
+    private static func testFollowedArtistsPartialFallbackInvalidatesCompleteness() {
+        var cache = FollowedArtistCache()
+        let artists = [
+            followedArtist("a", name: "Air"),
+            followedArtist("b", name: "Björk"),
+        ]
+        cache.applyServerSnapshot(artists, total: 2, complete: true, overrides: [:])
+        cache.applyServerSnapshot([artists[0]], total: 2, complete: false, overrides: [:])
+
+        expect(!cache.isComplete, "a failed tail must invalidate snapshot completeness")
+        expect(cache.artists.map(\.id) == ["a", "b"], "a partial fallback retains the cached tail")
     }
 
     private static func testStaleFollowedArtistsPrefixCannotUndoUnfollow() {

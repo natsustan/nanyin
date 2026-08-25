@@ -34,10 +34,10 @@ struct FollowedArtistCache: Equatable {
         let snapshotIDs = Set(snapshot.map(\.id))
         if complete {
             confirmedIDs = snapshotIDs
-            isComplete = true
         } else {
             confirmedIDs.formUnion(snapshotIDs)
         }
+        isComplete = complete
         knownIDs.formUnion(snapshotIDs)
         let canAdoptTotal = complete || overrides.allSatisfy { id, override in
             if override.followed { return snapshotIDs.contains(id) }
