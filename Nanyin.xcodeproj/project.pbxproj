@@ -50,6 +50,7 @@
 		B4A7E0B8FA945E0D257077DB /* SpotifyAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3769801C838BE7FD6353F953 /* SpotifyAuth.swift */; };
 		B65B50DEC7B998D60E808DE4 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AE5477026638A4B5FD55C57 /* Theme.swift */; };
 		B7A8F5C27CE3E0B4CE496DE0 /* ChromeStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4C7D21A04EED9DB1C9CFE42 /* ChromeStyle.swift */; };
+		BC531E3A1958C4181D03C7CB /* FollowedArtistsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A04FF71D42160C4B9B8D7D9 /* FollowedArtistsView.swift */; };
 		C08063B3487CD8115D817D01 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6332196A87845CF96EBF8B /* HomeView.swift */; };
 		C0DD952271D2CECFD543B0CF /* MembershipMutation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C34F9480C980947C6DBA66E /* MembershipMutation.swift */; };
 		C2DA3211CF3D7570D06BD6FE /* ThemeVisualFixture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 459B108E232139E1EFF71B79 /* ThemeVisualFixture.swift */; };
@@ -62,6 +63,7 @@
 		EFADA6F87C26753934251814 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B556474766D52B6DCB11E76 /* RootView.swift */; };
 		F1B27D6D9957E862044DF2E2 /* ArtworkCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1626E9E8B422F3514F07193B /* ArtworkCache.swift */; };
 		F1C78B12768F92C34FF8A9D4 /* ClassicChromeSearchFieldView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CD9B14835624C3E3C8EE254 /* ClassicChromeSearchFieldView.swift */; };
+		F3B94CBCD6AE156471B353E0 /* FollowedArtistCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95EBF21D652F09019FE022DB /* FollowedArtistCache.swift */; };
 		F4EA985D9087B87C714C0679 /* PlaybackTimeFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF1CAE36B8A3FE11D18B93B9 /* PlaybackTimeFormatter.swift */; };
 		F9075742F490A3C781517BB4 /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2639140FEC134E04BA4815ED /* SidebarView.swift */; };
 		FBB1CACFEE36F0855B5D4CC4 /* SystemConfiguration.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6FB0ED02C7F536E98940B95B /* SystemConfiguration.framework */; };
@@ -91,6 +93,7 @@
 		407D7A1D4B2A09E284C8A895 /* Nanyin.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Nanyin.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		459B108E232139E1EFF71B79 /* ThemeVisualFixture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeVisualFixture.swift; sourceTree = "<group>"; };
 		46CBA0966AF2014CCAB3C2D3 /* PlaybackReconnectPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackReconnectPolicy.swift; sourceTree = "<group>"; };
+		4A04FF71D42160C4B9B8D7D9 /* FollowedArtistsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FollowedArtistsView.swift; sourceTree = "<group>"; };
 		5362EA9DE5C94A675FC10A2A /* NowPlayingManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingManager.swift; sourceTree = "<group>"; };
 		5B62F2FDF62B22A7F2438671 /* PlaylistLibraryMerge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistLibraryMerge.swift; sourceTree = "<group>"; };
 		61564C1B59DBCF7E35D071B3 /* QueueView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueView.swift; sourceTree = "<group>"; };
@@ -100,6 +103,7 @@
 		70085F48F4FA957D680D6FB5 /* ChromeSectionBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromeSectionBar.swift; sourceTree = "<group>"; };
 		734903A1ED5DB2A2350BC30D /* ClassicChromeToolbarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClassicChromeToolbarView.swift; sourceTree = "<group>"; };
 		76BAF3B565A2B4E3EC2BC956 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		95EBF21D652F09019FE022DB /* FollowedArtistCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FollowedArtistCache.swift; sourceTree = "<group>"; };
 		96F13D809C3D460E5287899F /* ChromeSearchField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromeSearchField.swift; sourceTree = "<group>"; };
 		9BE78A5C4C4901EC940FAD47 /* ChromeButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromeButton.swift; sourceTree = "<group>"; };
 		9D367C153FFD42F80705ACA4 /* ClassicChromeSliderTrackView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClassicChromeSliderTrackView.swift; sourceTree = "<group>"; };
@@ -202,6 +206,7 @@
 				F3CB1BDED634D51131A94FB9 /* Classic2010Shell.swift */,
 				403D18D55DD1CEF30C7EA2F9 /* ClassicShellGeometryFixture.swift */,
 				22BE7BF3A6E1AE5C5985DB8D /* ClassicTitleBarControls.swift */,
+				4A04FF71D42160C4B9B8D7D9 /* FollowedArtistsView.swift */,
 				AA6332196A87845CF96EBF8B /* HomeView.swift */,
 				DD9151ECFD94AFE44E6F5E27 /* LoginView.swift */,
 				D3EBD0B033D15141F13D914C /* NanyinDarkShell.swift */,
@@ -240,6 +245,7 @@
 			isa = PBXGroup;
 			children = (
 				196502AD5E98E680CB17BD1E /* AppModel.swift */,
+				95EBF21D652F09019FE022DB /* FollowedArtistCache.swift */,
 				B9D94ED4DB09441D529487CA /* HomeFeed.swift */,
 				C3D90AF51885C8E464B60FE5 /* LocalPlaybackStore.swift */,
 				3C34F9480C980947C6DBA66E /* MembershipMutation.swift */,
@@ -418,6 +424,8 @@
 				A56F7ECEFC9FF398AF61C836 /* ClassicTitleBarControls.swift in Sources */,
 				76A0FBCD808CE4272E6E9FF7 /* CredentialRevision.swift in Sources */,
 				D53EA805C18FC6BD2585A05E /* DebugLog.swift in Sources */,
+				F3B94CBCD6AE156471B353E0 /* FollowedArtistCache.swift in Sources */,
+				BC531E3A1958C4181D03C7CB /* FollowedArtistsView.swift in Sources */,
 				3CD0F98412A26065319A48E8 /* HomeFeed.swift in Sources */,
 				C08063B3487CD8115D817D01 /* HomeView.swift in Sources */,
 				56EA31B8738E2B0828584E14 /* KeychainStore.swift in Sources */,

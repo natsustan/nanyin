@@ -176,13 +176,14 @@ final class AppModel {
         case queue
         case liked
         case savedAlbums
+        case followedArtists
         case playlist(id: String, name: String)
         case artist(id: String, name: String, artworkURL: URL?)
         case album(id: String, name: String, subtitle: String, artworkURL: URL?)
 
         var contextKey: String? {
             switch self {
-            case .home, .queue, .savedAlbums: nil
+            case .home, .queue, .savedAlbums, .followedArtists: nil
             case .search: "search"
             case .liked: "liked"
             case let .playlist(id, _): id
@@ -686,6 +687,7 @@ final class AppModel {
     func handleAppDidBecomeActive() {
         refreshLiked(force: false)
         refreshSavedAlbums(force: false)
+        refreshFollowedArtists(force: false)
     }
 
     /// Toggles like state for one track. Optimistic UI; server PUT/DELETE
@@ -1193,6 +1195,344 @@ final class AppModel {
         }
     }
 
+    // MARK: - Followed Artists (M4.9)
+
+    private var followedArtistCache = FollowedArtistCache()
+    private(set) var followedArtistsError: String?
+
+    private struct ArtistFollowOverride {
+        var mutation: MembershipMutation
+        var artist: SpotifyClient.Artist
+        var countedInServerTotal: Bool
+        var expiresAt: Date?
+        var followed: Bool { mutation.desiredSaved }
+    }
+
+    private var artistFollowOverrides: [String: ArtistFollowOverride] = [:]
+    private var artistFollowMutationTasks: [String: Task<Void, Never>] = [:]
+    private var artistFollowProbeInFlight: Set<String> = []
+    private var artistFollowProbeFailures: Set<String> = []
+    private var isRefreshingFollowedArtists = false
+    private var followedArtistsRefreshPending = false
+    private var lastFollowedArtistsRefresh = Date.distantPast
+    private let followedArtistsRefreshMinInterval: TimeInterval = 15
+    private let artistFollowOverrideLagWindow: TimeInterval = 30
+
+    var followedArtists: [SpotifyClient.Artist] { followedArtistCache.artists }
+    var followedArtistCount: Int {
+        followedArtistCache.displayCount(overrides: artistFollowOverrideViews())
+    }
+    var hasFollowedArtistsData: Bool { followedArtistCache.hasLoadedAnyData }
+    var hasCompleteFollowedArtistsData: Bool { followedArtistCache.isComplete }
+
+    private func artistFollowOverrideViews() -> [String: FollowedArtistCache.OverrideView] {
+        artistFollowOverrides.mapValues {
+            FollowedArtistCache.OverrideView(
+                followed: $0.followed,
+                countedInServerTotal: $0.countedInServerTotal,
+                artist: $0.artist
+            )
+        }
+    }
+
+    func isArtistFollowKnown(_ id: String) -> Bool {
+        followedArtistCache.followedState(id, overrides: artistFollowOverrideViews()) != nil
+    }
+
+    func isArtistFollowed(_ id: String) -> Bool {
+        followedArtistCache.followedState(id, overrides: artistFollowOverrideViews()) ?? false
+    }
+
+    func didArtistFollowProbeFail(_ id: String) -> Bool {
+        artistFollowProbeFailures.contains(id)
+    }
+
+    func requestArtistFollowState(_ artist: SpotifyClient.Artist) {
+        guard authState == .loggedIn,
+              !isArtistFollowKnown(artist.id),
+              !artistFollowProbeInFlight.contains(artist.id) else { return }
+        artistFollowProbeInFlight.insert(artist.id)
+        artistFollowProbeFailures.remove(artist.id)
+        let epoch = accountEpoch
+        let id = artist.id
+        Task {
+            defer {
+                if epoch == accountEpoch { artistFollowProbeInFlight.remove(id) }
+            }
+            do {
+                let flags = try await withAPIAuthRetry(for: epoch) { api in
+                    try await api.libraryContainsArtists(ids: [id])
+                }
+                guard epoch == accountEpoch,
+                      authState == .loggedIn,
+                      !isArtistFollowKnown(id),
+                      artistFollowOverrides[id] == nil else { return }
+                followedArtistCache.noteProbe(artist, followed: flags.first ?? false)
+            } catch is CancellationError {
+                // Account epoch changed.
+            } catch {
+                guard epoch == accountEpoch, authState == .loggedIn else { return }
+                artistFollowProbeFailures.insert(id)
+                dlog("artist follow contains failed for \(id): \(error)")
+            }
+        }
+    }
+
+    func toggleArtistFollow(_ artist: SpotifyClient.Artist) {
+        guard authState == .loggedIn else { return }
+        guard isArtistFollowKnown(artist.id) else {
+            requestArtistFollowState(artist)
+            return
+        }
+        setArtistFollow(artist, followed: !isArtistFollowed(artist.id))
+    }
+
+    func followArtist(_ artist: SpotifyClient.Artist) {
+        setArtistFollow(artist, followed: true)
+    }
+
+    func unfollowArtist(_ artist: SpotifyClient.Artist) {
+        setArtistFollow(artist, followed: false)
+    }
+
+    private func setArtistFollow(_ artist: SpotifyClient.Artist, followed: Bool) {
+        guard authState == .loggedIn else { return }
+        if var existing = artistFollowOverrides[artist.id] {
+            existing.mutation.setDesired(followed)
+            existing.artist = artist
+            existing.expiresAt = nil
+            artistFollowOverrides[artist.id] = existing
+        } else {
+            let confirmed = followedArtistCache.followedState(artist.id) ?? false
+            artistFollowOverrides[artist.id] = ArtistFollowOverride(
+                mutation: MembershipMutation(
+                    confirmedSaved: confirmed,
+                    desiredSaved: followed
+                ),
+                artist: artist,
+                countedInServerTotal: confirmed,
+                expiresAt: nil
+            )
+        }
+        if followed {
+            followedArtistCache.insertOptimistic(artist)
+        } else {
+            followedArtistCache.removeOptimistic(id: artist.id)
+        }
+
+        if artistFollowMutationTasks[artist.id] == nil {
+            let epoch = accountEpoch
+            artistFollowMutationTasks[artist.id] = Task { [weak self] in
+                await self?.flushArtistFollowMutations(for: artist.id, epoch: epoch)
+            }
+        }
+    }
+
+    private func flushArtistFollowMutations(for id: String, epoch: Int) async {
+        defer {
+            if epoch == accountEpoch { artistFollowMutationTasks.removeValue(forKey: id) }
+        }
+        while epoch == accountEpoch, let current = artistFollowOverrides[id] {
+            guard !Task.isCancelled else { return }
+            let attempted = current.mutation.nextAttempt()
+            let succeeded: Bool
+            do {
+                try await withAPIAuthRetry(for: epoch) { api in
+                    if attempted.saved {
+                        try await api.saveArtistsToLibrary(ids: [id])
+                    } else {
+                        try await api.removeArtistsFromLibrary(ids: [id])
+                    }
+                }
+                succeeded = true
+            } catch {
+                guard epoch == accountEpoch else { return }
+                succeeded = false
+            }
+
+            guard epoch == accountEpoch, var latest = artistFollowOverrides[id] else { return }
+            switch latest.mutation.resolve(attempted, succeeded: succeeded) {
+            case .persistLatest:
+                artistFollowOverrides[id] = latest
+                continue
+            case let .settled(maskServerLag):
+                if maskServerLag {
+                    latest.expiresAt = Date().addingTimeInterval(artistFollowOverrideLagWindow)
+                    artistFollowOverrides[id] = latest
+                } else {
+                    restoreConfirmedArtistState(latest)
+                    artistFollowOverrides.removeValue(forKey: id)
+                }
+                return
+            case let .rollback(confirmedFollowed):
+                dlog("artist follow toggle FAILED for \(id), reverting to confirmed state")
+                assert(confirmedFollowed == latest.mutation.confirmedSaved)
+                restoreConfirmedArtistState(latest)
+                if confirmedFollowed == latest.countedInServerTotal {
+                    artistFollowOverrides.removeValue(forKey: id)
+                } else {
+                    latest.mutation.setDesired(confirmedFollowed)
+                    latest.expiresAt = Date().addingTimeInterval(artistFollowOverrideLagWindow)
+                    artistFollowOverrides[id] = latest
+                }
+                return
+            }
+        }
+    }
+
+    private func restoreConfirmedArtistState(_ override: ArtistFollowOverride) {
+        if override.mutation.confirmedSaved {
+            followedArtistCache.insertOptimistic(override.artist)
+        } else {
+            followedArtistCache.removeOptimistic(id: override.artist.id)
+        }
+    }
+
+    @discardableResult
+    private func applyFollowedArtistsSnapshot(
+        _ snapshot: [SpotifyClient.Artist],
+        total: Int,
+        complete: Bool
+    ) -> Set<String> {
+        let overrides = FollowedArtistCache.rebasedOverrides(
+            artistFollowOverrideViews(),
+            snapshot: snapshot,
+            complete: complete
+        )
+        for (id, view) in overrides {
+            guard var override = artistFollowOverrides[id] else { continue }
+            override.countedInServerTotal = view.countedInServerTotal
+            artistFollowOverrides[id] = override
+        }
+        return followedArtistCache.applyServerSnapshot(
+            snapshot,
+            total: total,
+            complete: complete,
+            overrides: overrides
+        )
+    }
+
+    private func clearSettledArtistFollowOverrides(_ confirmed: Set<String>) {
+        for id in confirmed {
+            if artistFollowMutationTasks[id] != nil {
+                guard var override = artistFollowOverrides[id] else { continue }
+                override.mutation.observeConfirmedState(override.followed)
+                override.countedInServerTotal = override.followed
+                artistFollowOverrides[id] = override
+            } else {
+                artistFollowOverrides.removeValue(forKey: id)
+            }
+        }
+    }
+
+    private func completeFollowedArtistsSnapshot(
+        using api: SpotifyClient,
+        prefix: SpotifyClient.FollowedArtistsPage
+    ) async throws -> [SpotifyClient.Artist]? {
+        var artists = prefix.artists
+        var after = prefix.after
+        var seenCursors: Set<String> = []
+        while let cursor = after {
+            guard seenCursors.insert(cursor).inserted else { return nil }
+            let page = try await api.followedArtistsPage(after: cursor)
+            guard page.total == prefix.total, !page.artists.isEmpty else { return nil }
+            artists += page.artists
+            after = page.after
+        }
+        return FollowedArtistCache.isCompleteSnapshot(artists, total: prefix.total)
+            ? artists
+            : nil
+    }
+
+    /// Forced on page entry; throttled on app foreground. Cursor pagination
+    /// always completes so remote follow/unfollow changes converge.
+    func refreshFollowedArtists(force: Bool = false) {
+        guard authState == .loggedIn else { return }
+        guard !isRefreshingFollowedArtists else {
+            followedArtistsRefreshPending = true
+            return
+        }
+        if !force,
+           Date().timeIntervalSince(lastFollowedArtistsRefresh) < followedArtistsRefreshMinInterval {
+            return
+        }
+        isRefreshingFollowedArtists = true
+        let refreshStartedAt = Date()
+        lastFollowedArtistsRefresh = refreshStartedAt
+        let epoch = accountEpoch
+        Task {
+            var fallbackPage: SpotifyClient.FollowedArtistsPage?
+            defer {
+                if epoch == accountEpoch {
+                    isRefreshingFollowedArtists = false
+                    if followedArtistsRefreshPending {
+                        followedArtistsRefreshPending = false
+                        refreshFollowedArtists(force: true)
+                    }
+                }
+            }
+            do {
+                var prefix = try await withAPIAuthRetry(for: epoch) { api in
+                    try await api.followedArtistsPage()
+                }
+                guard epoch == accountEpoch, authState == .loggedIn else { return }
+                fallbackPage = prefix
+                followedArtistsError = nil
+
+                var snapshot = try await withAPIAuthRetry(for: epoch) { api in
+                    try await completeFollowedArtistsSnapshot(using: api, prefix: prefix)
+                }
+                if snapshot == nil {
+                    prefix = try await withAPIAuthRetry(for: epoch) { api in
+                        try await api.followedArtistsPage()
+                    }
+                    fallbackPage = prefix
+                    snapshot = try await withAPIAuthRetry(for: epoch) { api in
+                        try await completeFollowedArtistsSnapshot(using: api, prefix: prefix)
+                    }
+                }
+                guard epoch == accountEpoch, let snapshot else {
+                    throw SpotifyClient.APIError.http(0, "Followed Artists changed while loading. Please retry.")
+                }
+                artistFollowOverrides = artistFollowOverrides.filter { id, override in
+                    FollowedArtistCache.shouldRetainOverride(
+                        expiresAt: override.expiresAt,
+                        hasActiveMutation: artistFollowMutationTasks[id] != nil,
+                        refreshStartedAt: refreshStartedAt
+                    )
+                }
+                let confirmed = applyFollowedArtistsSnapshot(
+                    snapshot,
+                    total: prefix.total,
+                    complete: true
+                )
+                clearSettledArtistFollowOverrides(confirmed)
+                ArtworkCache.shared.replacePrefetch(
+                    urls: snapshot.compactMap(\.artworkURL),
+                    in: .followedArtists
+                )
+            } catch is CancellationError {
+                // Account epoch changed.
+            } catch {
+                guard epoch == accountEpoch else { return }
+                if let fallbackPage {
+                    let confirmed = applyFollowedArtistsSnapshot(
+                        fallbackPage.artists,
+                        total: fallbackPage.total,
+                        complete: false
+                    )
+                    clearSettledArtistFollowOverrides(confirmed)
+                    ArtworkCache.shared.replacePrefetch(
+                        urls: fallbackPage.artists.compactMap(\.artworkURL),
+                        in: .followedArtists
+                    )
+                }
+                followedArtistsError = error.localizedDescription
+                dlog("followed artists refresh failed: \(error)")
+            }
+        }
+    }
+
     private func persistLike(id: String, liked: Bool, epoch: Int) async throws {
         func mutate(using api: SpotifyClient) async throws {
             if liked {
@@ -1520,6 +1860,10 @@ final class AppModel {
             task.cancel()
         }
         albumSaveMutationTasks.removeAll()
+        for task in artistFollowMutationTasks.values {
+            task.cancel()
+        }
+        artistFollowMutationTasks.removeAll()
         cancelPlaybackWatchdog()
         clearPendingPlayIntent()
         cancelAudioStallWatchdog()
@@ -1583,6 +1927,14 @@ final class AppModel {
         savedAlbumsRefreshPending = false
         lastSavedAlbumsRefresh = .distantPast
         savedAlbumsError = nil
+        followedArtistCache = FollowedArtistCache()
+        artistFollowOverrides.removeAll()
+        artistFollowProbeInFlight.removeAll()
+        artistFollowProbeFailures.removeAll()
+        isRefreshingFollowedArtists = false
+        followedArtistsRefreshPending = false
+        lastFollowedArtistsRefresh = .distantPast
+        followedArtistsError = nil
         homeRecentlyPlayed = []
         homeTopTracks = []
         homeTopArtists = []
@@ -1731,6 +2083,7 @@ final class AppModel {
             guard epoch == accountEpoch, authState == .loggedIn else { return }
             refreshLiked(force: true)
             refreshSavedAlbums(force: true)
+            refreshFollowedArtists(force: true)
         }
     }
 
@@ -1986,6 +2339,7 @@ final class AppModel {
             // Re-clicking the current live page is a manual refresh.
             if case .liked = newPage { refreshLiked(force: true) }
             if case .savedAlbums = newPage { refreshSavedAlbums(force: true) }
+            if case .followedArtists = newPage { refreshFollowedArtists(force: true) }
             if case .queue = newPage { refreshQueue() }
             return
         }
@@ -2023,6 +2377,10 @@ final class AppModel {
         if case .savedAlbums = newPage {
             // refreshSavedAlbums owns the fetch (and the first-visit loader).
             refreshSavedAlbums(force: true)
+            return
+        }
+        if case .followedArtists = newPage {
+            refreshFollowedArtists(force: true)
             return
         }
         if case let .artist(id, _, artworkURL) = newPage, artworkURL == nil {
@@ -2070,7 +2428,7 @@ final class AppModel {
                 case .search:
                     // Results are fetched by search(), not by page-open.
                     return
-                case .queue, .home, .savedAlbums:
+                case .queue, .home, .savedAlbums, .followedArtists:
                     // Live views — nothing to prefetch.
                     return
                 }
@@ -2215,7 +2573,7 @@ final class AppModel {
             contextURI = "spotify:playlist:\(id)"
         case let .album(id, _, _, _):
             contextURI = "spotify:album:\(id)"
-        case .search, .artist, .queue, .home, .savedAlbums:
+        case .search, .artist, .queue, .home, .savedAlbums, .followedArtists:
             // Ad-hoc context: results are small — play the window directly.
             contextURI = nil
         }

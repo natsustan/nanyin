@@ -44,6 +44,18 @@ private enum StateReducerTests {
         testRollbackUsesNewerCanonicalOrder()
         testExpiryMarkingForcesFullReconciliation()
 
+        testFollowedArtistsSnapshotPreservesCursorOrderAndCounts()
+        testFollowedArtistsCursorPageDecodes()
+        testFollowedArtistsPaginationCompletesPastFifty()
+        testFollowedArtistsCompleteSnapshotReplacesPartialFallback()
+        testFollowedArtistsPartialFallbackInvalidatesCompleteness()
+        testStaleFollowedArtistsPrefixCannotUndoUnfollow()
+        testFollowedArtistsPartialTotalDoesNotDoubleAdjustUnfollow()
+        testFollowedArtistsRollbackRetainsCountCompensation()
+        testFollowedArtistsRefreshCannotExpireANewerOverride()
+        testOptimisticFollowAdjustsCountAndConfirms()
+        testCompleteFollowedArtistsSnapshotConvergesToRemoteChanges()
+
         testPlaybackStallDetectorClassifiesDownloaderStall()
         testPlaybackStallDetectorClassifiesDecoderStall()
         testPlaybackStallDetectorClassifiesPCMStall()
@@ -690,6 +702,253 @@ private enum StateReducerTests {
 
         cache.markNeedsReconciliation()
         expect(cache.needsFullReconciliation, "expiry marking must force full re-paging")
+    }
+
+    // MARK: - FollowedArtistCache (M4.9)
+
+    private static func followedArtist(_ id: String, name: String) -> SpotifyClient.Artist {
+        SpotifyClient.Artist(id: id, name: name, artworkURL: nil)
+    }
+
+    private static func testFollowedArtistsSnapshotPreservesCursorOrderAndCounts() {
+        var cache = FollowedArtistCache()
+        cache.applyServerSnapshot(
+            [followedArtist("b", name: "Björk"), followedArtist("a", name: "Air")],
+            total: 2,
+            complete: true,
+            overrides: [:]
+        )
+        expect(
+            cache.artists.map(\.id) == ["b", "a"],
+            "artist library preserves Spotify cursor order"
+        )
+        expect(cache.displayCount(overrides: [:]) == 2, "artist count uses server total")
+    }
+
+    private static func testFollowedArtistsCursorPageDecodes() {
+        let page = try! SpotifyClient.decodeFollowedArtistsPage(Data(#"""
+        {
+          "artists": {
+            "items": [{"id":"a","name":"Air","images":[{"url":"https://example.com/a.jpg"}]}],
+            "cursors": {"after":"cursor-a"},
+            "next": "https://api.spotify.com/v1/me/following?after=cursor-a",
+            "total": 51
+          }
+        }
+        """#.utf8))
+        expect(page.artists.map(\.id) == ["a"], "cursor page decodes artist items")
+        expect(page.after == "cursor-a", "nonterminal cursor page retains after")
+        expect(page.total == 51, "cursor page retains server total")
+
+        let terminal = try! SpotifyClient.decodeFollowedArtistsPage(Data(#"""
+        {
+          "artists": {"items":[],"cursors":{"after":"ignored"},"next":null,"total":0}
+        }
+        """#.utf8))
+        expect(terminal.after == nil, "terminal cursor page ignores its trailing cursor")
+    }
+
+    private static func testFollowedArtistsPaginationCompletesPastFifty() {
+        let artists = (0..<55).map {
+            followedArtist("\($0)", name: String(format: "Artist %02d", $0))
+        }
+        var cache = FollowedArtistCache()
+        cache.applyServerSnapshot(
+            Array(artists.prefix(50)), total: 55, complete: false, overrides: [:]
+        )
+        expect(cache.artists.count == 50, "a failed tail can retain the first cursor page")
+        expect(cache.displayCount(overrides: [:]) == 55, "an initial partial load adopts the server total")
+        expect(cache.hasLoadedAnyData, "a partial fallback is usable library data")
+        expect(
+            FollowedArtistCache.isCompleteSnapshot(artists, total: 55),
+            "a unique 55-item cursor snapshot is complete"
+        )
+        cache.applyServerSnapshot(artists, total: 55, complete: true, overrides: [:])
+        expect(cache.artists.count == 55, "tail pagination publishes every artist")
+        expect(
+            !FollowedArtistCache.isCompleteSnapshot(artists + [artists[0]], total: 56),
+            "duplicate cursor items cannot form a complete snapshot"
+        )
+    }
+
+    private static func testFollowedArtistsCompleteSnapshotReplacesPartialFallback() {
+        var cache = FollowedArtistCache()
+        let firstPage = [
+            followedArtist("b", name: "Björk"),
+            followedArtist("c", name: "Coldplay"),
+        ]
+        cache.applyServerSnapshot(firstPage, total: 3, complete: false, overrides: [:])
+        expect(cache.artists.map(\.id) == ["b", "c"], "partial fallback retains cursor order")
+        cache.applyServerSnapshot(
+            firstPage + [followedArtist("a", name: "Air")],
+            total: 3,
+            complete: true,
+            overrides: [:]
+        )
+        expect(
+            cache.artists.map(\.id) == ["b", "c", "a"],
+            "completion publishes cursor order without an intermediate reorder"
+        )
+    }
+
+    private static func testFollowedArtistsPartialFallbackInvalidatesCompleteness() {
+        var cache = FollowedArtistCache()
+        let artists = [
+            followedArtist("a", name: "Air"),
+            followedArtist("b", name: "Björk"),
+        ]
+        cache.applyServerSnapshot(artists, total: 2, complete: true, overrides: [:])
+        cache.applyServerSnapshot([artists[0]], total: 1, complete: false, overrides: [:])
+
+        expect(!cache.isComplete, "a failed tail must invalidate snapshot completeness")
+        expect(cache.artists.map(\.id) == ["a", "b"], "a partial fallback retains the cached tail")
+        expect(cache.displayCount(overrides: [:]) == 2, "a mixed partial fallback retains the cached total")
+    }
+
+    private static func testStaleFollowedArtistsPrefixCannotUndoUnfollow() {
+        var cache = FollowedArtistCache()
+        let artist = followedArtist("a", name: "Air")
+        cache.applyServerSnapshot([artist], total: 1, complete: true, overrides: [:])
+        cache.removeOptimistic(id: artist.id)
+        let overrides = [artist.id: FollowedArtistCache.OverrideView(
+            followed: false,
+            countedInServerTotal: true,
+            artist: artist
+        )]
+        cache.applyServerSnapshot([artist], total: 1, complete: false, overrides: overrides)
+        expect(cache.artists.isEmpty, "a stale cursor prefix cannot resurrect an unfollowed artist")
+        expect(cache.displayCount(overrides: overrides) == 0, "optimistic unfollow adjusts count")
+    }
+
+    private static func testFollowedArtistsPartialTotalDoesNotDoubleAdjustUnfollow() {
+        var cache = FollowedArtistCache()
+        let removed = followedArtist("removed", name: "Removed")
+        let retained = followedArtist("retained", name: "Retained")
+        cache.applyServerSnapshot([removed, retained], total: 2, complete: true, overrides: [:])
+        cache.removeOptimistic(id: removed.id)
+        let overrides = [removed.id: FollowedArtistCache.OverrideView(
+            followed: false,
+            countedInServerTotal: true,
+            artist: removed
+        )]
+        cache.applyServerSnapshot([retained], total: 1, complete: false, overrides: overrides)
+        expect(
+            cache.displayCount(overrides: overrides) == 1,
+            "partial total cannot double-count an unconfirmed unfollow"
+        )
+    }
+
+    private static func testFollowedArtistsRollbackRetainsCountCompensation() {
+        let artist = followedArtist("a", name: "Air")
+
+        var followMutation = MembershipMutation(confirmedSaved: false, desiredSaved: true)
+        let followAttempt = followMutation.nextAttempt()
+        followMutation.setDesired(false)
+        expect(
+            followMutation.resolve(followAttempt, succeeded: true) == .persistLatest,
+            "a successful older follow persists the newer unfollow intent"
+        )
+        let failedUnfollow = followMutation.nextAttempt()
+        expect(
+            followMutation.resolve(failedUnfollow, succeeded: false) == .rollback(to: true),
+            "a failed latest unfollow rolls back to the confirmed follow"
+        )
+        followMutation.setDesired(followMutation.confirmedSaved)
+        var followedCache = FollowedArtistCache()
+        followedCache.applyServerSnapshot([], total: 0, complete: true, overrides: [:])
+        followedCache.insertOptimistic(artist)
+        let followedOverride = [artist.id: FollowedArtistCache.OverrideView(
+            followed: followMutation.desiredSaved,
+            countedInServerTotal: false,
+            artist: artist
+        )]
+        expect(
+            followedCache.displayCount(overrides: followedOverride) == 1,
+            "rollback to a confirmed follow retains its positive count compensation"
+        )
+
+        var unfollowMutation = MembershipMutation(confirmedSaved: true, desiredSaved: false)
+        let unfollowAttempt = unfollowMutation.nextAttempt()
+        unfollowMutation.setDesired(true)
+        expect(
+            unfollowMutation.resolve(unfollowAttempt, succeeded: true) == .persistLatest,
+            "a successful older unfollow persists the newer follow intent"
+        )
+        let failedFollow = unfollowMutation.nextAttempt()
+        expect(
+            unfollowMutation.resolve(failedFollow, succeeded: false) == .rollback(to: false),
+            "a failed latest follow rolls back to the confirmed unfollow"
+        )
+        unfollowMutation.setDesired(unfollowMutation.confirmedSaved)
+        var unfollowedCache = FollowedArtistCache()
+        unfollowedCache.applyServerSnapshot([artist], total: 1, complete: true, overrides: [:])
+        unfollowedCache.removeOptimistic(id: artist.id)
+        let unfollowedOverride = [artist.id: FollowedArtistCache.OverrideView(
+            followed: unfollowMutation.desiredSaved,
+            countedInServerTotal: true,
+            artist: artist
+        )]
+        expect(
+            unfollowedCache.displayCount(overrides: unfollowedOverride) == 0,
+            "rollback to a confirmed unfollow retains its negative count compensation"
+        )
+    }
+
+    private static func testFollowedArtistsRefreshCannotExpireANewerOverride() {
+        let refreshStartedAt = Date(timeIntervalSince1970: 100)
+        expect(
+            FollowedArtistCache.shouldRetainOverride(
+                expiresAt: Date(timeIntervalSince1970: 110),
+                hasActiveMutation: false,
+                refreshStartedAt: refreshStartedAt
+            ),
+            "a refresh retains an override created or settled after it started"
+        )
+        expect(
+            !FollowedArtistCache.shouldRetainOverride(
+                expiresAt: Date(timeIntervalSince1970: 90),
+                hasActiveMutation: false,
+                refreshStartedAt: refreshStartedAt
+            ),
+            "a refresh may reconcile an override that expired before it started"
+        )
+        expect(
+            FollowedArtistCache.shouldRetainOverride(
+                expiresAt: Date(timeIntervalSince1970: 90),
+                hasActiveMutation: true,
+                refreshStartedAt: refreshStartedAt
+            ),
+            "an active mutation always wins over a refresh snapshot"
+        )
+    }
+
+    private static func testOptimisticFollowAdjustsCountAndConfirms() {
+        var cache = FollowedArtistCache()
+        cache.applyServerSnapshot([], total: 0, complete: true, overrides: [:])
+        let artist = followedArtist("new", name: "New Artist")
+        cache.insertOptimistic(artist)
+        let overrides = [artist.id: FollowedArtistCache.OverrideView(
+            followed: true,
+            countedInServerTotal: false,
+            artist: artist
+        )]
+        expect(cache.displayCount(overrides: overrides) == 1, "optimistic follow bumps count")
+        let confirmed = cache.applyServerSnapshot(
+            [artist], total: 1, complete: true, overrides: overrides
+        )
+        expect(confirmed == [artist.id], "full snapshot confirms the follow")
+    }
+
+    private static func testCompleteFollowedArtistsSnapshotConvergesToRemoteChanges() {
+        var cache = FollowedArtistCache()
+        cache.applyServerSnapshot(
+            [followedArtist("a", name: "Air")], total: 1, complete: true, overrides: [:]
+        )
+        cache.applyServerSnapshot(
+            [followedArtist("b", name: "Björk")], total: 1, complete: true, overrides: [:]
+        )
+        expect(cache.artists.map(\.id) == ["b"], "complete refresh adopts remote membership")
+        expect(cache.followedState("a") == false, "complete refresh proves remote unfollow")
     }
 
     // MARK: - Local playback

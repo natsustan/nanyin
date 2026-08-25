@@ -110,6 +110,7 @@ Note: ncspot client id keeps /v1/search working (production-approved app).
 | 4.6 | Playlist search/filter | **Next.** Client-side filter row in detail view | 0.25d |
 | 4.7 | Keyboard navigation | ↑↓ already free via List; Enter = play; Space = play/pause (global) | 0.25d |
 | 4.8 | Window: mini-player | Collapsed player-bar-only mode (classic Winamp-ish) | 0.5d |
+| 4.9 | Followed Artists / artist library | **Planned.** Library page for followed artists plus Follow/Following controls on artist detail pages; cursor pagination, filtering, optimistic writes, and cross-client reconciliation | 1.5–2d |
 
 ### M4.3 — Album Library product plan
 
@@ -423,6 +424,114 @@ Acceptance criteria:
   refresh and updates an open target without duplicating existing loaded rows.
 - Sign-out or account replacement wins over every late create/add/refresh
   completion.
+
+### M4.9 — Followed Artists / Artist Library plan
+
+Goal: make followed artists a first-class Library surface. A user can browse
+every artist they follow, filter the collection, open or play an artist, and
+follow/unfollow from the existing artist detail page. "Followed Artists" is
+distinct from Home's listening-affinity-based Top Artists.
+
+Primary UI:
+
+```text
+YOUR LIBRARY              ARTISTS                         84 artists
+♥  Songs            423  [Filter artists…]
+▣  Albums             68
+●  Artists            84  ( portrait )  ( portrait )  ( portrait )
+                         Artist name   Artist name   Artist name
+
+ARTIST DETAIL
+( portrait )  Artist name
+              10 top tracks · 14 albums · 8 singles
+              [▶ PLAY]  [✓ FOLLOWING]
+```
+
+MVP product scope:
+
+- Add a fixed `Artists` sidebar entry with the current followed-artist count.
+- Build an adaptive circular-portrait `LazyVGrid` in one vertical
+  `ScrollView`. Publish the complete collection once in localized artist-name
+  order so cards do not jump while cursor pages arrive. If tail pagination
+  fails, retain page one as an explicitly labeled partial fallback.
+- Add a client-side name filter. Empty-library state links to Search; a
+  no-filter-results state clears the query without making a request. Filtering
+  stays disabled for a partial fallback because it cannot search the full
+  collection.
+- Single-click opens the existing artist detail page. A cover hover action and
+  `Play Artist` context-menu action start the server-resolved
+  `spotify:artist:<id>` context; never construct a track-URI list.
+- Add `Follow` / `Following` to both dark and classic artist headers. The
+  artist-card context menu offers Play, Follow/Unfollow, and Copy Artist Link.
+  Unfollow is immediate and requires no confirmation.
+- Preserve the existing artist page header while profile, tracks, albums, or
+  membership state is loading or retrying. A membership failure is retryable
+  without replacing the rest of the artist page.
+
+API and state model:
+
+- Page `GET /v1/me/following?type=artist&limit=50&after=…`; retain the cursor
+  and server `total`, retain page one for failure recovery while fetching the
+  tail, deduplicate by artist id, and publish a complete snapshot only after
+  `next` is nil and the unique item count agrees with `total`. Spotify does not
+  document a semantic ordering for this endpoint, so the UI defaults to
+  localized artist-name order while retaining `Spotify Cursor` as an explicit
+  alternative. This endpoint requires the existing `user-follow-read` scope.
+- Spotify removed `PUT/DELETE /v1/me/following` in February 2026. Follow and
+  unfollow only through the current unified library interface:
+  `PUT /v1/me/library?uris=spotify:artist:<id>` and
+  `DELETE /v1/me/library?uris=spotify:artist:<id>`. Probe detail-page state via
+  `GET /v1/me/library/contains?uris=…` in batches of at most 40 URIs. Existing
+  `user-library-read` and `user-library-modify` scopes are sufficient; do not
+  add another OAuth journey.
+- Reuse `SpotifyClient.Artist` and the shared `MembershipMutation` reducer.
+  Keep artist collection snapshots and optimistic overrides behind one
+  artist-library state seam in `AppModel`; do not make views coordinate API
+  requests or mutation ordering.
+- Follow/unfollow is optimistic with one serialized writer per artist. Rapid
+  follow/unfollow/follow sequences settle on the latest intent; a failed
+  latest write rolls back to the last confirmed state.
+- Partial cursor snapshots may confirm presence but never confirm absence.
+  Only a complete snapshot may retire an optimistic unfollow. Successful
+  writes mask Spotify read-after-write lag for a bounded window; expired
+  overrides force complete re-pagination.
+- Fence every load, probe, mutation, and completion by account epoch. Route
+  calls through `withAPIAuthRetry`, honor `Retry-After`, and ensure sign-out
+  clears artist data and wins over in-flight work.
+- Refresh on page open/reselection and explicit retry. Reuse the current
+  library refresh throttling pattern so navigation does not create request
+  storms; cross-client changes converge on a full refresh.
+
+Delivery slices:
+
+1. **Data foundation (0.5d):** cursor-page DTO/decode, followed-artist client
+   calls, pure snapshot/override reconciliation, account-epoch cleanup, and
+   deterministic reducer tests.
+2. **Artist Library page (0.5d):** route/sidebar count, paged portrait grid,
+   filtering, artist navigation/playback, context menus, and page states.
+3. **Follow round-trip (0.25–0.5d):** detail-header control, contains probe,
+   serialized optimistic writes, rollback, and stale-read masking.
+4. **Verification (0.25–0.5d):** offline decode/state/UI build checks and
+   `script/agent_check.sh`; live follow/unfollow/server-refresh verification
+   only after explicit approval.
+
+Acceptance criteria:
+
+- A library larger than 50 followed artists cursor-paginates without missing
+  or duplicate cards. Successful loads publish once in stable artist-name
+  order; a failed tail retains page one with `Showing <loaded> of <total>` and
+  a retry action.
+- Sidebar count, Artists page, artist detail header, and card context menus
+  show one consistent membership state after local writes and refreshes.
+- Rapid repeated toggles, stale/partial snapshots, failed writes, override
+  expiry, and account replacement cannot overwrite the latest user intent.
+- Artist playback uses `spotify:artist:<id>` as a server-resolved context and
+  never uploads a large list of tracks.
+- Loading, empty, no-filter-results, partial-error, and retry states remain
+  navigable and accessible in both shell presentations.
+- Offline verification covers cursor decoding, >50-item pagination,
+  deduplication, optimistic rollback, stale snapshot reconciliation, and
+  sign-out/account-epoch fencing. Live Spotify writes remain opt-in.
 
 ## M5 — Distribution
 

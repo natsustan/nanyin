@@ -87,6 +87,12 @@ struct SpotifyClient {
         var id: String { album.id }
     }
 
+    struct FollowedArtistsPage: Equatable {
+        let artists: [Artist]
+        let after: String?
+        let total: Int
+    }
+
     struct PlaylistInfo: Identifiable, Hashable {
         let id: String
         let name: String
@@ -397,6 +403,21 @@ struct SpotifyClient {
     private struct PagedSavedAlbumsDTO: Codable {
         let items: [SavedAlbumItemDTO]?
         let total: Int
+    }
+
+    private struct FollowedArtistsDTO: Codable {
+        struct ArtistsPage: Codable {
+            struct Cursors: Codable {
+                let after: String?
+            }
+
+            let items: [ArtistDTO]?
+            let cursors: Cursors?
+            let next: String?
+            let total: Int
+        }
+
+        let artists: ArtistsPage
     }
 
     private struct AlbumTracksPageDTO: Codable {
@@ -728,11 +749,19 @@ struct SpotifyClient {
     /// URIs (roadmap cap). The server lags behind its own writes — never use
     /// this to confirm a save the app just made; keep the optimistic UI.
     func libraryContainsAlbums(ids: [String]) async throws -> [Bool] {
+        try await libraryContains(uris: ids.map { "spotify:album:\($0)" })
+    }
+
+    func libraryContainsArtists(ids: [String]) async throws -> [Bool] {
+        try await libraryContains(uris: ids.map { "spotify:artist:\($0)" })
+    }
+
+    private func libraryContains(uris: [String]) async throws -> [Bool] {
         var flags: [Bool] = []
-        for chunk in ids.chunked(into: 40) {
+        for chunk in uris.chunked(into: 40) {
             let batch: [Bool] = try await get(
                 "/v1/me/library/contains",
-                query: ["uris": chunk.map { "spotify:album:\($0)" }.joined(separator: ",")]
+                query: ["uris": chunk.joined(separator: ",")]
             )
             flags += batch
         }
@@ -741,18 +770,25 @@ struct SpotifyClient {
 
     /// Saves albums to the user's library (PUT /v1/me/library).
     func saveAlbumsToLibrary(ids: [String]) async throws {
-        try await mutateLibrary(ids: ids, method: "PUT")
+        try await mutateLibrary(uris: ids.map { "spotify:album:\($0)" }, method: "PUT")
     }
 
     /// Removes albums from the user's library (DELETE /v1/me/library).
     func removeAlbumsFromLibrary(ids: [String]) async throws {
-        try await mutateLibrary(ids: ids, method: "DELETE")
+        try await mutateLibrary(uris: ids.map { "spotify:album:\($0)" }, method: "DELETE")
+    }
+
+    func saveArtistsToLibrary(ids: [String]) async throws {
+        try await mutateLibrary(uris: ids.map { "spotify:artist:\($0)" }, method: "PUT")
+    }
+
+    func removeArtistsFromLibrary(ids: [String]) async throws {
+        try await mutateLibrary(uris: ids.map { "spotify:artist:\($0)" }, method: "DELETE")
     }
 
     /// PUT/DELETE /v1/me/library — the unified save surface. Never regress to
-    /// the deprecated album-specific /v1/me/albums save/remove endpoints.
-    private func mutateLibrary(ids: [String], method: String, retries: Int = 2) async throws {
-        let uris = ids.map { "spotify:album:\($0)" }
+    /// deprecated album-specific or /v1/me/following write endpoints.
+    private func mutateLibrary(uris: [String], method: String, retries: Int = 2) async throws {
         var components = URLComponents(string: "https://api.spotify.com/v1/me/library")!
         components.queryItems = [URLQueryItem(name: "uris", value: uris.joined(separator: ","))]
         var req = URLRequest(url: components.url!)
@@ -777,6 +813,29 @@ struct SpotifyClient {
             if status == 401 { throw APIError.needsAuth }
             throw APIError.http(status, "")
         }
+    }
+
+    // MARK: - Followed Artists (M4.9)
+
+    /// One cursor-paginated page of artists followed by the current user.
+    func followedArtistsPage(
+        after: String? = nil,
+        limit: Int = 50
+    ) async throws -> FollowedArtistsPage {
+        var query = ["type": "artist", "limit": "\(limit)"]
+        if let after { query["after"] = after }
+        return try Self.decodeFollowedArtistsPage(
+            try await fetch("/v1/me/following", query: query)
+        )
+    }
+
+    static func decodeFollowedArtistsPage(_ data: Data) throws -> FollowedArtistsPage {
+        let response = try JSONDecoder().decode(FollowedArtistsDTO.self, from: data)
+        return FollowedArtistsPage(
+            artists: (response.artists.items ?? []).compactMap(\.toArtist),
+            after: response.artists.next == nil ? nil : response.artists.cursors?.after,
+            total: response.artists.total
+        )
     }
 
     // MARK: - Playlist writes (M4.5)

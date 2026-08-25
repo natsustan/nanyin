@@ -23,6 +23,7 @@ final class ArtworkCache {
         case homeTopArtists
         case library
         case savedAlbums
+        case followedArtists
         case queue
         case detail
     }
@@ -512,7 +513,7 @@ final class ArtworkCache {
             (20, 0)
         case .library:
             (20, 40)
-        case .savedAlbums:
+        case .savedAlbums, .followedArtists:
             (30, 100)
         case .queue:
             (30, 0)
@@ -527,7 +528,7 @@ final class ArtworkCache {
             134
         case .homeTopArtists:
             88
-        case .library, .savedAlbums:
+        case .library, .savedAlbums, .followedArtists:
             170
         case .queue:
             32

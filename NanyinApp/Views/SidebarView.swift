@@ -53,8 +53,14 @@ struct SidebarView: View {
                 .padding(.horizontal, theme.metrics.sidebarInset)
                 .padding(.bottom, sidebarHeaderToItemsGap)
 
-            entry(.liked, icon: Image(systemName: "heart.fill"), title: "Songs", count: app.likedCount)
-            entry(.savedAlbums, icon: Image(systemName: "opticaldisc"), title: "Albums", count: app.savedAlbumCount)
+            entry(.liked, icon: Image(systemName: "music.note"), title: "Songs", count: app.likedCount)
+            entry(.savedAlbums, icon: Image("DiscIcon"), title: "Albums", count: app.savedAlbumCount)
+            entry(
+                .followedArtists,
+                icon: Image(systemName: "microphone"),
+                title: "Artists",
+                count: app.followedArtistCount
+            )
 
             // One stable title row: Playlists + always-visible New
             // Playlist (+) button — present while loading and empty too.

@@ -190,6 +190,7 @@ xcrun swiftc \
     "$ROOT_DIR/NanyinApp/State/PlaybackReconnectPolicy.swift" \
     "$ROOT_DIR/NanyinApp/State/LocalPlaybackStore.swift" \
     "$ROOT_DIR/NanyinApp/State/SavedAlbumCache.swift" \
+    "$ROOT_DIR/NanyinApp/State/FollowedArtistCache.swift" \
     "$ROOT_DIR/NanyinApp/State/PlaylistLibraryMerge.swift" \
     "$ROOT_DIR/NanyinApp/State/HomeFeed.swift" \
     "$ROOT_DIR/Tests/StateReducerTests.swift" \

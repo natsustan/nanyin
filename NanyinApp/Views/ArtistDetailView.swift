@@ -5,8 +5,8 @@
 
 import SwiftUI
 
-/// Artist page: circular portrait header + discography rows (albums, singles)
-/// + top tracks (PlaylistDetailView's structure). Top tracks are small — they
+/// Artist page: themed portrait header + discography rows (albums, singles) +
+/// top tracks (PlaylistDetailView's structure). Top tracks are small — they
 /// play as a bounded ad-hoc context, same path as search results (no server
 /// context URI).
 struct ArtistDetailView: View {
@@ -20,6 +20,10 @@ struct ArtistDetailView: View {
 
     private var resolvedArtworkURL: URL? {
         artworkURL ?? app.artistsByID[artistID]?.artworkURL
+    }
+
+    private var artist: SpotifyClient.Artist {
+        SpotifyClient.Artist(id: artistID, name: title, artworkURL: resolvedArtworkURL)
     }
 
     private var tracks: [SpotifyClient.Track] {
@@ -55,6 +59,7 @@ struct ArtistDetailView: View {
             if artworkURL == nil {
                 app.loadArtistProfileIfNeeded(id: artistID)
             }
+            app.requestArtistFollowState(artist)
         }
     }
 
@@ -132,7 +137,7 @@ struct ArtistDetailView: View {
                     .font(theme.typography.metadata)
                     .foregroundStyle(theme.colors.secondaryText)
 
-                playButton
+                actionButtons
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -160,7 +165,7 @@ struct ArtistDetailView: View {
                     .font(theme.typography.metadata)
                     .foregroundStyle(theme.colors.secondaryText)
                     .lineLimit(1)
-                playButton
+                actionButtons
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -202,6 +207,48 @@ struct ArtistDetailView: View {
         }
     }
 
+    private var actionButtons: some View {
+        HStack(spacing: 10) {
+            playButton
+            followButton
+        }
+    }
+
+    private var followButton: some View {
+        let known = app.isArtistFollowKnown(artistID)
+        let followed = app.isArtistFollowed(artistID)
+        let probeFailed = app.didArtistFollowProbeFail(artistID)
+        return Button {
+            if known {
+                app.toggleArtistFollow(artist)
+            } else {
+                app.requestArtistFollowState(artist)
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: followed ? "checkmark" : (probeFailed ? "arrow.clockwise" : "plus"))
+                    .font(.system(size: 10, weight: .bold))
+                Text(known ? (followed ? "Following" : "Follow") : (probeFailed ? "Retry" : "Checking…"))
+                    .font(theme.typography.button)
+                    .tracking(0.5)
+            }
+            .foregroundStyle(followed ? theme.colors.accent : theme.colors.primaryText)
+            .padding(.horizontal, theme.metrics.controlHorizontalPadding)
+            .padding(.vertical, theme.metrics.controlVerticalPadding)
+            .overlay(
+                RoundedRectangle(cornerRadius: theme.metrics.pillCornerRadius)
+                    .strokeBorder(
+                        followed ? theme.colors.accent : theme.colors.border,
+                        lineWidth: 1
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(!known && !probeFailed)
+        .opacity(!known && !probeFailed ? 0.55 : 1)
+        .help(known ? (followed ? "Unfollow Artist" : "Follow Artist") : "Check follow state")
+    }
+
     private var headerStats: String {
         var stats = ["\(tracks.count) top tracks"]
         if !albums.isEmpty {
@@ -218,7 +265,7 @@ struct ArtistDetailView: View {
         ArtworkView(url: resolvedArtworkURL, size: size) {
             placeholderPortrait(size: size)
         }
-        .clipShape(Circle())
+        .clipShape(theme.id == .classic2010 ? AnyShape(Rectangle()) : AnyShape(Circle()))
     }
 
     private func placeholderPortrait(size: CGFloat) -> some View {

@@ -29,6 +29,8 @@ struct AppContentView: View {
             )
         case .savedAlbums:
             SavedAlbumsView()
+        case .followedArtists:
+            FollowedArtistsView()
         case let .playlist(id, name):
             let info = app.playlists.first { $0.id == id }
             PlaylistDetailView(
