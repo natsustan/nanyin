@@ -757,6 +757,7 @@ private enum StateReducerTests {
             Array(artists.prefix(50)), total: 55, complete: false, overrides: [:]
         )
         expect(cache.artists.count == 50, "a failed tail can retain the first cursor page")
+        expect(cache.displayCount(overrides: [:]) == 55, "an initial partial load adopts the server total")
         expect(cache.hasLoadedAnyData, "a partial fallback is usable library data")
         expect(
             FollowedArtistCache.isCompleteSnapshot(artists, total: 55),
@@ -797,10 +798,11 @@ private enum StateReducerTests {
             followedArtist("b", name: "Björk"),
         ]
         cache.applyServerSnapshot(artists, total: 2, complete: true, overrides: [:])
-        cache.applyServerSnapshot([artists[0]], total: 2, complete: false, overrides: [:])
+        cache.applyServerSnapshot([artists[0]], total: 1, complete: false, overrides: [:])
 
         expect(!cache.isComplete, "a failed tail must invalidate snapshot completeness")
         expect(cache.artists.map(\.id) == ["a", "b"], "a partial fallback retains the cached tail")
+        expect(cache.displayCount(overrides: [:]) == 2, "a mixed partial fallback retains the cached total")
     }
 
     private static func testStaleFollowedArtistsPrefixCannotUndoUnfollow() {

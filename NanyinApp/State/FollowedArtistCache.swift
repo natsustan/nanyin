@@ -39,10 +39,11 @@ struct FollowedArtistCache: Equatable {
         }
         isComplete = complete
         knownIDs.formUnion(snapshotIDs)
-        let canAdoptTotal = complete || overrides.allSatisfy { id, override in
+        let hasCachedTail = artists.contains { !snapshotIDs.contains($0.id) }
+        let canAdoptTotal = complete || (!hasCachedTail && overrides.allSatisfy { id, override in
             if override.followed { return snapshotIDs.contains(id) }
             return false
-        }
+        })
         if canAdoptTotal {
             serverTotal = total
         }
