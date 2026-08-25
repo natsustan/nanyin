@@ -5,8 +5,8 @@
 
 import SwiftUI
 
-/// Artist page: circular portrait header + discography rows (albums, singles)
-/// + top tracks (PlaylistDetailView's structure). Top tracks are small — they
+/// Artist page: themed portrait header + discography rows (albums, singles) +
+/// top tracks (PlaylistDetailView's structure). Top tracks are small — they
 /// play as a bounded ad-hoc context, same path as search results (no server
 /// context URI).
 struct ArtistDetailView: View {
@@ -265,7 +265,7 @@ struct ArtistDetailView: View {
         ArtworkView(url: resolvedArtworkURL, size: size) {
             placeholderPortrait(size: size)
         }
-        .clipShape(Circle())
+        .clipShape(theme.id == .classic2010 ? AnyShape(Rectangle()) : AnyShape(Circle()))
     }
 
     private func placeholderPortrait(size: CGFloat) -> some View {
