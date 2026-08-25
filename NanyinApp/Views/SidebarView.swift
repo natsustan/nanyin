@@ -304,24 +304,26 @@ struct SidebarView: View {
         if let nowPlaying = app.nowPlaying {
             HStack(spacing: 3) {
                 Button(nowPlaying.artist.isEmpty ? "—" : nowPlaying.artist) {
+                    guard !nowPlaying.artists.isEmpty else { return }
                     app.openNowPlayingArtist()
                 }
-                .disabled(nowPlaying.artists.isEmpty)
-                .help("Open artist")
+                .allowsHitTesting(!nowPlaying.artists.isEmpty)
+                .help(nowPlaying.artists.isEmpty ? "Artist unavailable" : "Open artist")
 
                 Text("(")
 
                 Button(nowPlaying.album.isEmpty ? "—" : nowPlaying.album) {
+                    guard nowPlaying.albumId != nil else { return }
                     app.openNowPlayingAlbum()
                 }
-                .disabled(nowPlaying.albumId == nil)
-                .help("Open album")
+                .allowsHitTesting(nowPlaying.albumId != nil)
+                .help(nowPlaying.albumId == nil ? "Album unavailable" : "Open album")
 
                 Text(")")
             }
             .buttonStyle(.plain)
             .font(theme.typography.compact)
-            .foregroundStyle(theme.colors.inverseText.opacity(0.68))
+            .foregroundStyle(theme.colors.inverseText.opacity(0.58))
             .lineLimit(1)
         } else {
             Text("—")
