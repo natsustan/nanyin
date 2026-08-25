@@ -37,6 +37,9 @@ struct SidebarView: View {
             entry(.home, icon: Image(systemName: "house"), title: "Home")
                 .padding(.top, homeTopInset)
             entry(.search, icon: Image(systemName: "magnifyingglass"), title: "Search")
+            if presentation == .nanyinDark {
+                entry(.queue, icon: Image(systemName: "list.bullet"), title: "Queue")
+            }
 
             Divider()
                 .overlay(theme.colors.playerBackground.swiftUIStyle)

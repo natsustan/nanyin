@@ -91,6 +91,7 @@ struct ClassicTitleBarBridge: NSViewRepresentable {
                 return
             }
             guard titleBarView == nil, let app, let theme else { return }
+            guard let container = titleBarContainer(in: window) else { return }
 
             originalConfiguration = WindowConfiguration(window: window)
             window.styleMask.formUnion([
@@ -105,7 +106,6 @@ struct ClassicTitleBarBridge: NSViewRepresentable {
             window.toolbar?.isVisible = false
             setStandardButtons(hidden: true, in: window)
 
-            guard let container = titleBarContainer(in: window) else { return }
             let titleBarView = ClassicAquaTitleBarView()
             titleBarView.translatesAutoresizingMaskIntoConstraints = false
             container.addSubview(titleBarView, positioned: .below, relativeTo: nil)

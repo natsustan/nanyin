@@ -29,7 +29,7 @@ final class ClassicChromeSearchFieldView: NSView, NSSearchFieldDelegate {
     private let borderLayer = BorderLayer()
     private let searchField = NSSearchField()
     private let submitButton = ClassicSearchSubmitButton()
-    private var lastFocusToken = 0
+    private var lastFocusToken: Int?
     private var isEditing = false
 
     override init(frame frameRect: NSRect) {
@@ -173,8 +173,12 @@ final class ClassicChromeSearchFieldView: NSView, NSSearchFieldDelegate {
     }
 
     private func requestFocusIfNeeded() {
+        guard let lastFocusToken else {
+            self.lastFocusToken = style.focusToken
+            return
+        }
         guard style.focusToken != 0, style.focusToken != lastFocusToken else { return }
-        lastFocusToken = style.focusToken
+        self.lastFocusToken = style.focusToken
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.window?.makeFirstResponder(self.searchField)

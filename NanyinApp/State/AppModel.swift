@@ -1828,12 +1828,14 @@ final class AppModel {
 
     /// ⌘K/⌘F: open the Search page and focus the field.
     func focusSearch() {
+        guard authState == .loggedIn else { return }
         open(.search)
         searchFocusToken += 1
     }
 
     /// Debounced as-you-type search (≥300ms, roadmap 3.1).
     func searchDebounced(_ raw: String) {
+        guard authState == .loggedIn else { return }
         searchDebounce?.cancel()
         searchDebounce = Task {
             try? await Task.sleep(for: .milliseconds(350))
@@ -1843,6 +1845,7 @@ final class AppModel {
     }
 
     func search(_ raw: String) {
+        guard authState == .loggedIn else { return }
         let query = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         searchEpoch += 1
         searchDebounce?.cancel() // submit supersedes a pending debounce
