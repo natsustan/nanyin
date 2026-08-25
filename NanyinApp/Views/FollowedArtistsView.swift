@@ -11,6 +11,14 @@ struct FollowedArtistsView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.appTheme) private var theme
     @State private var filterText = ""
+    @State private var sortOrder: SortOrder = .artist
+
+    private enum SortOrder: String, CaseIterable, Identifiable {
+        case artist = "Artist"
+        case spotifyCursor = "Spotify Cursor"
+
+        var id: String { rawValue }
+    }
 
     private var trimmedFilter: String {
         filterText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -23,9 +31,11 @@ struct FollowedArtistsView: View {
                 $0.name.localizedCaseInsensitiveContains(trimmedFilter)
             }
         }
-        artists.sort {
-            let order = $0.name.localizedStandardCompare($1.name)
-            return order == .orderedAscending || (order == .orderedSame && $0.id < $1.id)
+        if sortOrder == .artist {
+            artists.sort {
+                let order = $0.name.localizedStandardCompare($1.name)
+                return order == .orderedAscending || (order == .orderedSame && $0.id < $1.id)
+            }
         }
         return artists
     }
@@ -56,6 +66,7 @@ struct FollowedArtistsView: View {
             HStack(spacing: 12) {
                 filterField
                 Spacer()
+                sortMenu
             }
         }
         .padding(.horizontal, theme.metrics.pageHorizontalInset)
@@ -98,6 +109,29 @@ struct FollowedArtistsView: View {
         .disabled(!app.hasCompleteFollowedArtistsData)
         .opacity(app.hasCompleteFollowedArtistsData ? 1 : 0.55)
         .help(app.hasCompleteFollowedArtistsData ? "Filter artists" : "Retry to load all artists before filtering")
+    }
+
+    private var sortMenu: some View {
+        Menu {
+            Picker("Sort by", selection: $sortOrder) {
+                ForEach(SortOrder.allCases) { order in
+                    Text(order.rawValue).tag(order)
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.up.arrow.down")
+                    .font(theme.typography.compact)
+                Text(sortOrder.rawValue)
+                    .font(theme.typography.metadata)
+            }
+            .foregroundStyle(theme.colors.secondaryText)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .disabled(!app.hasCompleteFollowedArtistsData)
+        .opacity(app.hasCompleteFollowedArtistsData ? 1 : 0.55)
+        .help("Sort artists")
     }
 
     @ViewBuilder

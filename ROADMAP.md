@@ -474,9 +474,9 @@ API and state model:
   and server `total`, retain page one for failure recovery while fetching the
   tail, deduplicate by artist id, and publish a complete snapshot only after
   `next` is nil and the unique item count agrees with `total`. Spotify does not
-  document a semantic ordering for this endpoint, so the UI sorts the complete
-  snapshot by localized artist name instead of exposing a "Spotify Order".
-  This endpoint requires the existing `user-follow-read` scope.
+  document a semantic ordering for this endpoint, so the UI defaults to
+  localized artist-name order while retaining `Spotify Cursor` as an explicit
+  alternative. This endpoint requires the existing `user-follow-read` scope.
 - Spotify removed `PUT/DELETE /v1/me/following` in February 2026. Follow and
   unfollow only through the current unified library interface:
   `PUT /v1/me/library?uris=spotify:artist:<id>` and
