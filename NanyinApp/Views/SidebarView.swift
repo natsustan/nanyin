@@ -19,7 +19,8 @@ struct SidebarView: View {
     /// Hover state for the New Playlist (+) button — local to the sidebar.
     @State private var plusHovering = false
     @State private var signOutHovering = false
-    @State private var isClassicNowPlayingCollapsed = false
+    @AppStorage("sidebar.classicNowPlayingCollapsed")
+    private var isClassicNowPlayingCollapsed = false
 
     init(presentation: SidebarPresentation = .nanyinDark) {
         self.presentation = presentation
@@ -241,8 +242,8 @@ struct SidebarView: View {
 
     private var classicCompactNowPlaying: some View {
         HStack(spacing: 8) {
-            classicArtwork(size: 52)
-                .frame(width: 52, height: 52)
+            classicArtwork(size: 54)
+                .frame(width: 54, height: 54)
                 .clipped()
 
             if let nowPlaying = app.nowPlaying {
