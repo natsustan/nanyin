@@ -355,7 +355,10 @@ main() {
     generate_sparkle_appcast
   fi
 
-  shasum -a 256 "$DMG_PATH" > "$DMG_PATH.sha256"
+  (
+    cd "$RELEASE_DIR"
+    shasum -a 256 "$(basename "$DMG_PATH")" > "$(basename "$DMG_PATH").sha256"
+  )
   echo "Release app: $APP_BUNDLE"
   echo "Release DMG: $DMG_PATH"
   echo "SHA-256: $DMG_PATH.sha256"
