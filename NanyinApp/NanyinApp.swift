@@ -3,6 +3,7 @@
 //  Nanyin
 //
 
+import Sparkle
 import SwiftUI
 
 @MainActor
@@ -10,10 +11,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     static var shared: AppDelegate?
     /// The single app-wide model (shared by UI, media keys, and remote commands).
     let appModel = AppModel()
+    private let updaterController: SPUStandardUpdaterController
 
     override init() {
+        updaterController = SPUStandardUpdaterController(
+            startingUpdater: true,
+            updaterDelegate: nil,
+            userDriverDelegate: nil
+        )
         super.init()
         Self.shared = self
+    }
+
+    func checkForUpdates() {
+        updaterController.checkForUpdates(nil)
     }
 
     /// Cheap Liked Songs probe when coming back from another app (phone like
@@ -56,6 +67,11 @@ struct NanyinApp: App {
         .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(.unified(showsTitle: false))
         .commands {
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") {
+                    delegate.checkForUpdates()
+                }
+            }
             CommandGroup(after: .newItem) {
                 Button("Search") { delegate.appModel.focusSearch() }
                     .keyboardShortcut("k", modifiers: .command)

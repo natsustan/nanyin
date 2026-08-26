@@ -27,6 +27,7 @@
 		4EC4005CBB59A6B4F9BF51CD /* ThemeSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F44F7DCE76E9710B8B7CCF3C /* ThemeSettingsView.swift */; };
 		52B63753341B65F4678AB876 /* NewPlaylistSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10B7E73922A5EDF16DA2D101 /* NewPlaylistSheet.swift */; };
 		539DBBE8B281B8EA226EF674 /* ChromeSliderTrack.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADAF42C16B8EF1413FC9E218 /* ChromeSliderTrack.swift */; };
+		53FA7B6D6DFC1738B7A1528E /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = E648D54B7F3A2D5EB4AC0C0C /* Sparkle */; };
 		546CCAB14C2F7992EBE66196 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 196502AD5E98E680CB17BD1E /* AppModel.swift */; };
 		5682C32BA41F5DA9D173E728 /* QueueView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61564C1B59DBCF7E35D071B3 /* QueueView.swift */; };
 		56EA31B8738E2B0828584E14 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9DA62671ECF8B9C27AA8947 /* KeychainStore.swift */; };
@@ -113,6 +114,7 @@
 		AA6332196A87845CF96EBF8B /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		ADAF42C16B8EF1413FC9E218 /* ChromeSliderTrack.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromeSliderTrack.swift; sourceTree = "<group>"; };
 		AF1CAE36B8A3FE11D18B93B9 /* PlaybackTimeFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackTimeFormatter.swift; sourceTree = "<group>"; };
+		AF563C8FD915FFE2A17701A0 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		B5D5892A75C75A7736107AEE /* ArtworkView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtworkView.swift; sourceTree = "<group>"; };
 		B9D94ED4DB09441D529487CA /* HomeFeed.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeFeed.swift; sourceTree = "<group>"; };
 		C2CC8CB2F66E24260D048945 /* PlaybackStallDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackStallDetector.swift; sourceTree = "<group>"; };
@@ -140,6 +142,7 @@
 			files = (
 				FBB1CACFEE36F0855B5D4CC4 /* SystemConfiguration.framework in Frameworks */,
 				1F95067B899D9D06EF8C1CCD /* ChouTiUI in Frameworks */,
+				53FA7B6D6DFC1738B7A1528E /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -291,6 +294,7 @@
 			isa = PBXGroup;
 			children = (
 				76BAF3B565A2B4E3EC2BC956 /* Assets.xcassets */,
+				AF563C8FD915FFE2A17701A0 /* Info.plist */,
 				D16BE0C19B1222A7FFFA360C /* NanyinApp.swift */,
 				FE20EAE131182D00019CD5F1 /* Audio */,
 				F5DCA635E2C023950945B4A3 /* Classic */,
@@ -320,6 +324,7 @@
 			name = Nanyin;
 			packageProductDependencies = (
 				DB31B019530AC3D9E7DAD07E /* ChouTiUI */,
+				E648D54B7F3A2D5EB4AC0C0C /* Sparkle */,
 			);
 			productName = Nanyin;
 			productReference = 407D7A1D4B2A09E284C8A895 /* Nanyin.app */;
@@ -350,6 +355,7 @@
 			mainGroup = 2924F003B6BC2588327A0A11;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				DE6314A910D1ED2BCE31AF58 /* XCRemoteSwiftPackageReference "Sparkle" */,
 				0E939310993C9733D098E7CB /* XCLocalSwiftPackageReference "research-repos/ChouTiUI" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -470,9 +476,8 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_HARDENED_RUNTIME = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = nanyin;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = NanyinApp/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
 				MARKETING_VERSION = 0.1.0;
 				OTHER_LDFLAGS = "$(SRCROOT)/build/rust/lib/libnanyin_core.a";
@@ -487,6 +492,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
@@ -518,7 +524,8 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGNING_ALLOWED = NO;
 				CODE_SIGN_STYLE = Automatic;
-				COPY_PHASE_STRIP = NO;
+				COPY_PHASE_STRIP = YES;
+				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = "";
 				ENABLE_NS_ASSERTIONS = NO;
@@ -536,6 +543,7 @@
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
+				STRIP_INSTALLED_PRODUCT = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.10;
@@ -549,9 +557,8 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_HARDENED_RUNTIME = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = nanyin;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = NanyinApp/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
 				MARKETING_VERSION = 0.1.0;
 				OTHER_LDFLAGS = "$(SRCROOT)/build/rust/lib/libnanyin_core.a";
@@ -658,10 +665,26 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		DE6314A910D1ED2BCE31AF58 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = exactVersion;
+				version = 2.9.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		DB31B019530AC3D9E7DAD07E /* ChouTiUI */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = ChouTiUI;
+		};
+		E648D54B7F3A2D5EB4AC0C0C /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DE6314A910D1ED2BCE31AF58 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

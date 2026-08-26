@@ -1,7 +1,7 @@
 # nanyin — Roadmap
 
-> Status: M0 ✅ · M1 ✅ · hardening ✅ · M2 ✅ · M3 ✅ · M4.1 ✅ · M4.2 ✅ · M4.3 ✅ · M4.4 ✅ · M4.5 ✅ (offline) · next: M4.6
-> Last updated: 2026-08-21
+> Status: M0 ✅ · M1 ✅ · hardening ✅ · M2 ✅ · M3 ✅ · M4.1 ✅ · M4.2 ✅ · M4.3 ✅ · M4.4 ✅ · M4.5 ✅ (offline) · M4.9 ✅ (offline) · next: M4.6
+> Last updated: 2026-08-26
 
 ## Completed
 
@@ -108,9 +108,9 @@ Note: ncspot client id keeps /v1/search working (production-approved app).
 | 4.4 | Personalized Home | ✅ done 2026-08-20. Recently Played, Top Tracks, Top Artists, and Your Library from public Web API endpoints; independent section loading and cache/failure handling | 1d |
 | 4.5 | Playlist create/add | ✅ done 2026-08-21 (offline). `+` beside the sidebar `PLAYLISTS` title opens New Playlist; track context menus add to owned playlists. Uses `/v1/me/playlists` + `/v1/playlists/{id}/items`. Live verification pending explicit approval | 0.5d |
 | 4.6 | Playlist search/filter | **Next.** Client-side filter row in detail view | 0.25d |
-| 4.7 | Keyboard navigation | ↑↓ already free via List; Enter = play; Space = play/pause (global) | 0.25d |
+| 4.7 | Keyboard navigation | **Partial.** ↑↓ is provided by `List`; global Space = play/pause is implemented. Enter = play remains. | 0.25d |
 | 4.8 | Window: mini-player | Collapsed player-bar-only mode (classic Winamp-ish) | 0.5d |
-| 4.9 | Followed Artists / artist library | **Planned.** Library page for followed artists plus Follow/Following controls on artist detail pages; cursor pagination, filtering, optimistic writes, and cross-client reconciliation | 1.5–2d |
+| 4.9 | Followed Artists / artist library | ✅ done 2026-08-25 (offline). Library page, Follow/Following controls, cursor pagination, filtering, optimistic writes, and cross-client reconciliation. Live verification pending explicit approval. | 1.5–2d |
 
 ### M4.3 — Album Library product plan
 
@@ -427,6 +427,21 @@ Acceptance criteria:
 
 ### M4.9 — Followed Artists / Artist Library plan
 
+Progress 2026-08-25 (implementation): all four delivery slices landed
+offline. `SpotifyClient` pages `GET /v1/me/following?type=artist` using its
+cursor and mutates membership through the unified `/v1/me/library` API;
+`FollowedArtistCache` reconciles complete and partial snapshots with optimistic
+overrides. `AppModel` provides epoch-fenced, throttled refreshes, serialized
+per-artist writes, membership probes, rollback, and sign-out cleanup. The new
+Artists sidebar route has a count, adaptive portrait grid, client-side filter,
+localized-name/Spotify-cursor sorting, partial-load retry state, artist
+navigation/playback, and follow/unfollow/copy-link menus. Artist headers now
+expose Follow/Following in both shell presentations. Deterministic reducer and
+decode coverage includes cursor paging beyond 50 items, deduplication, stale
+or partial snapshots, rollback, override expiry, and account-epoch fencing.
+`script/agent_check.sh` passed on 2026-08-26. Live follow/unfollow and
+server-refresh verification remains opt-in.
+
 Goal: make followed artists a first-class Library surface. A user can browse
 every artist they follow, filter the collection, open or play an artist, and
 follow/unfollow from the existing artist detail page. "Followed Artists" is
@@ -537,10 +552,23 @@ Acceptance criteria:
 
 | # | Item | Notes |
 |---|------|-------|
-| 5.1 | Signing + notarization | Developer ID; hardened runtime exceptions (none expected — audio via AVAudioEngine, network via URLSession) | 0.5d |
-| 5.2 | Sparkle updates | appcast + delta | 0.5d |
-| 5.3 | Release build profile | Rust LTO already on; verify release-vs-debug audio latency; strip symbols | 0.25d |
-| 5.4 | DMG / Homebrew cask | | 0.25d |
+| 5.1 | Signing + notarization | ✅ done 2026-08-27. Developer ID + secure timestamps on app/DMG, Hardened Runtime with no entitlement exceptions, Apple notarization via the existing same-team `notomo-api` profile, stapling, and Gatekeeper assessment | 0.5d |
+| 5.2 | Sparkle updates | ✅ done 2026-08-27. Sparkle 2.9.1, app-menu update check, GitHub Releases feed, isolated Keychain signing key, EdDSA appcast/update ZIP, and up to five deltas once a previous compatible release exists. Initial feed ships with v0.1.0 | 0.5d |
+| 5.3 | Release build profile | ✅ offline 2026-08-27: arm64 Xcode archive, Swift `-O`, dead-code stripping, dSYM retained, Rust opt-level 3 + LTO. Release-vs-debug audio latency remains live-only | 0.25d |
+| 5.4 | DMG / Homebrew cask | ✅ done 2026-08-27. Notarized/stapled DMG with Applications link + SHA-256; arm64/macOS 15 cask uses the immutable v0.1.0 GitHub Release URL and Sparkle livecheck | 0.25d |
+
+M5 readiness audit 2026-08-27: the machine has one valid Developer ID
+Application identity. The Rust core is an arm64 static library, so the first
+release is explicitly Apple Silicon-only on macOS 15+.
+`script/package_release.sh` creates an unsigned local archive/DMG by default;
+`--sign` and `--notarize` are deliberate opt-ins. The unsigned archive and DMG
+passed local structure, architecture, and checksum verification without
+launching Nanyin or contacting Spotify. Full offline `script/agent_check.sh`
+also passed. The final Sparkle-enabled Developer ID app and DMG were accepted
+by Apple's notary service and stapled; nested Sparkle helpers/XPC services pass
+strict signing verification and Gatekeeper reports
+`source=Notarized Developer ID`. The first EdDSA appcast and update ZIP were
+generated, independently signature-verified, and published with v0.1.0.
 
 ## Explicitly out of scope (for now)
 

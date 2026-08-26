@@ -4,6 +4,12 @@ A native macOS Spotify client with the feel of the classic (pre-Electron-look) d
 
 > **Unofficial client.** Not affiliated with Spotify. Requires a **Spotify Premium** account. Using it is against the Spotify ToS — use a secondary account if that concerns you.
 
+## Install
+
+Download the notarized Apple Silicon DMG from
+[GitHub Releases](https://github.com/natsustan/nanyin/releases). Nanyin requires
+macOS 15 or later and updates itself through Sparkle.
+
 ## Architecture
 
 ```
@@ -59,13 +65,28 @@ xcodebuild -project Nanyin.xcodeproj -scheme Nanyin -configuration Debug build
 ./rust/build.sh          # standalone Rust core build
 ```
 
+## Distribution
+
+Build an unsigned, arm64 Release app and DMG without launching Nanyin or
+contacting Spotify/Apple:
+
+```sh
+./script/package_release.sh
+```
+
+Developer ID signing and notarization are opt-in. See
+[`docs/distribution.md`](docs/distribution.md) for credentials, commands, and
+the release checklist.
+
 ## Status
 
 | Milestone | Scope | State |
 |---|---|---|
-| M0 | Login → play any track by URI/URL → audio out, player bar | ✅ scaffolded, needs live testing |
-| M1 | Liked Songs, playlists, covers, track lists | — |
-| M2 | Queue, shuffle/repeat, media keys, MPNowPlayingInfo | — |
-| M3 | Search | — |
+| M0 | Login, playback core, audio renderer, player bar | ✅ |
+| M1 | Liked Songs, playlists, covers, track lists | ✅ |
+| M2 | Queue, shuffle/repeat, media keys, MPNowPlayingInfo | ✅ |
+| M3 | Search | ✅ |
+| M4 | Library expansion, personalized Home, themes and polish | In progress; see `ROADMAP.md` |
+| M5 | Signing, notarization, Sparkle, DMG and Homebrew cask | ✅ v0.1.0 |
 
 Out of scope for MVP: Spotify Connect as a *remote*, podcasts, lyrics, offline caching, social.

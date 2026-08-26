@@ -11,10 +11,19 @@ settings:
     DEVELOPMENT_TEAM: ""
     CODE_SIGN_STYLE: Automatic
     CODE_SIGNING_ALLOWED: "NO"
+  configs:
+    Release:
+      ARCHS: arm64
+      COPY_PHASE_STRIP: "YES"
+      DEAD_CODE_STRIPPING: "YES"
+      STRIP_INSTALLED_PRODUCT: "YES"
 
 packages:
   ChouTiUI:
     path: research-repos/ChouTiUI
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: 2.9.1
 
 targets:
   Nanyin:
@@ -25,6 +34,7 @@ targets:
     dependencies:
       - sdk: SystemConfiguration.framework
       - package: ChouTiUI
+      - package: Sparkle
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.nanyin.app
@@ -36,9 +46,8 @@ targets:
         SWIFT_INCLUDE_PATHS: "$(SRCROOT)/build/rust/include"
         OTHER_LDFLAGS: "$(SRCROOT)/build/rust/lib/libnanyin_core.a"
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks"
-        GENERATE_INFOPLIST_FILE: "YES"
-        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.music
-        INFOPLIST_KEY_CFBundleDisplayName: nanyin
+        GENERATE_INFOPLIST_FILE: "NO"
+        INFOPLIST_FILE: NanyinApp/Info.plist
         ENABLE_HARDENED_RUNTIME: "YES"
     preBuildScripts:
       - name: Build Rust Core
