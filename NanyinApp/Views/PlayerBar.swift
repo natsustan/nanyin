@@ -117,7 +117,7 @@ struct PlayerBar: View {
                     }
                     .buttonStyle(.plain)
 
-                    button("backward.fill") { app.prev() }
+                    transportButton("PreviousTrack", action: app.prev)
                     Button {
                         app.togglePlay()
                     } label: {
@@ -126,7 +126,7 @@ struct PlayerBar: View {
                             .foregroundStyle(theme.colors.primaryText)
                     }
                     .buttonStyle(.plain)
-                    button("forward.fill") { app.next() }
+                    transportButton("NextTrack", action: app.next)
 
                     Button {
                         app.cycleRepeat()
@@ -199,7 +199,7 @@ struct PlayerBar: View {
                 ChromeButton(
                     title: "",
                     accessibilityLabel: "Previous track",
-                    symbolName: "backward.fill",
+                    assetName: "ClassicPreviousTrack",
                     style: ChromeStyle(role: .transport, size: CGSize(width: 24, height: 24)),
                     action: app.prev
                 )
@@ -213,7 +213,7 @@ struct PlayerBar: View {
                 ChromeButton(
                     title: "",
                     accessibilityLabel: "Next track",
-                    symbolName: "forward.fill",
+                    assetName: "ClassicNextTrack",
                     style: ChromeStyle(role: .transport, size: CGSize(width: 24, height: 24)),
                     action: app.next
                 )
@@ -418,6 +418,18 @@ struct PlayerBar: View {
         Button(action: action) {
             Image(systemName: icon)
                 .font(theme.typography.controlLabel)
+                .foregroundStyle(theme.colors.secondaryText)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func transportButton(_ assetName: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(assetName)
+                .resizable()
+                .renderingMode(.template)
+                .scaledToFit()
+                .frame(width: 16, height: 16)
                 .foregroundStyle(theme.colors.secondaryText)
         }
         .buttonStyle(.plain)

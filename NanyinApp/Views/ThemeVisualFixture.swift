@@ -365,7 +365,7 @@ struct ThemeVisualFixture: View {
                     ChromeButton(
                         title: "",
                         accessibilityLabel: "Previous track",
-                        symbolName: "backward.fill",
+                        assetName: "ClassicPreviousTrack",
                         style: ChromeStyle(role: .transport, size: CGSize(width: 24, height: 24))
                     )
                     .disabled(state == .disabled)
@@ -379,7 +379,7 @@ struct ThemeVisualFixture: View {
                     ChromeButton(
                         title: "",
                         accessibilityLabel: "Next track",
-                        symbolName: "forward.fill",
+                        assetName: "ClassicNextTrack",
                         style: ChromeStyle(role: .transport, size: CGSize(width: 24, height: 24))
                     )
                     .disabled(state == .disabled)
@@ -438,9 +438,13 @@ struct ThemeVisualFixture: View {
             .background { ChromeSectionBar(style: ChromeSectionBarStyle(height: theme.metrics.playerBarHeight)) }
         } else {
             HStack(spacing: 10) {
-                Button("◀") {}
+                Button {} label: {
+                    transportFixtureIcon("PreviousTrack")
+                }
                 Button(state == .pressed ? "❚❚" : "▶") {}
-                Button("▶") {}
+                Button {} label: {
+                    transportFixtureIcon("NextTrack")
+                }
                 Rectangle()
                     .fill(theme.colors.divider)
                     .frame(width: 1, height: 28)
@@ -461,6 +465,14 @@ struct ThemeVisualFixture: View {
             .frame(height: theme.metrics.playerBarHeight)
             .background(theme.colors.playerBackground.swiftUIStyle)
         }
+    }
+
+    private func transportFixtureIcon(_ assetName: String) -> some View {
+        Image(assetName)
+            .resizable()
+            .renderingMode(.template)
+            .scaledToFit()
+            .frame(width: 16, height: 16)
     }
 }
 
