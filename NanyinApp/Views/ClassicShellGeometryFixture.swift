@@ -144,7 +144,7 @@ struct ClassicShellGeometryFixture: View {
                 ChromeButton(
                     title: "",
                     accessibilityLabel: "Previous track",
-                    symbolName: "backward.fill",
+                    assetName: "ClassicPreviousTrack",
                     style: ChromeStyle(role: .transport, size: CGSize(width: 24, height: 24))
                 )
                 ChromeButton(
@@ -156,7 +156,7 @@ struct ClassicShellGeometryFixture: View {
                 ChromeButton(
                     title: "",
                     accessibilityLabel: "Next track",
-                    symbolName: "forward.fill",
+                    assetName: "ClassicNextTrack",
                     style: ChromeStyle(role: .transport, size: CGSize(width: 24, height: 24))
                 )
                 Spacer(minLength: 6)

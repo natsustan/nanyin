@@ -9,6 +9,7 @@ struct ChromeButton: View {
     let title: String
     var accessibilityLabel: String? = nil
     var symbolName: String? = nil
+    var assetName: String? = nil
     var style = ChromeStyle()
     var action: () -> Void = {}
 
@@ -30,7 +31,13 @@ struct ChromeButton: View {
         )
         .overlay {
             Group {
-                if let symbolName {
+                if let assetName {
+                    Image(assetName)
+                        .resizable()
+                        .renderingMode(.template)
+                        .scaledToFit()
+                        .frame(width: symbolSize, height: symbolSize)
+                } else if let symbolName {
                     Image(systemName: symbolName)
                         .font(.system(size: symbolSize, weight: .bold))
                 } else {
@@ -48,7 +55,7 @@ struct ChromeButton: View {
 
     private var symbolSize: CGFloat {
         switch style.role {
-        case .transport: 10
+        case .transport: assetName == nil ? 10 : 12
         case .titlebarNavigation: 10
         case .pill: 9
         }

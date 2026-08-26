@@ -24,6 +24,7 @@ final class ClassicChromeSliderTrackView: NSView {
 
     private let borderLayer = BorderLayer()
     private let progressView = NSView()
+    private let thumbView = NSView()
     private var isDragging = false
 
     override init(frame frameRect: NSRect) {
@@ -37,6 +38,8 @@ final class ClassicChromeSliderTrackView: NSView {
         progressView.wantsLayer = true
         progressView.isHidden = true
         addSubview(progressView)
+        thumbView.wantsLayer = true
+        addSubview(thumbView)
         updateAppearance()
     }
 
@@ -53,6 +56,10 @@ final class ClassicChromeSliderTrackView: NSView {
         style.isEnabled
     }
 
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        bounds.contains(point) ? self : nil
+    }
+
     override func layout() {
         super.layout()
         borderLayer.frame = bounds
@@ -65,6 +72,18 @@ final class ClassicChromeSliderTrackView: NSView {
             y: trackBounds.minY,
             width: max(width, width > 0 ? 3 : 0),
             height: trackBounds.height
+        )
+        let thumbDiameter = trackBounds.height
+        let thumbRadius = thumbDiameter / 2
+        let thumbCenterX = min(
+            max(trackBounds.minX + width, trackBounds.minX + thumbRadius),
+            trackBounds.maxX - thumbRadius
+        )
+        thumbView.frame = NSRect(
+            x: thumbCenterX - thumbRadius,
+            y: trackBounds.midY - thumbRadius,
+            width: thumbDiameter,
+            height: thumbDiameter
         )
     }
 
@@ -129,7 +148,9 @@ final class ClassicChromeSliderTrackView: NSView {
     }
 
     private func updateAppearance() {
-        guard let layer, let progressLayer = progressView.layer else { return }
+        guard let layer,
+              let progressLayer = progressView.layer,
+              let thumbLayer = thumbView.layer else { return }
         let shape = ChouTiUI.Capsule(style: .circular)
         layer.shape = shape
         borderLayer.borderMask = .shape(shape, offset: -0.5)
@@ -140,6 +161,8 @@ final class ClassicChromeSliderTrackView: NSView {
         progressLayer.shape = ChouTiUI.Capsule(style: .circular)
         progressLayer.backgroundColor = nsColor(style.palette.sliderProgress).cgColor
         progressView.isHidden = clampedFraction <= 0
+        thumbLayer.shape = ChouTiUI.Capsule(style: .circular)
+        thumbLayer.backgroundColor = nsColor(style.palette.sliderThumb).cgColor
         alphaValue = style.isEnabled ? 1 : style.palette.disabledAlpha
         setAccessibilityEnabled(style.isEnabled)
         setAccessibilityValue(NSNumber(value: clampedFraction))

@@ -19,7 +19,8 @@ struct SidebarView: View {
     /// Hover state for the New Playlist (+) button — local to the sidebar.
     @State private var plusHovering = false
     @State private var signOutHovering = false
-    @State private var isClassicNowPlayingCollapsed = false
+    @AppStorage("sidebar.classicNowPlayingCollapsed")
+    private var isClassicNowPlayingCollapsed = false
 
     init(presentation: SidebarPresentation = .nanyinDark) {
         self.presentation = presentation
@@ -100,7 +101,7 @@ struct SidebarView: View {
                     .padding(.bottom, theme.metrics.smallPadding)
             }
 
-            if presentation == .classic2010 {
+            if presentation == .classic2010, app.nowPlaying != nil {
                 classicNowPlayingPanel
             }
 
@@ -241,19 +242,30 @@ struct SidebarView: View {
 
     private var classicCompactNowPlaying: some View {
         HStack(spacing: 8) {
-            classicArtwork(size: 52)
-                .frame(width: 52, height: 52)
+            classicArtwork(size: 54)
+                .frame(width: 54, height: 54)
                 .clipped()
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(app.nowPlaying?.title ?? "Not playing")
-                    .font(theme.typography.playerTitle)
-                    .foregroundStyle(theme.colors.inverseText.opacity(0.92))
-                    .lineLimit(1)
+            if let nowPlaying = app.nowPlaying {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 4) {
+                        Text(nowPlaying.title)
+                            .font(theme.typography.playerTitle)
+                            .foregroundStyle(theme.colors.inverseText.opacity(0.92))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .layoutPriority(1)
 
-                classicNowPlayingArtistAndAlbum
+                        classicNowPlayingLikeButton
+                    }
+                    // Reserve the top-right corner for the collapse control so
+                    // the title and its liked-state marker never sit beneath it.
+                    .padding(.trailing, 24)
+
+                    classicNowPlayingArtistAndAlbum
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.trailing, 2)
         .frame(height: 54)
@@ -265,46 +277,54 @@ struct SidebarView: View {
 
     private var classicNowPlayingMetadata: some View {
         ZStack(alignment: .trailing) {
-            VStack(spacing: 2) {
-                Text(app.nowPlaying?.title ?? "Not playing")
-                    .font(theme.typography.playerTitle)
-                    .foregroundStyle(theme.colors.inverseText.opacity(0.92))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+            if let nowPlaying = app.nowPlaying {
+                VStack(spacing: 2) {
+                    Text(nowPlaying.title)
+                        .font(theme.typography.playerTitle)
+                        .foregroundStyle(theme.colors.inverseText.opacity(0.92))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
 
-                classicNowPlayingArtistAndAlbum
-            }
-            // Keep the metadata out of the right-side action area: the like
-            // button occupies 26 pt plus its trailing inset, while the
-            // collapse button remains in the top-right corner.
-            .padding(.leading, 24)
-            .padding(.trailing, 58)
-            .frame(maxWidth: .infinity)
-
-            if let nowPlaying = app.nowPlaying,
-               let id = SpotifyClient.trackId(from: nowPlaying.uri) {
-                let known = app.isLikeKnown(id)
-                let liked = app.likedIDs.contains(id)
-                Button {
-                    app.toggleLikePlaying()
-                } label: {
-                    Image(systemName: liked ? "heart.fill" : "heart")
-                        .font(theme.typography.compact)
-                        .foregroundStyle(liked ? theme.colors.accent : theme.colors.inverseText.opacity(0.58))
-                        .frame(width: 26, height: 36)
-                        .contentShape(Rectangle())
+                    classicNowPlayingArtistAndAlbum
                 }
-                .buttonStyle(.plain)
-                .disabled(!known)
-                .opacity(known ? 1 : 0.35)
+                // Keep the metadata out of the right-side action area: the like
+                // button occupies 26 pt plus its trailing inset, while the
+                // collapse button remains in the top-right corner.
+                .padding(.leading, 24)
+                .padding(.trailing, 58)
+                .frame(maxWidth: .infinity)
+            }
+
+            classicNowPlayingLikeButton
+                .frame(width: 26, height: 36)
                 .padding(.trailing, 24)
-                .help(known ? (liked ? "Remove from Liked Songs" : "Save to Liked Songs") : "Checking Liked Songs…")
-                .task(id: id) {
-                    app.requestLikedState(id)
-                }
-            }
 
             classicNowPlayingCollapseButton
+        }
+    }
+
+    @ViewBuilder
+    private var classicNowPlayingLikeButton: some View {
+        if let nowPlaying = app.nowPlaying,
+           let id = SpotifyClient.trackId(from: nowPlaying.uri) {
+            let known = app.isLikeKnown(id)
+            let liked = app.likedIDs.contains(id)
+            Button {
+                app.toggleLikePlaying()
+            } label: {
+                Image(systemName: liked ? "heart.fill" : "heart")
+                    .font(theme.typography.compact)
+                    .foregroundStyle(liked ? theme.colors.accent : theme.colors.inverseText.opacity(0.58))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!known)
+            .opacity(known ? 1 : 0.35)
+            .accessibilityLabel(known ? (liked ? "Remove from Liked Songs" : "Save to Liked Songs") : "Checking Liked Songs")
+            .help(known ? (liked ? "Remove from Liked Songs" : "Save to Liked Songs") : "Checking Liked Songs…")
+            .task(id: id) {
+                app.requestLikedState(id)
+            }
         }
     }
 
