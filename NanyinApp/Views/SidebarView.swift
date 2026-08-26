@@ -247,10 +247,19 @@ struct SidebarView: View {
 
             if let nowPlaying = app.nowPlaying {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(nowPlaying.title)
-                        .font(theme.typography.playerTitle)
-                        .foregroundStyle(theme.colors.inverseText.opacity(0.92))
-                        .lineLimit(1)
+                    HStack(spacing: 4) {
+                        Text(nowPlaying.title)
+                            .font(theme.typography.playerTitle)
+                            .foregroundStyle(theme.colors.inverseText.opacity(0.92))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .layoutPriority(1)
+
+                        classicNowPlayingLikeButton
+                    }
+                    // Reserve the top-right corner for the collapse control so
+                    // the title and its liked-state marker never sit beneath it.
+                    .padding(.trailing, 24)
 
                     classicNowPlayingArtistAndAlbum
                 }
@@ -285,30 +294,36 @@ struct SidebarView: View {
                 .frame(maxWidth: .infinity)
             }
 
-            if let nowPlaying = app.nowPlaying,
-               let id = SpotifyClient.trackId(from: nowPlaying.uri) {
-                let known = app.isLikeKnown(id)
-                let liked = app.likedIDs.contains(id)
-                Button {
-                    app.toggleLikePlaying()
-                } label: {
-                    Image(systemName: liked ? "heart.fill" : "heart")
-                        .font(theme.typography.compact)
-                        .foregroundStyle(liked ? theme.colors.accent : theme.colors.inverseText.opacity(0.58))
-                        .frame(width: 26, height: 36)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .disabled(!known)
-                .opacity(known ? 1 : 0.35)
+            classicNowPlayingLikeButton
+                .frame(width: 26, height: 36)
                 .padding(.trailing, 24)
-                .help(known ? (liked ? "Remove from Liked Songs" : "Save to Liked Songs") : "Checking Liked Songs…")
-                .task(id: id) {
-                    app.requestLikedState(id)
-                }
-            }
 
             classicNowPlayingCollapseButton
+        }
+    }
+
+    @ViewBuilder
+    private var classicNowPlayingLikeButton: some View {
+        if let nowPlaying = app.nowPlaying,
+           let id = SpotifyClient.trackId(from: nowPlaying.uri) {
+            let known = app.isLikeKnown(id)
+            let liked = app.likedIDs.contains(id)
+            Button {
+                app.toggleLikePlaying()
+            } label: {
+                Image(systemName: liked ? "heart.fill" : "heart")
+                    .font(theme.typography.compact)
+                    .foregroundStyle(liked ? theme.colors.accent : theme.colors.inverseText.opacity(0.58))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!known)
+            .opacity(known ? 1 : 0.35)
+            .accessibilityLabel(known ? (liked ? "Remove from Liked Songs" : "Save to Liked Songs") : "Checking Liked Songs")
+            .help(known ? (liked ? "Remove from Liked Songs" : "Save to Liked Songs") : "Checking Liked Songs…")
+            .task(id: id) {
+                app.requestLikedState(id)
+            }
         }
     }
 
