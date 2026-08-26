@@ -24,6 +24,7 @@ struct ChromePalette: Equatable {
     let controlHoverBorder: ChromeColor
     let sliderBorder: ChromeColor
     let sliderProgress: ChromeColor
+    let sliderThumb: ChromeColor
     let disabledAlpha: CGFloat
 
     static let nanyinDark = Self(
@@ -50,6 +51,7 @@ struct ChromePalette: Equatable {
         controlHoverBorder: ChromeColor(red: 1, green: 1, blue: 1, alpha: 0.58),
         sliderBorder: ChromeColor(red: 1, green: 1, blue: 1, alpha: 0.38),
         sliderProgress: ChromeColor(red: 0.72, green: 0.72, blue: 0.72, alpha: 1),
+        sliderThumb: ChromeColor(red: 0.92, green: 0.92, blue: 0.92, alpha: 1),
         disabledAlpha: 0.45
     )
 
@@ -80,7 +82,8 @@ struct ChromePalette: Equatable {
         controlBorder: ChromeColor(red: 0.20, green: 0.20, blue: 0.20, alpha: 0.95),
         controlHoverBorder: ChromeColor(red: 0.08, green: 0.08, blue: 0.08, alpha: 1),
         sliderBorder: ChromeColor(red: 0.08, green: 0.08, blue: 0.08, alpha: 0.82),
-        sliderProgress: ChromeColor(red: 0.54, green: 0.62, blue: 0.38, alpha: 1),
+        sliderProgress: ChromeColor(red: 0.18, green: 0.18, blue: 0.18, alpha: 1),
+        sliderThumb: ChromeColor(red: 0.92, green: 0.92, blue: 0.92, alpha: 1),
         disabledAlpha: 0.45
     )
 }
