@@ -8,6 +8,7 @@ import SwiftUI
 struct ChromeSliderTrack: View {
     let style: ChromeSliderStyle
     var fillsAvailableWidth = false
+    var accessibilityLabel = "Playback progress"
     var onChanged: (Double) -> Void = { _ in }
     var onEnded: (Double) -> Void = { _ in }
     var onCancelled: () -> Void = {}
@@ -36,6 +37,7 @@ struct ChromeSliderTrack: View {
         layoutStyle.size.width = width
         return ClassicChromeSliderTrackRepresentable(
             style: layoutStyle,
+            accessibilityLabel: accessibilityLabel,
             onChanged: onChanged,
             onEnded: onEnded,
             onCancelled: onCancelled
@@ -46,6 +48,7 @@ struct ChromeSliderTrack: View {
 
 private struct ClassicChromeSliderTrackRepresentable: NSViewRepresentable {
     let style: ChromeSliderStyle
+    let accessibilityLabel: String
     let onChanged: (Double) -> Void
     let onEnded: (Double) -> Void
     let onCancelled: () -> Void
@@ -55,6 +58,7 @@ private struct ClassicChromeSliderTrackRepresentable: NSViewRepresentable {
     }
 
     func updateNSView(_ view: ClassicChromeSliderTrackView, context: Context) {
+        view.setAccessibilityLabel(accessibilityLabel)
         view.onChanged = onChanged
         view.onEnded = onEnded
         view.onCancelled = onCancelled

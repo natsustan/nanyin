@@ -220,13 +220,17 @@ struct PlayerBar: View {
 
                 Spacer(minLength: 6)
 
-                Slider(value: Binding(
-                    get: { app.volume },
-                    set: { app.setVolume($0) }
-                ), in: 0 ... 1)
-                .controlSize(.mini)
-                .frame(width: 68)
-                .disabled(!app.isPlaybackReady)
+                ChromeSliderTrack(
+                    style: ChromeSliderStyle(
+                        size: CGSize(width: 68, height: 10),
+                        fraction: app.volume,
+                        isEnabled: app.isPlaybackReady,
+                        activeAlpha: 0.72
+                    ),
+                    accessibilityLabel: "Volume",
+                    onChanged: { app.setVolume($0) },
+                    onEnded: { app.setVolume($0) }
+                )
 
                 Image(systemName: "speaker.wave.2.fill")
                     .font(.system(size: 10, weight: .medium))

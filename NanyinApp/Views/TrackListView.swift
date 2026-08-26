@@ -521,7 +521,9 @@ private struct ClassicTrackRow: View {
         if isSelected { return theme.colors.rowSelected.swiftUIStyle }
         if isCurrent { return theme.colors.rowCurrent.swiftUIStyle }
         if hovering { return theme.colors.rowHover.swiftUIStyle }
-        return AnyShapeStyle(Color.clear)
+        return index.isMultiple(of: 2)
+            ? AnyShapeStyle(Color.clear)
+            : theme.colors.rowAlternate.swiftUIStyle
     }
 
     private var accessibilitySummary: String {

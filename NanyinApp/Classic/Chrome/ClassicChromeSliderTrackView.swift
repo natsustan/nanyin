@@ -163,7 +163,7 @@ final class ClassicChromeSliderTrackView: NSView {
         progressView.isHidden = clampedFraction <= 0
         thumbLayer.shape = ChouTiUI.Capsule(style: .circular)
         thumbLayer.backgroundColor = nsColor(style.palette.sliderThumb).cgColor
-        alphaValue = style.isEnabled ? 1 : style.palette.disabledAlpha
+        alphaValue = style.isEnabled ? style.activeAlpha : style.palette.disabledAlpha
         setAccessibilityEnabled(style.isEnabled)
         setAccessibilityValue(NSNumber(value: clampedFraction))
         setAccessibilityMinValue(NSNumber(value: 0))

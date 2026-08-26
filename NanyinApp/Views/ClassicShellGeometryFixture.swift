@@ -160,9 +160,14 @@ struct ClassicShellGeometryFixture: View {
                     style: ChromeStyle(role: .transport, size: CGSize(width: 24, height: 24))
                 )
                 Spacer(minLength: 6)
-                Capsule()
-                    .fill(theme.colors.sliderTrack)
-                    .frame(width: 68, height: 4)
+                ChromeSliderTrack(
+                    style: ChromeSliderStyle(
+                        size: CGSize(width: 68, height: 10),
+                        fraction: 0.72,
+                        activeAlpha: 0.72
+                    ),
+                    accessibilityLabel: "Volume"
+                )
                 Image(systemName: "speaker.wave.2.fill")
                     .font(.system(size: 10, weight: .medium))
             }

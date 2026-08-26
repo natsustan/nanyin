@@ -55,6 +55,14 @@ private enum ThemePreferenceTests {
             !AppTheme.classic2010.colors.contentBackground.isSolid,
             "Classic 2010 background should remain a gradient token"
         )
+        expect(
+            AppTheme.classic2010.colors.rowAlternate.isSolid,
+            "Classic 2010 zebra rows should use a solid alternate band token"
+        )
+        expect(
+            AppTheme.nanyinDark.colors.rowAlternate.isSolid,
+            "Nanyin Dark should retain a clear alternate row token"
+        )
     }
 
     private static func withDefaults(_ operation: (UserDefaults) -> Void) {

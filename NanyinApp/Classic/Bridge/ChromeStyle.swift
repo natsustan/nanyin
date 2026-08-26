@@ -134,6 +134,8 @@ struct ChromeSliderStyle: Equatable {
     var size = CGSize(width: 220, height: 12)
     var fraction = 0.0
     var isEnabled = true
+    /// Keeps secondary controls such as volume visually behind playback progress.
+    var activeAlpha: CGFloat = 1
     var palette = ChromePalette.classic2010
 }
 

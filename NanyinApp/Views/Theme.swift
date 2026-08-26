@@ -86,6 +86,7 @@ struct AppTheme {
         let rowHover: Fill
         let rowSelected: Fill
         let rowCurrent: Fill
+        let rowAlternate: Fill
         let controlHover: Fill
         let controlPressed: Fill
         let subtleHover: Fill
@@ -226,6 +227,7 @@ struct AppTheme {
             // The dark theme keeps the existing clear row background; the
             // current title/equalizer already provide the visual indication.
             rowCurrent: .solid(.clear),
+            rowAlternate: .solid(.clear),
             controlHover: .solid(Color(white: 0.14)),
             controlPressed: .solid(Color(white: 0.09)),
             subtleHover: .solid(Color(white: 0.10)),
@@ -370,6 +372,9 @@ struct AppTheme {
                 .init(color: Color(white: 0.20), location: 1),
             ]),
             rowCurrent: .solid(Color(red: 0.36, green: 0.53, blue: 0.22).opacity(0.22)),
+            // A translucent overlay keeps zebra-row contrast consistent over
+            // the Classic content gradient from top to bottom.
+            rowAlternate: .solid(Color.white.opacity(0.045)),
             controlHover: .solid(Color(white: 0.24)),
             controlPressed: .solid(Color(white: 0.14)),
             subtleHover: .solid(Color(white: 0.18)),

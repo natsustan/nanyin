@@ -302,7 +302,13 @@ struct ThemeVisualFixture: View {
         .background(
             isSelected
                 ? theme.colors.rowSelected.swiftUIStyle
-                : (isCurrent ? theme.colors.rowCurrent.swiftUIStyle : (isHovered ? theme.colors.rowHover.swiftUIStyle : AnyShapeStyle(Color.clear)))
+                : (isCurrent
+                    ? theme.colors.rowCurrent.swiftUIStyle
+                    : (isHovered
+                        ? theme.colors.rowHover.swiftUIStyle
+                        : (isClassic && !index.isMultiple(of: 2)
+                            ? theme.colors.rowAlternate.swiftUIStyle
+                            : AnyShapeStyle(Color.clear))))
         )
         .overlay(alignment: .leading) {
             if isSelected {
@@ -384,9 +390,15 @@ struct ThemeVisualFixture: View {
                     )
                     .disabled(state == .disabled)
                     Spacer(minLength: 6)
-                    Capsule()
-                        .fill(theme.colors.sliderTrack)
-                        .frame(width: 68, height: 4)
+                    ChromeSliderTrack(
+                        style: ChromeSliderStyle(
+                            size: CGSize(width: 68, height: 10),
+                            fraction: state == .disabled ? 0.42 : 0.72,
+                            isEnabled: state != .disabled,
+                            activeAlpha: 0.72
+                        ),
+                        accessibilityLabel: "Volume"
+                    )
                     Image(systemName: "speaker.wave.2.fill")
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(theme.colors.secondaryText)
