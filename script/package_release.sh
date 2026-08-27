@@ -67,7 +67,7 @@ parse_args() {
 
 require_tools() {
   local tool
-  for tool in xcodegen xcodebuild hdiutil ditto lipo shasum; do
+  for tool in xcodegen xcodebuild hdiutil ditto lipo otool shasum; do
     command -v "$tool" >/dev/null 2>&1 || {
       echo "ERROR: required tool not found: $tool" >&2
       exit 1
@@ -129,6 +129,7 @@ validate_release_app() {
   local executable="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
   local info_plist="$APP_BUNDLE/Contents/Info.plist"
   local architectures
+  local runpaths
 
   [[ -x "$executable" ]] || {
     echo "ERROR: release executable is missing: $executable" >&2
@@ -145,6 +146,12 @@ validate_release_app() {
     echo "ERROR: debug or preview dylibs were included in the Release app" >&2
     exit 1
   fi
+
+  runpaths="$(otool -l "$executable" | awk '/LC_RPATH/{found=1; next} found && /path /{print $2; found=0}')"
+  grep -Fxq '@executable_path/../Frameworks' <<<"$runpaths" || {
+    echo "ERROR: release executable cannot resolve frameworks from Contents/Frameworks" >&2
+    exit 1
+  }
 
   [[ "$(/usr/libexec/PlistBuddy -c 'Print :SUFeedURL' "$info_plist")" == \
     "https://github.com/natsustan/nanyin/releases/latest/download/appcast.xml" ]] || {

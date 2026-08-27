@@ -1,6 +1,6 @@
 cask "nanyin" do
-  version "0.1.0"
-  sha256 "40cbba84fd810d699d50276b1da769ba38bc3f29a7537c6cfe2121747285e9bb"
+  version "0.1.1"
+  sha256 "3fb033b1041e116c91b563c34c7a341a928b83509f18fcde0d8294c0ef272a15"
 
   url "https://github.com/natsustan/nanyin/releases/download/v#{version}/Nanyin-#{version}-arm64.dmg"
   name "Nanyin"
