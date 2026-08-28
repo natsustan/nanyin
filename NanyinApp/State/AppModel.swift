@@ -1810,7 +1810,6 @@ final class AppModel {
                     self.authState = .loggedIn
                     self.playbackConnectionState = .connecting
                     self.restoreUserAndLibrary(for: epoch)
-                    NSApp.activate(ignoringOtherApps: true)
                 }
                 guard epoch == accountEpoch, authState == .loggedIn else { return }
                 apply(playbackToken: playback)

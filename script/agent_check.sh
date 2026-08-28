@@ -7,6 +7,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUST_MANIFEST="$ROOT_DIR/rust/Cargo.toml"
 LIBRESPOT_DIR="$ROOT_DIR/research-repos/librespot"
+LIBRESPOT_SHA="9c7d75615fc093bdcbdb29adbce3fed38c531852"
 LIBRESPOT_PATCHES=(
     "$ROOT_DIR/patches/librespot-pr-1741.patch"
     "$ROOT_DIR/patches/librespot-auth-error-classification.patch"
@@ -37,6 +38,8 @@ git diff HEAD --check
 
 step "checking vendored librespot wiring"
 [[ -d "$LIBRESPOT_DIR/.git" ]] || fail "research-repos/librespot checkout is missing"
+[[ "$(git -C "$LIBRESPOT_DIR" rev-parse HEAD)" == "$LIBRESPOT_SHA" ]] \
+    || fail "librespot is not at the pinned revision"
 for dependency in audio core connect playback metadata protocol; do
     rg -q \
         "librespot-${dependency} = \\{ path = \\\"\.\./research-repos/librespot/${dependency}\\\" \\}" \
