@@ -91,7 +91,8 @@ likedCount = prefix.total
 
 `restoreUserAndLibrary` starts this fetch at login in parallel with home/search hearts. Saved Albums and Followed Artists always apply the first page through the override-aware cache. Liked Songs does not.
 
-Comment at 659 (“Do not replace likedIDs”) is already violated by `formUnion`.
+The `formUnion` preserves unrelated IDs as intended, but bypassing
+`likeOverrides` can reinsert an ID covered by a newer local unlike intent.
 
 **Failure:** login prefix is in flight; user unlikes a recently-played track from the player bar; prefix returns; heart fills again and the liked page still lists the row. If the tail fetch then fails, the wrong state sticks.
 

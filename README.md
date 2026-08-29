@@ -61,7 +61,7 @@ Intel Macs are not supported yet: the Rust core is an arm64 static library.
 ### macOS
 
 - Media keys, Control Center, and lock-screen Now Playing
-  (play/pause/next/prev/seek)
+  (play/pause/next/prev)
 - Back / forward page history (⌘[ / ⌘])
 - Space = play/pause; ⌘← / ⌘→ = previous / next
 - VoiceOver labels, visible focus, and Reduce Motion on artwork and EQ
