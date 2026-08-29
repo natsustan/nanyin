@@ -191,6 +191,7 @@ xcrun swiftc \
     "$ROOT_DIR/NanyinApp/State/MembershipMutation.swift" \
     "$ROOT_DIR/NanyinApp/State/PendingPlayIntent.swift" \
     "$ROOT_DIR/NanyinApp/State/PlaybackReconnectPolicy.swift" \
+    "$ROOT_DIR/NanyinApp/State/PlaybackProgressDisplay.swift" \
     "$ROOT_DIR/NanyinApp/State/LocalPlaybackStore.swift" \
     "$ROOT_DIR/NanyinApp/State/SavedAlbumCache.swift" \
     "$ROOT_DIR/NanyinApp/State/FollowedArtistCache.swift" \

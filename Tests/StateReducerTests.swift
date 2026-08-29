@@ -75,6 +75,8 @@ private enum StateReducerTests {
         testReconnectDefersWhileAudioIsProgressing()
         testReconnectDoesNotDeferWhenPlaybackNeedsControlPlane()
 
+        testCommittedSeekKeepsTargetVisible()
+
         testRecentlyPlayedDecodesTracksAndContexts()
         testRecentlyPlayedSkipsUnplayableAndContextlessAlbumEntries()
         testHomePagesRequireItemsArray()
@@ -1498,6 +1500,18 @@ private enum StateReducerTests {
                 "paused, buffering, and pending-play states must rebuild the control plane"
             )
         }
+    }
+
+    private static func testCommittedSeekKeepsTargetVisible() {
+        var display = PlaybackProgressDisplay(positionMs: 30_000)
+        display.drag(to: 0.75)
+
+        display.commitSeek(to: 0.75, durationMs: 180_000)
+
+        expect(
+            display.effectivePositionMs(durationMs: 180_000) == 135_000,
+            "committing a seek must not flash back to the pre-seek position"
+        )
     }
 
     // MARK: - Personalized home (SpotifyClient decode + HomeFeed)

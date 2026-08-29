@@ -8,30 +8,25 @@ import SwiftUI
 struct PlayerBar: View {
     @Environment(AppModel.self) private var app
     @Environment(\.appTheme) private var theme
-    @State private var draggingProgress: Double?
+    /// Kept local so the 2.5Hz tick never invalidates the track list.
+    @State private var progressDisplay = PlaybackProgressDisplay()
     /// Now-playing block hover — brightens the artist link (M4.1).
     @State private var npHover = false
-    /// Local playback-position tick — deliberately NOT in AppModel so the
-    /// 2Hz update only invalidates this bar, never the track list.
-    @State private var displayPosition: UInt32 = 0
 
     var body: some View {
         content
             .task(id: app.nowPlaying?.uri) {
-                displayPosition = app.playbackPositionMs
+                progressDisplay.update(positionMs: app.playbackPositionMs)
                 while !Task.isCancelled {
-                    if draggingProgress == nil {
-                        let p = app.playbackPositionMs
-                        if p != displayPosition { displayPosition = p }
-                    }
+                    progressDisplay.update(positionMs: app.playbackPositionMs)
                     try? await Task.sleep(for: .milliseconds(400))
                 }
             }
             .onChange(of: app.isPlaybackReady) { _, ready in
-                if !ready { draggingProgress = nil }
+                if !ready { progressDisplay.cancelDrag() }
             }
             .onChange(of: app.nowPlaying?.uri) { _, _ in
-                draggingProgress = nil
+                progressDisplay.cancelDrag()
             }
     }
 
@@ -260,12 +255,11 @@ struct PlayerBar: View {
                                 isEnabled: app.isPlaybackReady
                             ),
                             fillsAvailableWidth: true,
-                            onChanged: { draggingProgress = $0 },
+                            onChanged: { progressDisplay.drag(to: $0) },
                             onEnded: {
-                                app.seek(to: $0)
-                                draggingProgress = nil
+                                seek(to: $0)
                             },
-                            onCancelled: { draggingProgress = nil }
+                            onCancelled: { progressDisplay.cancelDrag() }
                         )
 
                         Text(PlaybackTimeFormatter.string(fromMilliseconds: max(app.durationMs, 0)))
@@ -336,7 +330,10 @@ struct PlayerBar: View {
     }
 
     private var effectivePosition: UInt32 {
-        min(draggingProgress.map { UInt32($0 * Double(max(app.durationMs, 1))) } ?? displayPosition, max(app.durationMs, 0))
+        min(
+            progressDisplay.effectivePositionMs(durationMs: max(app.durationMs, 0)),
+            max(app.durationMs, 0)
+        )
     }
 
     private var progressFraction: Double {
@@ -360,12 +357,11 @@ struct PlayerBar: View {
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
                         let fraction = min(max(value.location.x / geo.size.width, 0), 1)
-                        draggingProgress = fraction
+                        progressDisplay.drag(to: fraction)
                     }
                     .onEnded { value in
                         let fraction = min(max(value.location.x / geo.size.width, 0), 1)
-                        app.seek(to: fraction)
-                        draggingProgress = nil
+                        seek(to: fraction)
                     }
             )
         }
@@ -384,9 +380,9 @@ struct PlayerBar: View {
             let step = 0.05
             switch direction {
             case .increment:
-                app.seek(to: min(progressFraction + step, 1))
+                seek(to: min(progressFraction + step, 1))
             case .decrement:
-                app.seek(to: max(progressFraction - step, 0))
+                seek(to: max(progressFraction - step, 0))
             @unknown default:
                 break
             }
@@ -394,9 +390,12 @@ struct PlayerBar: View {
     }
 
     private func progressWidth(_ geo: GeometryProxy) -> CGFloat {
-        guard app.durationMs > 0 else { return 0 }
-        let fraction = draggingProgress ?? Double(displayPosition) / Double(max(app.durationMs, 1))
-        return geo.size.width * min(max(fraction, 0), 1)
+        geo.size.width * progressFraction
+    }
+
+    private func seek(to fraction: Double) {
+        progressDisplay.commitSeek(to: fraction, durationMs: max(app.durationMs, 0))
+        app.seek(to: fraction)
     }
 
     @ViewBuilder
