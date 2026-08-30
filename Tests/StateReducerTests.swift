@@ -79,6 +79,7 @@ private enum StateReducerTests {
         testCommittedSeekAcceptsConfirmation()
         testCommittedSeekFenceExpires()
         testCommittedSeekResetClearsFence()
+        testNewPlayRequestClearsSeekFenceForSameTrack()
         testLatestCommittedSeekOwnsFence()
 
         testRecentlyPlayedDecodesTracksAndContexts()
@@ -1515,6 +1516,7 @@ private enum StateReducerTests {
         display.update(
             positionMs: 30_400,
             confirmedPositionMs: 30_400,
+            playRequestID: 1,
             now: now.advanced(by: .milliseconds(400))
         )
 
@@ -1532,6 +1534,7 @@ private enum StateReducerTests {
         display.update(
             positionMs: 30_400,
             confirmedPositionMs: 135_000,
+            playRequestID: 1,
             now: now.advanced(by: .milliseconds(800))
         )
         expect(
@@ -1542,6 +1545,7 @@ private enum StateReducerTests {
         display.update(
             positionMs: 136_000,
             confirmedPositionMs: 136_000,
+            playRequestID: 1,
             now: now.advanced(by: .seconds(1))
         )
 
@@ -1559,6 +1563,7 @@ private enum StateReducerTests {
         display.update(
             positionMs: 31_000,
             confirmedPositionMs: 31_000,
+            playRequestID: 1,
             now: now.advanced(by: .seconds(4))
         )
 
@@ -1577,12 +1582,37 @@ private enum StateReducerTests {
         display.update(
             positionMs: 0,
             confirmedPositionMs: 0,
+            playRequestID: 1,
             now: now.advanced(by: .milliseconds(400))
         )
 
         expect(
             display.effectivePositionMs(durationMs: 180_000) == 0,
             "track or connection changes must clear a pending seek fence"
+        )
+    }
+
+    private static func testNewPlayRequestClearsSeekFenceForSameTrack() {
+        let now = ContinuousClock.now
+        var display = PlaybackProgressDisplay(positionMs: 30_000)
+        display.update(
+            positionMs: 30_000,
+            confirmedPositionMs: 30_000,
+            playRequestID: 1,
+            now: now
+        )
+        display.commitSeek(to: 0.75, durationMs: 180_000, now: now)
+
+        display.update(
+            positionMs: 0,
+            confirmedPositionMs: 0,
+            playRequestID: 2,
+            now: now.advanced(by: .milliseconds(400))
+        )
+
+        expect(
+            display.effectivePositionMs(durationMs: 180_000) == 0,
+            "a new play request for the same URI must clear the previous seek fence"
         )
     }
 
@@ -1599,6 +1629,7 @@ private enum StateReducerTests {
         display.update(
             positionMs: 135_000,
             confirmedPositionMs: 135_000,
+            playRequestID: 1,
             now: now.advanced(by: .milliseconds(800))
         )
 

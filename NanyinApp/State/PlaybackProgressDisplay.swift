@@ -6,6 +6,7 @@ struct PlaybackProgressDisplay {
     private(set) var draggingFraction: Double?
     private var pendingSeekTargetMs: UInt32?
     private var seekConfirmationDeadline: ContinuousClock.Instant?
+    private var playRequestID: UInt64?
 
     init(positionMs: UInt32 = 0) {
         self.positionMs = positionMs
@@ -19,8 +20,15 @@ struct PlaybackProgressDisplay {
     mutating func update(
         positionMs: UInt32,
         confirmedPositionMs: UInt32,
+        playRequestID: UInt64,
         now: ContinuousClock.Instant = .now
     ) {
+        if let previousPlayRequestID = self.playRequestID,
+           previousPlayRequestID != playRequestID {
+            resetInteraction()
+        }
+        self.playRequestID = playRequestID
+
         guard draggingFraction == nil else { return }
 
         if let target = pendingSeekTargetMs,

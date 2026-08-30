@@ -396,7 +396,8 @@ struct PlayerBar: View {
     private func updateProgressDisplay() {
         progressDisplay.update(
             positionMs: app.playbackPositionMs,
-            confirmedPositionMs: app.playbackConfirmedPositionMs
+            confirmedPositionMs: app.playbackConfirmedPositionMs,
+            playRequestID: app.playbackRequestID
         )
     }
 
