@@ -160,10 +160,9 @@ current context”. `GET /v1/me/player/queue` is capped ~20; dealer
 
 ### N8. Playlist sidebar life cycle
 
-**Why.** Users can create playlists and add tracks, then cannot rename,
-unfollow, or delete from Nanyin. `snapshotId` is already decoded and
-unused. Scopes already include `playlist-modify-private` and
-`playlist-modify-public`.
+**Why.** Users can create playlists and add tracks, then cannot rename or
+remove them from Your Library in Nanyin. Scopes already include
+`playlist-modify-private` and `playlist-modify-public`.
 
 **Effort.** M. **Risk.** `api` (write lag — reuse `PlaylistLibraryMerge`
 latest-intent-wins, do not invent a second reducer).
@@ -173,22 +172,23 @@ Ship as a source-list context menu, not a settings page:
 ```
   PLAYLISTS                         +
   Late Night                   128    [ Rename… ]
-  Discover Weekly               30    [ Delete playlist ]
+  Discover Weekly               30    [ Remove from Your Library ]
                                       [ Copy Playlist Link ]
 ```
 
-Unfollow vs delete must be distinct for playlists the user does not
-own. No confirmation-on-unfollow; delete of an owned playlist does
-need one, because it is remote and irreversible.
+The Web API has no playlist delete operation. Removing either an owned or
+followed playlist from Your Library unfollows it; following it again reverses
+the operation.
 
 ### N9. Remove a track from an owned playlist
 
-**Why.** Add without remove is a one-way street. `DELETE /v1/playlists/{id}/items`
-needs `snapshot_id` (already on the DTO). Occurrence identity in
-`TrackListView` is the hard part and it already exists.
+**Why.** Add without remove is a one-way street. The current
+`DELETE /v1/playlists/{id}/items` request accepts track URIs and an optional
+`snapshot_id` concurrency guard, but no position or item identifier.
 
-**Effort.** M. **Risk.** `api` (duplicates: must delete the right
-occurrence, not every copy).
+**Effort.** M. **Risk.** `api` (the public API cannot target one occurrence
+of a duplicated URI; either clearly remove every matching item or defer this
+feature).
 
 ### N10. Home: Recently Saved Albums shelf
 

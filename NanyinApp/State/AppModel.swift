@@ -157,6 +157,14 @@ final class AppModel {
         localPlaybackRestore?.snapshot.playablePositionMs ?? Core.positionMs
     }
 
+    var playbackConfirmedPositionMs: UInt32 {
+        localPlaybackRestore?.snapshot.playablePositionMs ?? Core.confirmedPositionMs
+    }
+
+    var playbackRequestID: UInt64 {
+        Core.playbackProgress.playRequestID
+    }
+
     var connectionNote: String? {
         switch playbackConnectionState {
         case .connecting:
