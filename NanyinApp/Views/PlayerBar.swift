@@ -16,17 +16,17 @@ struct PlayerBar: View {
     var body: some View {
         content
             .task(id: app.nowPlaying?.uri) {
-                progressDisplay.update(positionMs: app.playbackPositionMs)
+                updateProgressDisplay()
                 while !Task.isCancelled {
-                    progressDisplay.update(positionMs: app.playbackPositionMs)
+                    updateProgressDisplay()
                     try? await Task.sleep(for: .milliseconds(400))
                 }
             }
             .onChange(of: app.isPlaybackReady) { _, ready in
-                if !ready { progressDisplay.cancelDrag() }
+                if !ready { progressDisplay.resetInteraction() }
             }
             .onChange(of: app.nowPlaying?.uri) { _, _ in
-                progressDisplay.cancelDrag()
+                progressDisplay.resetInteraction()
             }
     }
 
@@ -391,6 +391,13 @@ struct PlayerBar: View {
 
     private func progressWidth(_ geo: GeometryProxy) -> CGFloat {
         geo.size.width * progressFraction
+    }
+
+    private func updateProgressDisplay() {
+        progressDisplay.update(
+            positionMs: app.playbackPositionMs,
+            confirmedPositionMs: app.playbackConfirmedPositionMs
+        )
     }
 
     private func seek(to fraction: Double) {
