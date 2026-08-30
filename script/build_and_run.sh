@@ -87,13 +87,54 @@ generate_project_if_needed() {
   fi
 }
 
+resolve_development_signing_identity() {
+  local identities
+  local override="${NANYIN_DEVELOPMENT_SIGN_IDENTITY:-}"
+  identities="$(security find-identity -v -p codesigning 2>/dev/null \
+    | sed -n 's/.*\([[:xdigit:]]\{40\}\) "\(Apple Development:.*\)"/\1\	\2/p' \
+    || true)"
+
+  if [[ -n "$override" ]]; then
+    local matches=""
+    local sha name
+    while IFS=$'\t' read -r sha name; do
+      if [[ "$override" == "$sha" || "$override" == "$name" ]]; then
+        matches+="${sha}"$'\n'
+      fi
+    done <<< "$identities"
+
+    if [[ "$(printf '%s\n' "$matches" | sed '/^$/d' | wc -l | tr -d ' ')" != "1" ]]; then
+      echo "ERROR: NANYIN_DEVELOPMENT_SIGN_IDENTITY must match exactly one valid Apple Development identity." >&2
+      echo "       Use the certificate SHA shown by: security find-identity -v -p codesigning" >&2
+      exit 1
+    fi
+
+    printf '%s\n' "$matches" | sed '/^$/d'
+    return
+  fi
+
+  if [[ "$(printf '%s\n' "$identities" | sed '/^$/d' | wc -l | tr -d ' ')" != "1" ]]; then
+    echo "ERROR: live builds require one stable Apple Development signing identity." >&2
+    echo "       Set NANYIN_DEVELOPMENT_SIGN_IDENTITY to its certificate SHA when multiple identities are installed." >&2
+    exit 1
+  fi
+
+  printf '%s\n' "$identities" | cut -f1
+}
+
 build_app() {
+  local identity
+  identity="$(resolve_development_signing_identity)"
+
   xcodebuild \
     -project "$PROJECT_PATH" \
     -scheme "$SCHEME" \
     -configuration "$CONFIGURATION" \
     -destination "$DESTINATION" \
     -derivedDataPath "$DERIVED_DATA_PATH" \
+    CODE_SIGNING_ALLOWED=YES \
+    CODE_SIGN_STYLE=Manual \
+    CODE_SIGN_IDENTITY="$identity" \
     build
 }
 
