@@ -74,6 +74,8 @@ private enum StateReducerTests {
 
         testReconnectDefersWhileAudioIsProgressing()
         testReconnectDoesNotDeferWhenPlaybackNeedsControlPlane()
+        testInactiveIdleReconnectWaitsForActivation()
+        testReconnectNeededNowDoesNotWaitForActivation()
 
         testCommittedSeekRejectsStalePosition()
         testCommittedSeekAcceptsConfirmation()
@@ -1503,6 +1505,45 @@ private enum StateReducerTests {
                     hasPendingPlay: state.hasPendingPlay
                 ),
                 "paused, buffering, and pending-play states must rebuild the control plane"
+            )
+        }
+    }
+
+    private static func testInactiveIdleReconnectWaitsForActivation() {
+        expect(
+            PlaybackReconnectPolicy.shouldWaitForActivation(
+                isAppActive: false,
+                isPlaying: false,
+                isBuffering: false,
+                hasPendingPlay: false
+            ),
+            "an inactive idle app must wait for activation before rebuilding playback"
+        )
+    }
+
+    private static func testReconnectNeededNowDoesNotWaitForActivation() {
+        expect(
+            !PlaybackReconnectPolicy.shouldWaitForActivation(
+                isAppActive: true,
+                isPlaying: false,
+                isBuffering: false,
+                hasPendingPlay: false
+            ),
+            "an active idle app must rebuild playback immediately"
+        )
+        for state in [
+            (isPlaying: true, isBuffering: false, hasPendingPlay: false),
+            (isPlaying: false, isBuffering: true, hasPendingPlay: false),
+            (isPlaying: false, isBuffering: false, hasPendingPlay: true),
+        ] {
+            expect(
+                !PlaybackReconnectPolicy.shouldWaitForActivation(
+                    isAppActive: false,
+                    isPlaying: state.isPlaying,
+                    isBuffering: state.isBuffering,
+                    hasPendingPlay: state.hasPendingPlay
+                ),
+                "active playback work must not wait for app activation"
             )
         }
     }

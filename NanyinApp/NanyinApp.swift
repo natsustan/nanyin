@@ -33,6 +33,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appModel.handleAppDidBecomeActive()
     }
 
+    func applicationDidResignActive(_ notification: Notification) {
+        appModel.handleAppDidResignActive()
+    }
+
     /// Send the Connect "goodbye" so this device disappears immediately
     /// instead of lingering as a zombie until the server times it out.
     func applicationWillTerminate(_ notification: Notification) {

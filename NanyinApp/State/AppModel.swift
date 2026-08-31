@@ -25,6 +25,12 @@ final class AppModel {
         case unavailable(String)
     }
 
+    private enum PlaybackRetryAvailability {
+        case none
+        case whenActivated
+        case manual
+    }
+
     // MARK: - Auth
 
     private(set) var authState: AuthState = .checking
@@ -43,6 +49,8 @@ final class AppModel {
     private var playbackGeneration: UInt64 = 0
     private var activePlaybackGeneration: UInt64?
     private var deferredReconnectGeneration: UInt64?
+    private var playbackRetryAvailability = PlaybackRetryAvailability.none
+    private var isAppActive = false
     private var webRefreshInFlight: (epoch: Int, task: Task<SpotifyAuth.Token, Error>)?
     private var interactiveSignInTask: Task<Void, Never>?
 
@@ -174,6 +182,12 @@ final class AppModel {
         case let .unavailable(message):
             message
         }
+    }
+
+    var canRetryPlaybackConnection: Bool {
+        authState == .loggedIn
+            && playbackRetryAvailability == .manual
+            && !isPlaybackReady
     }
 
     // MARK: - Library (M1)
@@ -693,9 +707,27 @@ final class AppModel {
     }
 
     func handleAppDidBecomeActive() {
+        isAppActive = true
         refreshLiked(force: false)
         refreshSavedAlbums(force: false)
         refreshFollowedArtists(force: false)
+        guard playbackRetryAvailability == .whenActivated else { return }
+        reconnect(
+            disconnectedGeneration: playbackGeneration,
+            preserveActiveAudio: false
+        )
+    }
+
+    func handleAppDidResignActive() {
+        isAppActive = false
+    }
+
+    func retryPlaybackConnection() {
+        guard canRetryPlaybackConnection else { return }
+        reconnect(
+            disconnectedGeneration: playbackGeneration,
+            preserveActiveAudio: false
+        )
     }
 
     /// Toggles like state for one track. Optimistic UI; server PUT/DELETE
@@ -1879,6 +1911,7 @@ final class AppModel {
         playbackGeneration &+= 1
         activePlaybackGeneration = nil
         deferredReconnectGeneration = nil
+        playbackRetryAvailability = .none
         loadEpoch += 1
         searchEpoch += 1
         SpotifyAuth.invalidateInteractiveSignIn()
@@ -2128,7 +2161,9 @@ final class AppModel {
                 deviceId = try KeychainStore.spotifyDeviceId()
             } catch {
                 guard isCurrentPlayback(epoch: epoch, generation: generation) else { return }
-                playbackConnectionState = .unavailable(error.localizedDescription)
+                dlog("device id persistence failed: \(error)")
+                playbackRetryAvailability = .manual
+                playbackConnectionState = .unavailable("Playback connection unavailable")
                 return
             }
             let startedAt = ContinuousClock.now
@@ -2152,9 +2187,8 @@ final class AppModel {
                 )
             case let .failed(code, message):
                 dlog("player init rc=\(code): \(message)")
-                playbackConnectionState = .unavailable(
-                    "Playback service unavailable — will retry on relaunch"
-                )
+                playbackRetryAvailability = .manual
+                playbackConnectionState = .unavailable("Playback connection unavailable")
             }
         }
     }
@@ -2162,6 +2196,7 @@ final class AppModel {
     private func beginPlaybackConnection() -> UInt64 {
         cancelAudioStallWatchdog()
         deferredReconnectGeneration = nil
+        playbackRetryAvailability = .none
         playbackGeneration &+= 1
         activePlaybackGeneration = nil
         playbackConnectionState = .connecting
@@ -3104,6 +3139,17 @@ final class AppModel {
             dlog("control plane disconnected — deferring rebuild while audio is progressing")
             return
         }
+        if PlaybackReconnectPolicy.shouldWaitForActivation(
+            isAppActive: isAppActive,
+            isPlaying: isPlaying,
+            isBuffering: isBuffering,
+            hasPendingPlay: pendingPlayIntent != nil
+        ) {
+            playbackRetryAvailability = .whenActivated
+            playbackConnectionState = .unavailable("Playback connection unavailable")
+            dlog("control plane disconnected while inactive — waiting for app activation")
+            return
+        }
         if pendingPlayIntent != nil {
             cancelPlaybackWatchdog()
         }
@@ -3117,8 +3163,9 @@ final class AppModel {
             } catch {
                 guard isCurrentPlayback(epoch: epoch, generation: generation) else { return }
                 dlog("device id persistence failed: \(error)")
+                playbackRetryAvailability = .manual
                 playbackConnectionState = .unavailable(
-                    "Connection lost — \(error.localizedDescription)"
+                    "Playback connection unavailable"
                 )
                 return
             }
@@ -3139,7 +3186,8 @@ final class AppModel {
                 return
             case let .failed(code, message):
                 dlog("reconnect kept current token after init rc=\(code): \(message)")
-                playbackConnectionState = .unavailable("Connection lost — \(message)")
+                playbackRetryAvailability = .manual
+                playbackConnectionState = .unavailable("Playback connection unavailable")
                 return
             case let .credentialsRejected(message):
                 dlog("reconnect credentials rejected: \(message)")
@@ -3160,8 +3208,15 @@ final class AppModel {
                     activePlaybackGeneration = generation
                     playbackConnectionState = .ready
                     schedulePendingPlayReplay(epoch: epoch, generation: generation)
-                case let .credentialsRejected(message), let .failed(_, message):
-                    playbackConnectionState = .unavailable("Connection lost — \(message)")
+                case let .credentialsRejected(message):
+                    dlog("reconnect refreshed token rejected: \(message)")
+                    playbackConnectionState = .unavailable(
+                        "Playback authorization expired — sign out and sign in again"
+                    )
+                case let .failed(code, message):
+                    dlog("reconnect refreshed token init rc=\(code): \(message)")
+                    playbackRetryAvailability = .manual
+                    playbackConnectionState = .unavailable("Playback connection unavailable")
                 }
             } catch {
                 guard isCurrentPlayback(epoch: epoch, generation: generation) else { return }
