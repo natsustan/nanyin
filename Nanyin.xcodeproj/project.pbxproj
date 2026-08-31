@@ -42,7 +42,6 @@
 		80CAD290E086617D8B2A3342 /* ChromeToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA12EC951690941451EA2E7A /* ChromeToolbar.swift */; };
 		840397300BB1399C8824A015 /* SavedAlbumCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A304C3165403EF8BCC680B91 /* SavedAlbumCache.swift */; };
 		866B96F9C71C95430D94F290 /* ClassicTitleBarBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D773E91A6DEB68D27AC2EA7 /* ClassicTitleBarBridge.swift */; };
-		86E3EB8B91A5E4530C4F814D /* PlaybackProgressDisplay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80F0DB23689B87FA0D10E86B /* PlaybackProgressDisplay.swift */; };
 		881E3FDCED569E6CF81E5CE6 /* ClassicShellGeometryFixture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 403D18D55DD1CEF30C7EA2F9 /* ClassicShellGeometryFixture.swift */; };
 		8BA79311D06E4870F7108167 /* ChromeButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BE78A5C4C4901EC940FAD47 /* ChromeButton.swift */; };
 		A25B430D787B7E5F81AFEA3D /* ClassicChromeButtonView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6F7A03F72E05B94F8661242 /* ClassicChromeButtonView.swift */; };
@@ -59,6 +58,7 @@
 		C480BDD897799A7CF14CBCCC /* NowPlayingManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5362EA9DE5C94A675FC10A2A /* NowPlayingManager.swift */; };
 		CEE4F338C3A35800937BF7B7 /* ClassicChromePreviewHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = F79877AF87B61E7E6245030C /* ClassicChromePreviewHarness.swift */; };
 		D53EA805C18FC6BD2585A05E /* DebugLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EF680835CEF2B531A47F6E0 /* DebugLog.swift */; };
+		DE40BB519C9F238F334D72AE /* PlaybackProgressDisplay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FCA06198CCC61FE8D63D535 /* PlaybackProgressDisplay.swift */; };
 		E3147F1FBCE00F908E18C6DA /* PlaylistDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04B2F003CBEB64EB848C8C21 /* PlaylistDetailView.swift */; };
 		EC8DC609E5BBBE60053D1B1C /* ClassicChromeSliderTrackView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D367C153FFD42F80705ACA4 /* ClassicChromeSliderTrackView.swift */; };
 		EF615432E21E71D8FDC83A84 /* SpotifyConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9E3597C813B3B8DD81E108D /* SpotifyConfig.swift */; };
@@ -102,10 +102,10 @@
 		63B137ABBBF1D05325A8ED16 /* SpotifyClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotifyClient.swift; sourceTree = "<group>"; };
 		6AE5477026638A4B5FD55C57 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		6FB0ED02C7F536E98940B95B /* SystemConfiguration.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SystemConfiguration.framework; path = System/Library/Frameworks/SystemConfiguration.framework; sourceTree = SDKROOT; };
+		6FCA06198CCC61FE8D63D535 /* PlaybackProgressDisplay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackProgressDisplay.swift; sourceTree = "<group>"; };
 		70085F48F4FA957D680D6FB5 /* ChromeSectionBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromeSectionBar.swift; sourceTree = "<group>"; };
 		734903A1ED5DB2A2350BC30D /* ClassicChromeToolbarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClassicChromeToolbarView.swift; sourceTree = "<group>"; };
 		76BAF3B565A2B4E3EC2BC956 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		80F0DB23689B87FA0D10E86B /* PlaybackProgressDisplay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackProgressDisplay.swift; sourceTree = "<group>"; };
 		95EBF21D652F09019FE022DB /* FollowedArtistCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FollowedArtistCache.swift; sourceTree = "<group>"; };
 		96F13D809C3D460E5287899F /* ChromeSearchField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromeSearchField.swift; sourceTree = "<group>"; };
 		9BE78A5C4C4901EC940FAD47 /* ChromeButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromeButton.swift; sourceTree = "<group>"; };
@@ -255,7 +255,7 @@
 				C3D90AF51885C8E464B60FE5 /* LocalPlaybackStore.swift */,
 				3C34F9480C980947C6DBA66E /* MembershipMutation.swift */,
 				40227EC50BC3F11ADCDBF6EA /* PendingPlayIntent.swift */,
-				80F0DB23689B87FA0D10E86B /* PlaybackProgressDisplay.swift */,
+				6FCA06198CCC61FE8D63D535 /* PlaybackProgressDisplay.swift */,
 				46CBA0966AF2014CCAB3C2D3 /* PlaybackReconnectPolicy.swift */,
 				5B62F2FDF62B22A7F2438671 /* PlaylistLibraryMerge.swift */,
 				A304C3165403EF8BCC680B91 /* SavedAlbumCache.swift */,
@@ -447,7 +447,7 @@
 				52B63753341B65F4678AB876 /* NewPlaylistSheet.swift in Sources */,
 				C480BDD897799A7CF14CBCCC /* NowPlayingManager.swift in Sources */,
 				2C33ADC8885AA0DE3B857361 /* PendingPlayIntent.swift in Sources */,
-				86E3EB8B91A5E4530C4F814D /* PlaybackProgressDisplay.swift in Sources */,
+				DE40BB519C9F238F334D72AE /* PlaybackProgressDisplay.swift in Sources */,
 				4E22EB860701B1CEA504D2C8 /* PlaybackReconnectPolicy.swift in Sources */,
 				762B77578549312AFA4EBA63 /* PlaybackStallDetector.swift in Sources */,
 				F4EA985D9087B87C714C0679 /* PlaybackTimeFormatter.swift in Sources */,
@@ -478,12 +478,12 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = NanyinApp/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
-				MARKETING_VERSION = 0.1.1;
+				MARKETING_VERSION = 0.1.2;
 				OTHER_LDFLAGS = "$(SRCROOT)/build/rust/lib/libnanyin_core.a";
 				PRODUCT_BUNDLE_IDENTIFIER = com.nanyin.app;
 				PRODUCT_NAME = Nanyin;
@@ -559,12 +559,12 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = NanyinApp/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
-				MARKETING_VERSION = 0.1.1;
+				MARKETING_VERSION = 0.1.2;
 				OTHER_LDFLAGS = "$(SRCROOT)/build/rust/lib/libnanyin_core.a";
 				PRODUCT_BUNDLE_IDENTIFIER = com.nanyin.app;
 				PRODUCT_NAME = Nanyin;
