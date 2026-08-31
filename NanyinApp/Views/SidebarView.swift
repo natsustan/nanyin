@@ -94,11 +94,22 @@ struct SidebarView: View {
             }
 
             if let note = app.connectionNote {
-                Text(note)
-                    .font(.caption)
-                    .foregroundStyle(theme.colors.secondaryText)
-                    .padding(.horizontal, theme.metrics.sidebarInset)
-                    .padding(.bottom, theme.metrics.smallPadding)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(note)
+                        .font(.caption)
+                        .foregroundStyle(theme.colors.secondaryText)
+                    Spacer(minLength: 4)
+                    if app.canRetryPlaybackConnection {
+                        Button("Retry") {
+                            app.retryPlaybackConnection()
+                        }
+                        .buttonStyle(.link)
+                        .tint(theme.colors.accent)
+                        .font(.caption)
+                    }
+                }
+                .padding(.horizontal, theme.metrics.sidebarInset)
+                .padding(.bottom, theme.metrics.smallPadding)
             }
 
             if presentation == .classic2010, app.nowPlaying != nil {

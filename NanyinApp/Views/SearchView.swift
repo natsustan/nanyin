@@ -217,9 +217,19 @@ struct SearchView: View {
             .disabled(!app.isPlaybackReady)
             .padding(.top, 2)
             if let note = app.connectionNote {
-                Text(note)
-                    .font(.system(size: 11))
-                    .foregroundStyle(theme.colors.warning)
+                HStack(spacing: 8) {
+                    Text(note)
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.colors.warning)
+                    if app.canRetryPlaybackConnection {
+                        Button("Retry") {
+                            app.retryPlaybackConnection()
+                        }
+                        .buttonStyle(.link)
+                        .tint(theme.colors.accent)
+                        .font(.system(size: 11))
+                    }
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
