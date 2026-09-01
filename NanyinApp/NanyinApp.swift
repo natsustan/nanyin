@@ -19,6 +19,16 @@ private enum NanyinMain {
             FileHandle.standardError.write(Data("Usage: Nanyin --dealer-probe [device_id]\n".utf8))
             Darwin.exit(64)
         }
+        if isDealerProbe,
+           ProcessInfo.processInfo.environment["NANYIN_ALLOW_LIVE_SPOTIFY"] != "1" {
+            FileHandle.standardError.write(
+                Data("ERROR: dealer_probe uses real Spotify credentials and opens a real dealer session.\n".utf8)
+            )
+            FileHandle.standardError.write(
+                Data("       Set NANYIN_ALLOW_LIVE_SPOTIFY=1 only after explicit user authorization.\n".utf8)
+            )
+            Darwin.exit(64)
+        }
 
         do {
             guard let lock = try NanyinProcessLock.acquire() else {
