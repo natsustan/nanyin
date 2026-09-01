@@ -9,16 +9,35 @@ import SwiftUI
 
 @main
 private enum NanyinMain {
+    private static var processLock: NanyinProcessLock?
+
     @MainActor
     static func main() async {
         let arguments = Array(CommandLine.arguments.dropFirst())
-        guard arguments.first == "--dealer-probe" else {
-            NanyinApp.main()
-            return
-        }
-        guard arguments.count <= 2 else {
+        let isDealerProbe = arguments.first == "--dealer-probe"
+        if isDealerProbe, arguments.count > 2 {
             FileHandle.standardError.write(Data("Usage: Nanyin --dealer-probe [device_id]\n".utf8))
             Darwin.exit(64)
+        }
+
+        do {
+            guard let lock = try NanyinProcessLock.acquire() else {
+                FileHandle.standardError.write(
+                    Data("ERROR: Nanyin is already running; stop it before starting another instance.\n".utf8)
+                )
+                Darwin.exit(6)
+            }
+            processLock = lock
+        } catch {
+            FileHandle.standardError.write(
+                Data("ERROR: could not acquire Nanyin's process lock: \(error.localizedDescription)\n".utf8)
+            )
+            Darwin.exit(1)
+        }
+
+        guard isDealerProbe else {
+            NanyinApp.main()
+            return
         }
 
         let deviceId = arguments.dropFirst().first ?? "nanyin_probe_check"

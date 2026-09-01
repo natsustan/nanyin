@@ -239,6 +239,13 @@ xcrun swiftc \
     -o "$state_test_dir/keychain-store-tests"
 "$state_test_dir/keychain-store-tests"
 
+step "running Nanyin process lock tests"
+xcrun swiftc \
+    "$ROOT_DIR/NanyinApp/Core/NanyinProcessLock.swift" \
+    "$ROOT_DIR/Tests/NanyinProcessLockTests.swift" \
+    -o "$state_test_dir/nanyin-process-lock-tests"
+"$state_test_dir/nanyin-process-lock-tests"
+
 step "running Rust unit tests offline"
 mise exec rust@stable -- cargo test \
     --offline \
