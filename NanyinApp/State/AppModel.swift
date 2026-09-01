@@ -1823,7 +1823,11 @@ final class AppModel {
             } catch {
                 guard epoch == accountEpoch, authState == .checking else { return }
                 dlog("silent login failed: \(error)")
-                authError = error.localizedDescription
+                if case SpotifyAuth.AuthError.noStoredCredential = error {
+                    authError = nil
+                } else {
+                    authError = "Unable to restore your session — connect with Spotify again"
+                }
                 authState = .loggedOut
             }
         }
@@ -2142,6 +2146,10 @@ final class AppModel {
                 if case SpotifyAuth.AuthError.refreshTokenRevoked = error {
                     playbackConnectionState = .unavailable(
                         "Playback authorization expired — sign out and sign in again"
+                    )
+                } else if case SpotifyAuth.AuthError.noStoredCredential = error {
+                    playbackConnectionState = .unavailable(
+                        "Playback authorization unavailable — sign out and sign in again"
                     )
                 } else {
                     playbackConnectionState = .unavailable(

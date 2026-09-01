@@ -10,15 +10,13 @@ import Security
 
 /// Minimal Keychain wrapper for the OAuth tokens.
 enum KeychainStore {
-    private static let legacyService = "com.nanyin.app.spotify"
-
-    /// Development signatures must never create credentials in the production
-    /// namespace. A later Developer ID build would not satisfy their legacy
-    /// Keychain ACL and macOS could otherwise offer an authorization prompt.
-#if DEBUG
-    private static let service = "com.nanyin.app.spotify.development.v2"
+    /// Only the distribution build may use the production namespace. DEBUG is
+    /// insufficient here because locally signed Release builds have a
+    /// different designated requirement from Developer ID releases too.
+#if NANYIN_DISTRIBUTION
+    static let service = "com.nanyin.app.spotify"
 #else
-    private static let service = "com.nanyin.app.spotify.v2"
+    static let service = "com.nanyin.app.spotify.development"
 #endif
 
     struct KeychainError: Error, LocalizedError {
@@ -64,27 +62,6 @@ enum KeychainStore {
     }
 
     static func string(forKey key: String) throws -> String? {
-        if let value = try string(forKey: key, service: service) {
-            return value
-        }
-
-#if DEBUG
-        return nil
-#else
-        // Existing Developer ID releases stored both refresh tokens in the
-        // original service. Copy before deleting so an interrupted migration
-        // never loses the only credential. Development builds must not read
-        // this namespace.
-        guard let legacyValue = try string(forKey: key, service: legacyService) else {
-            return nil
-        }
-        try setString(legacyValue, forKey: key)
-        try delete(forKey: key, service: legacyService)
-        return legacyValue
-#endif
-    }
-
-    private static func string(forKey key: String, service: String) throws -> String? {
         try disableUserInteraction()
         let authenticationContext = LAContext()
         authenticationContext.interactionNotAllowed = true
@@ -112,32 +89,6 @@ enum KeychainStore {
     }
 
     static func delete(forKey key: String) throws {
-        var firstError: Error?
-        do {
-            try delete(forKey: key, service: service)
-        } catch {
-            firstError = error
-        }
-
-#if !DEBUG
-        // Sign-out must also clear credentials left by an older release. If a
-        // migration copied successfully but legacy cleanup failed, retaining
-        // that item could otherwise resurrect the signed-out session.
-        do {
-            try delete(forKey: key, service: legacyService)
-        } catch {
-            if firstError == nil {
-                firstError = error
-            }
-        }
-#endif
-
-        if let firstError {
-            throw firstError
-        }
-    }
-
-    private static func delete(forKey key: String, service: String) throws {
         try disableUserInteraction()
         let authenticationContext = LAContext()
         authenticationContext.interactionNotAllowed = true
@@ -172,10 +123,7 @@ extension KeychainStore {
     /// must survive restarts without ever being regenerated after a transient
     /// read failure, so keep it in an atomically written owner-only file.
     static func spotifyDeviceId(
-        in applicationSupportDirectory: URL? = nil,
-        legacyDeviceIdProvider: () throws -> String? = {
-            try string(forKey: "device_id", service: legacyService)
-        }
+        in applicationSupportDirectory: URL? = nil
     ) throws -> String {
         let fileManager = FileManager.default
         let baseDirectory = try applicationSupportDirectory ?? fileManager.url(
@@ -215,13 +163,6 @@ extension KeychainStore {
         let fileURL = directory.appendingPathComponent(spotifyDeviceIdFileName)
         if try fileStatus(at: fileURL) != nil {
             return try readSpotifyDeviceId(from: fileURL)
-        }
-
-        if let legacyDeviceId = try legacyDeviceIdProvider() {
-            return try writeSpotifyDeviceId(
-                try validateSpotifyDeviceId(legacyDeviceId),
-                to: fileURL
-            )
         }
 
         var bytes = [UInt8](repeating: 0, count: 10)

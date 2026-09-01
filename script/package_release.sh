@@ -112,6 +112,11 @@ build_app() {
   rm -rf "$DERIVED_DATA_PATH" "$RELEASE_DIR"
   mkdir -p "$RELEASE_DIR"
 
+  local build_settings=(CODE_SIGNING_ALLOWED=NO)
+  if [[ "$SIGN" == true ]]; then
+    build_settings+=(SWIFT_ACTIVE_COMPILATION_CONDITIONS=NANYIN_DISTRIBUTION)
+  fi
+
   xcodebuild \
     -project "$PROJECT_PATH" \
     -scheme "$SCHEME" \
@@ -119,7 +124,7 @@ build_app() {
     -destination "$DESTINATION" \
     -derivedDataPath "$DERIVED_DATA_PATH" \
     -archivePath "$ARCHIVE_PATH" \
-    CODE_SIGNING_ALLOWED=NO \
+    "${build_settings[@]}" \
     archive
 
   ditto "$BUILT_APP" "$APP_BUNDLE"

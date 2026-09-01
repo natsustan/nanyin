@@ -8,10 +8,20 @@ private enum KeychainStoreTests {
         defer { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
 
-        let first = try KeychainStore.spotifyDeviceId(in: root, legacyDeviceIdProvider: { nil })
-        let second = try KeychainStore.spotifyDeviceId(in: root) {
-            fatalError("an existing device id file must win over legacy storage")
-        }
+#if NANYIN_DISTRIBUTION
+        expect(
+            KeychainStore.service == "com.nanyin.app.spotify",
+            "distribution builds must use the production Keychain service"
+        )
+#else
+        expect(
+            KeychainStore.service == "com.nanyin.app.spotify.development",
+            "local builds must use the development Keychain service"
+        )
+#endif
+
+        let first = try KeychainStore.spotifyDeviceId(in: root)
+        let second = try KeychainStore.spotifyDeviceId(in: root)
         expect(first == second, "device id must remain stable")
         expect(isValidDeviceId(first), "device id must be 20 lowercase hex characters")
 
@@ -22,7 +32,7 @@ private enum KeychainStoreTests {
 
         try Data("invalid".utf8).write(to: file, options: .atomic)
         do {
-            _ = try KeychainStore.spotifyDeviceId(in: root, legacyDeviceIdProvider: { nil })
+            _ = try KeychainStore.spotifyDeviceId(in: root)
             fatalError("a corrupt device id must not be silently replaced")
         } catch CocoaError.fileReadCorruptFile {
             try expect(
@@ -32,43 +42,12 @@ private enum KeychainStoreTests {
         }
 
         try FileManager.default.removeItem(at: file)
-        let legacyDeviceId = "0123456789abcdefabcd"
-        let migrated = try KeychainStore.spotifyDeviceId(in: root) { legacyDeviceId }
-        expect(migrated == legacyDeviceId, "the legacy device id must be preserved exactly")
-        try expect(
-            try String(contentsOf: file, encoding: .utf8) == legacyDeviceId,
-            "the migrated device id must be persisted to the new file"
-        )
-
-        try FileManager.default.removeItem(at: file)
-        do {
-            _ = try KeychainStore.spotifyDeviceId(in: root) { "invalid" }
-            fatalError("a corrupt legacy device id must not be replaced")
-        } catch CocoaError.fileReadCorruptFile {
-            expect(
-                !FileManager.default.fileExists(atPath: file.path),
-                "a corrupt legacy device id must not create a replacement file"
-            )
-        }
-
-        enum LegacyReadError: Error { case denied }
-        do {
-            _ = try KeychainStore.spotifyDeviceId(in: root) { throw LegacyReadError.denied }
-            fatalError("a failed legacy read must not generate a replacement")
-        } catch LegacyReadError.denied {
-            expect(
-                !FileManager.default.fileExists(atPath: file.path),
-                "a failed legacy read must leave the device id absent"
-            )
-        }
-
+        let validDeviceId = "0123456789abcdefabcd"
         let symlinkTarget = root.appendingPathComponent("device-id-target")
-        try Data(legacyDeviceId.utf8).write(to: symlinkTarget)
+        try Data(validDeviceId.utf8).write(to: symlinkTarget)
         try FileManager.default.createSymbolicLink(at: file, withDestinationURL: symlinkTarget)
         try expectFailure("a device id symlink must be rejected") {
-            _ = try KeychainStore.spotifyDeviceId(in: root) {
-                fatalError("a device id symlink must not trigger legacy migration")
-            }
+            _ = try KeychainStore.spotifyDeviceId(in: root)
         }
 
         try FileManager.default.removeItem(at: file)
@@ -77,17 +56,13 @@ private enum KeychainStoreTests {
             withDestinationPath: root.appendingPathComponent("missing-target").path
         )
         try expectFailure("a dangling device id symlink must be rejected") {
-            _ = try KeychainStore.spotifyDeviceId(in: root) {
-                fatalError("a dangling symlink must not trigger legacy migration")
-            }
+            _ = try KeychainStore.spotifyDeviceId(in: root)
         }
 
         try FileManager.default.removeItem(at: file)
         try FileManager.default.createDirectory(at: file, withIntermediateDirectories: false)
         try expectFailure("a non-file device id must be rejected") {
-            _ = try KeychainStore.spotifyDeviceId(in: root) {
-                fatalError("a non-file device id must not trigger legacy migration")
-            }
+            _ = try KeychainStore.spotifyDeviceId(in: root)
         }
 
         let symlinkRoot = root.appendingPathComponent("symlink-root", isDirectory: true)
@@ -99,9 +74,7 @@ private enum KeychainStoreTests {
             withDestinationURL: symlinkDirectoryTarget
         )
         try expectFailure("a device id directory symlink must be rejected") {
-            _ = try KeychainStore.spotifyDeviceId(in: symlinkRoot) {
-                fatalError("a directory symlink must not trigger legacy migration")
-            }
+            _ = try KeychainStore.spotifyDeviceId(in: symlinkRoot)
         }
 
         print("Keychain store tests passed")
