@@ -119,6 +119,7 @@ build_app() {
     -destination "$DESTINATION" \
     -derivedDataPath "$DERIVED_DATA_PATH" \
     -archivePath "$ARCHIVE_PATH" \
+    SWIFT_ACTIVE_COMPILATION_CONDITIONS=NANYIN_DISTRIBUTION \
     CODE_SIGNING_ALLOWED=NO \
     archive
 

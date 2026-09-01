@@ -54,6 +54,7 @@ enum SpotifyAuth {
         case noAuthorizationCode
         case tokenExchangeFailed(String)
         case userCancelled
+        case noStoredCredential
         case refreshFailed(String)
         /// The stored refresh token was rejected (revoked/expired). The
         /// credential is dead — only an interactive re-auth recovers.
@@ -65,6 +66,7 @@ enum SpotifyAuth {
             case .noAuthorizationCode: "No authorization code received"
             case let .tokenExchangeFailed(msg): "Token exchange failed: \(msg)"
             case .userCancelled: "Sign-in cancelled"
+            case .noStoredCredential: "No stored credential"
             case let .refreshFailed(msg): "Token refresh failed: \(msg)"
             case let .refreshTokenRevoked(cleanupError):
                 if let cleanupError {
@@ -185,7 +187,7 @@ enum SpotifyAuth {
                 throw CancellationError()
             }
             guard let storedToken = try SpotifyAuth.storedRefreshTokenUncoordinated(for: kind) else {
-                throw AuthError.refreshFailed("no stored refresh token")
+                throw AuthError.noStoredCredential
             }
             let token = try await request(storedToken)
             try persistReplacement(
