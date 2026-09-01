@@ -20,3 +20,5 @@ research-repos/
 
 # Logs
 *.log
+
+.agents/

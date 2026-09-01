@@ -486,8 +486,8 @@ enum SpotifyAuth {
         }
     }
 
-    /// Shares a BSD file lock with dealer_probe.sh so only one process can
-    /// read, refresh, and persist the rotating playback credential at a time.
+    /// Serializes playback credential access across GUI and headless-probe
+    /// Nanyin processes so a rotating replacement is persisted exactly once.
     private static func withPlaybackRefreshLock<T>(
         _ operation: () async throws -> T
     ) async throws -> T {
