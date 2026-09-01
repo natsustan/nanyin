@@ -64,7 +64,24 @@ enum KeychainStore {
     }
 
     static func string(forKey key: String) throws -> String? {
-        try string(forKey: key, service: service)
+        if let value = try string(forKey: key, service: service) {
+            return value
+        }
+
+#if DEBUG
+        return nil
+#else
+        // Existing Developer ID releases stored both refresh tokens in the
+        // original service. Copy before deleting so an interrupted migration
+        // never loses the only credential. Development builds must not read
+        // this namespace.
+        guard let legacyValue = try string(forKey: key, service: legacyService) else {
+            return nil
+        }
+        try setString(legacyValue, forKey: key)
+        try delete(forKey: key, service: legacyService)
+        return legacyValue
+#endif
     }
 
     private static func string(forKey key: String, service: String) throws -> String? {
@@ -95,6 +112,32 @@ enum KeychainStore {
     }
 
     static func delete(forKey key: String) throws {
+        var firstError: Error?
+        do {
+            try delete(forKey: key, service: service)
+        } catch {
+            firstError = error
+        }
+
+#if !DEBUG
+        // Sign-out must also clear credentials left by an older release. If a
+        // migration copied successfully but legacy cleanup failed, retaining
+        // that item could otherwise resurrect the signed-out session.
+        do {
+            try delete(forKey: key, service: legacyService)
+        } catch {
+            if firstError == nil {
+                firstError = error
+            }
+        }
+#endif
+
+        if let firstError {
+            throw firstError
+        }
+    }
+
+    private static func delete(forKey key: String, service: String) throws {
         try disableUserInteraction()
         let authenticationContext = LAContext()
         authenticationContext.interactionNotAllowed = true
