@@ -3,8 +3,123 @@
 //  Nanyin
 //
 
+import Darwin
 import Sparkle
 import SwiftUI
+
+@main
+private enum NanyinMain {
+    private static var processLock: NanyinProcessLock?
+
+    @MainActor
+    static func main() async {
+        let arguments = Array(CommandLine.arguments.dropFirst())
+        let isDealerProbe = arguments.first == "--dealer-probe"
+        if isDealerProbe, arguments.count > 2 {
+            FileHandle.standardError.write(Data("Usage: Nanyin --dealer-probe [device_id]\n".utf8))
+            Darwin.exit(64)
+        }
+        if isDealerProbe,
+           ProcessInfo.processInfo.environment["NANYIN_ALLOW_LIVE_SPOTIFY"] != "1" {
+            FileHandle.standardError.write(
+                Data("ERROR: dealer_probe uses real Spotify credentials and opens a real dealer session.\n".utf8)
+            )
+            FileHandle.standardError.write(
+                Data("       Set NANYIN_ALLOW_LIVE_SPOTIFY=1 only after explicit user authorization.\n".utf8)
+            )
+            Darwin.exit(64)
+        }
+
+        do {
+            guard let lock = try NanyinProcessLock.acquire() else {
+                FileHandle.standardError.write(
+                    Data("ERROR: Nanyin is already running; stop it before starting another instance.\n".utf8)
+                )
+                Darwin.exit(6)
+            }
+            processLock = lock
+        } catch {
+            FileHandle.standardError.write(
+                Data("ERROR: could not acquire Nanyin's process lock: \(error.localizedDescription)\n".utf8)
+            )
+            Darwin.exit(1)
+        }
+
+        guard isDealerProbe else {
+            NanyinApp.main()
+            return
+        }
+
+        let deviceId = arguments.dropFirst().first ?? "nanyin_probe_check"
+        Darwin.exit(await runDealerProbe(deviceId: deviceId))
+    }
+
+    @MainActor
+    private static func runDealerProbe(deviceId: String) async -> Int32 {
+        guard !deviceId.isEmpty else {
+            FileHandle.standardError.write(Data("ERROR: probe device id must not be empty.\n".utf8))
+            return 64
+        }
+
+        let token: SpotifyAuth.Token
+        do {
+            token = try await SpotifyAuth.refreshAccessToken(for: .playback)
+        } catch let error as KeychainStore.KeychainError {
+            FileHandle.standardError.write(
+                Data("ERROR: could not access Nanyin's playback credential: \(error.localizedDescription)\n".utf8)
+            )
+            return 5
+        } catch let error as SpotifyAuth.AuthError {
+            FileHandle.standardError.write(
+                Data("ERROR: could not refresh the playback credential: \(error.localizedDescription)\n".utf8)
+            )
+            return 2
+        } catch {
+            FileHandle.standardError.write(Data("ERROR: token refresh failed: \(error.localizedDescription)\n".utf8))
+            return 1
+        }
+
+        var disconnected = false
+        Core.onDisconnected = { generation in
+            if generation == 1 {
+                disconnected = true
+            }
+        }
+
+        print("[probe] starting Nanyin core device_id=\(deviceId) (idles 300s, no audio)")
+        switch await Core.initializePlayer(
+            accessToken: token.accessToken,
+            deviceId: deviceId,
+            generation: 1
+        ) {
+        case .connected:
+            break
+        case let .credentialsRejected(message):
+            _ = Core.shutdown()
+            FileHandle.standardError.write(Data("ERROR: playback credentials rejected: \(message)\n".utf8))
+            return 2
+        case let .failed(code, message):
+            _ = Core.shutdown()
+            FileHandle.standardError.write(Data("ERROR: probe initialization failed (\(code)): \(message)\n".utf8))
+            return 1
+        }
+
+        print("[probe] spirc up — idling 300s, watching dealer")
+        for interval in 1...30 {
+            try? await Task.sleep(nanoseconds: 10_000_000_000)
+            if disconnected {
+                _ = Core.shutdown()
+                print("RESULT: dealer session died after connecting; inspect network, Spotify service, credentials, and suspected restriction state.")
+                return 3
+            }
+            print("[probe] t+\(interval)0s")
+        }
+
+        _ = Core.shutdown()
+        print("RESULT: idle dealer session remained stable for 300s; investigate the application path next")
+        return 0
+    }
+}
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -44,7 +159,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-@main
 struct NanyinApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @AppStorage(AppThemeID.preferenceKey)

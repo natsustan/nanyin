@@ -237,6 +237,11 @@ Idle dealer probe (also live, also opt-in):
 NANYIN_ALLOW_LIVE_SPOTIFY=1 script/dealer_probe.sh [device_id]
 ```
 
+The probe delegates credential refresh, rotation persistence, and the idle
+dealer session to the installed Developer ID-signed `/Applications/Nanyin.app`;
+the shell never reads the app's Keychain items. Set `NANYIN_APP_PATH` when the
+signed bundle is installed elsewhere.
+
 ## Tests
 
 `script/agent_check.sh` is the suite. It compiles three Swift test binaries

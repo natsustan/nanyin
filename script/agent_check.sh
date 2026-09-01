@@ -102,6 +102,20 @@ rg -q 'fixedSize\(\)' "$ROOT_DIR/NanyinApp/Classic/Bridge/ChromeButton.swift" \
     || fail "Classic Chrome bridge still exposes the old implementation configuration"
 
 step "checking shell and playback ownership seams"
+! rg -q \
+    'security (find|add)-generic-password|com\.nanyin\.app\.spotify|playback_refresh_token' \
+    "$ROOT_DIR/script/dealer_probe.sh" \
+    || fail "dealer_probe must not access the application Keychain from the shell"
+rg -q -- '--dealer-probe' "$ROOT_DIR/NanyinApp/NanyinApp.swift" \
+    || fail "the signed app no longer owns the headless dealer probe"
+rg -Fq 'environment["NANYIN_ALLOW_LIVE_SPOTIFY"]' "$ROOT_DIR/NanyinApp/NanyinApp.swift" \
+    || fail "the signed dealer probe does not require explicit live Spotify authorization"
+rg -Fq 'certificate leaf[subject.OU] = "V6GTS74AND"' "$ROOT_DIR/script/dealer_probe.sh" \
+    || fail "dealer_probe is not pinned to Nanyin's Developer ID team"
+rg -Fq 'pgrep -x Nanyin' "$ROOT_DIR/script/dealer_probe.sh" \
+    || fail "dealer_probe does not detect Nanyin independently of its bundle path"
+! rg -q 'strings .*\|.*grep' "$ROOT_DIR/script/dealer_probe.sh" \
+    || fail "dealer_probe has a pipefail-sensitive strings pipeline"
 for source in \
     "$ROOT_DIR/NanyinApp/Views/AppContentView.swift" \
     "$ROOT_DIR/NanyinApp/Views/NanyinDarkShell.swift" \
@@ -219,6 +233,20 @@ xcrun swiftc \
     -framework ImageIO \
     -o "$state_test_dir/artwork-cache-tests"
 "$state_test_dir/artwork-cache-tests"
+
+step "running Keychain store tests"
+xcrun swiftc \
+    "$ROOT_DIR/NanyinApp/Core/KeychainStore.swift" \
+    "$ROOT_DIR/Tests/KeychainStoreTests.swift" \
+    -o "$state_test_dir/keychain-store-tests"
+"$state_test_dir/keychain-store-tests"
+
+step "running Nanyin process lock tests"
+xcrun swiftc \
+    "$ROOT_DIR/NanyinApp/Core/NanyinProcessLock.swift" \
+    "$ROOT_DIR/Tests/NanyinProcessLockTests.swift" \
+    -o "$state_test_dir/nanyin-process-lock-tests"
+"$state_test_dir/nanyin-process-lock-tests"
 
 step "running Rust unit tests offline"
 mise exec rust@stable -- cargo test \
