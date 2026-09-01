@@ -108,6 +108,10 @@ step "checking shell and playback ownership seams"
     || fail "dealer_probe must not access the application Keychain from the shell"
 rg -q -- '--dealer-probe' "$ROOT_DIR/NanyinApp/NanyinApp.swift" \
     || fail "the signed app no longer owns the headless dealer probe"
+rg -Fq 'certificate leaf[subject.OU] = "V6GTS74AND"' "$ROOT_DIR/script/dealer_probe.sh" \
+    || fail "dealer_probe is not pinned to Nanyin's Developer ID team"
+! rg -q 'strings .*\|.*grep' "$ROOT_DIR/script/dealer_probe.sh" \
+    || fail "dealer_probe has a pipefail-sensitive strings pipeline"
 for source in \
     "$ROOT_DIR/NanyinApp/Views/AppContentView.swift" \
     "$ROOT_DIR/NanyinApp/Views/NanyinDarkShell.swift" \

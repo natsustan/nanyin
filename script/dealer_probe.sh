@@ -22,6 +22,7 @@ set -euo pipefail
 DEVICE_ID="${1:-nanyin_probe_check}"
 APP_BUNDLE="${NANYIN_APP_PATH:-/Applications/Nanyin.app}"
 APP_EXECUTABLE="$APP_BUNDLE/Contents/MacOS/Nanyin"
+SIGNING_REQUIREMENT='anchor apple generic and identifier "com.nanyin.app" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = "V6GTS74AND"'
 
 require_live_spotify_opt_in() {
     if [ "${NANYIN_ALLOW_LIVE_SPOTIFY:-}" != "1" ]; then
@@ -46,17 +47,11 @@ if [ ! -x "$APP_EXECUTABLE" ]; then
     echo "       Install Nanyin.app or set NANYIN_APP_PATH to its bundle path." >&2
     exit 1
 fi
-if ! SIGNING_INFO="$(codesign -dvv "$APP_BUNDLE" 2>&1)"; then
-    echo "ERROR: could not inspect the Nanyin app signature." >&2
+if ! codesign --verify --strict -R="$SIGNING_REQUIREMENT" "$APP_BUNDLE"; then
+    echo "ERROR: dealer_probe requires Nanyin's Developer ID signature (Team V6GTS74AND)." >&2
     exit 1
 fi
-if ! codesign --verify --strict "$APP_BUNDLE" \
-    || ! grep -q '^Identifier=com.nanyin.app$' <<<"$SIGNING_INFO" \
-    || ! grep -q '^Authority=Developer ID Application:' <<<"$SIGNING_INFO"; then
-    echo "ERROR: dealer_probe requires a valid Developer ID-signed Nanyin.app." >&2
-    exit 1
-fi
-if ! strings "$APP_EXECUTABLE" | grep -Fqx 'Usage: Nanyin --dealer-probe [device_id]'; then
+if ! grep -Fqx 'Usage: Nanyin --dealer-probe [device_id]' < <(strings "$APP_EXECUTABLE"); then
     echo "ERROR: the installed Nanyin.app does not support the headless dealer probe." >&2
     echo "       Install a release containing the --dealer-probe command first." >&2
     exit 1

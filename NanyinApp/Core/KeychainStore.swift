@@ -147,10 +147,19 @@ extension KeychainStore {
             withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700]
         )
+        guard let directoryStatus = try fileStatus(at: directory),
+              directoryStatus.st_mode & S_IFMT == S_IFDIR,
+              directoryStatus.st_uid == geteuid() else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
         try fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
 
         let lockURL = directory.appendingPathComponent("spotify-device-id.lock")
-        let lockDescriptor = open(lockURL.path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+        let lockDescriptor = open(
+            lockURL.path,
+            O_CREAT | O_RDWR | O_NOFOLLOW,
+            S_IRUSR | S_IWUSR
+        )
         guard lockDescriptor >= 0 else {
             throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
         }
@@ -161,8 +170,7 @@ extension KeychainStore {
         defer { flock(lockDescriptor, LOCK_UN) }
 
         let fileURL = directory.appendingPathComponent(spotifyDeviceIdFileName)
-        if fileManager.fileExists(atPath: fileURL.path) {
-            try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
+        if try fileStatus(at: fileURL) != nil {
             return try readSpotifyDeviceId(from: fileURL)
         }
 
@@ -192,8 +200,47 @@ extension KeychainStore {
     }
 
     private static func readSpotifyDeviceId(from fileURL: URL) throws -> String {
-        let id = try String(contentsOf: fileURL, encoding: .utf8)
+        guard let initialStatus = try fileStatus(at: fileURL),
+              initialStatus.st_mode & S_IFMT == S_IFREG,
+              initialStatus.st_uid == geteuid() else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+
+        let descriptor = open(fileURL.path, O_RDONLY | O_NONBLOCK | O_NOFOLLOW)
+        guard descriptor >= 0 else {
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+        }
+        defer { close(descriptor) }
+
+        var status = stat()
+        guard fstat(descriptor, &status) == 0 else {
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+        }
+        guard status.st_mode & S_IFMT == S_IFREG,
+              status.st_uid == geteuid() else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        guard fchmod(descriptor, S_IRUSR | S_IWUSR) == 0 else {
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+        }
+
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: false)
+        let data = try handle.readToEnd() ?? Data()
+        guard let id = String(data: data, encoding: .utf8) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
         return try validateSpotifyDeviceId(id)
+    }
+
+    private static func fileStatus(at url: URL) throws -> stat? {
+        var status = stat()
+        if lstat(url.path, &status) == 0 {
+            return status
+        }
+        if errno == ENOENT {
+            return nil
+        }
+        throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
     }
 
     private static func validateSpotifyDeviceId(_ id: String) throws -> String {

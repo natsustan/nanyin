@@ -62,6 +62,48 @@ private enum KeychainStoreTests {
             )
         }
 
+        let symlinkTarget = root.appendingPathComponent("device-id-target")
+        try Data(legacyDeviceId.utf8).write(to: symlinkTarget)
+        try FileManager.default.createSymbolicLink(at: file, withDestinationURL: symlinkTarget)
+        try expectFailure("a device id symlink must be rejected") {
+            _ = try KeychainStore.spotifyDeviceId(in: root) {
+                fatalError("a device id symlink must not trigger legacy migration")
+            }
+        }
+
+        try FileManager.default.removeItem(at: file)
+        try FileManager.default.createSymbolicLink(
+            atPath: file.path,
+            withDestinationPath: root.appendingPathComponent("missing-target").path
+        )
+        try expectFailure("a dangling device id symlink must be rejected") {
+            _ = try KeychainStore.spotifyDeviceId(in: root) {
+                fatalError("a dangling symlink must not trigger legacy migration")
+            }
+        }
+
+        try FileManager.default.removeItem(at: file)
+        try FileManager.default.createDirectory(at: file, withIntermediateDirectories: false)
+        try expectFailure("a non-file device id must be rejected") {
+            _ = try KeychainStore.spotifyDeviceId(in: root) {
+                fatalError("a non-file device id must not trigger legacy migration")
+            }
+        }
+
+        let symlinkRoot = root.appendingPathComponent("symlink-root", isDirectory: true)
+        let symlinkDirectoryTarget = root.appendingPathComponent("symlink-directory-target", isDirectory: true)
+        try FileManager.default.createDirectory(at: symlinkRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: symlinkDirectoryTarget, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(
+            at: symlinkRoot.appendingPathComponent("Nanyin", isDirectory: true),
+            withDestinationURL: symlinkDirectoryTarget
+        )
+        try expectFailure("a device id directory symlink must be rejected") {
+            _ = try KeychainStore.spotifyDeviceId(in: symlinkRoot) {
+                fatalError("a directory symlink must not trigger legacy migration")
+            }
+        }
+
         print("Keychain store tests passed")
     }
 
@@ -76,6 +118,15 @@ private enum KeychainStoreTests {
     private static func isValidDeviceId(_ id: String) -> Bool {
         id.utf8.count == 20
             && id.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
+    }
+
+    private static func expectFailure(_ message: String, _ operation: () throws -> Void) throws {
+        do {
+            try operation()
+            fatalError(message)
+        } catch {
+            return
+        }
     }
 
     private static func expect(_ condition: @autoclosure () throws -> Bool, _ message: String) rethrows {
