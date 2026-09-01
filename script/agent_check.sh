@@ -240,6 +240,12 @@ xcrun swiftc \
     "$ROOT_DIR/Tests/KeychainStoreTests.swift" \
     -o "$state_test_dir/keychain-store-tests"
 "$state_test_dir/keychain-store-tests"
+xcrun swiftc \
+    -D NANYIN_DISTRIBUTION \
+    "$ROOT_DIR/NanyinApp/Core/KeychainStore.swift" \
+    "$ROOT_DIR/Tests/KeychainStoreTests.swift" \
+    -o "$state_test_dir/keychain-store-distribution-tests"
+"$state_test_dir/keychain-store-distribution-tests"
 
 step "running Nanyin process lock tests"
 xcrun swiftc \

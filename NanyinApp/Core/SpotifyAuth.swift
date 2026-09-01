@@ -155,9 +155,6 @@ enum SpotifyAuth {
 
         func deleteCredential() throws {
             try SpotifyAuth.setRefreshTokenUncoordinated(nil, for: kind)
-            if kind == .playback {
-                try KeychainStore.delete(forKey: "refresh_token")
-            }
         }
 
         func deleteCredential(expectedRevision: UInt64) throws {
@@ -232,16 +229,7 @@ enum SpotifyAuth {
     // MARK: - Token persistence
 
     private static func storedRefreshTokenUncoordinated(for kind: TokenKind) throws -> String? {
-        // Migrate: the original single-flow keymaster token (all scopes incl.
-        // streaming) works as the playback refresh token.
-        if kind == .playback, try KeychainStore.string(forKey: kind.keychainKey) == nil {
-            if let legacy = try KeychainStore.string(forKey: "refresh_token") {
-                try KeychainStore.setString(legacy, forKey: kind.keychainKey)
-                try KeychainStore.delete(forKey: "refresh_token")
-                return legacy
-            }
-        }
-        return try KeychainStore.string(forKey: kind.keychainKey)
+        try KeychainStore.string(forKey: kind.keychainKey)
     }
 
     private static func setRefreshTokenUncoordinated(

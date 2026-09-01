@@ -14,9 +14,9 @@ enum KeychainStore {
     /// insufficient here because locally signed Release builds have a
     /// different designated requirement from Developer ID releases too.
 #if NANYIN_DISTRIBUTION
-    private static let service = "com.nanyin.app.spotify"
+    static let service = "com.nanyin.app.spotify"
 #else
-    private static let service = "com.nanyin.app.spotify.development"
+    static let service = "com.nanyin.app.spotify.development"
 #endif
 
     struct KeychainError: Error, LocalizedError {

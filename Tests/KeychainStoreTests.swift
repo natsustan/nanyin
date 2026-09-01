@@ -8,6 +8,18 @@ private enum KeychainStoreTests {
         defer { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
 
+#if NANYIN_DISTRIBUTION
+        expect(
+            KeychainStore.service == "com.nanyin.app.spotify",
+            "distribution builds must use the production Keychain service"
+        )
+#else
+        expect(
+            KeychainStore.service == "com.nanyin.app.spotify.development",
+            "local builds must use the development Keychain service"
+        )
+#endif
+
         let first = try KeychainStore.spotifyDeviceId(in: root)
         let second = try KeychainStore.spotifyDeviceId(in: root)
         expect(first == second, "device id must remain stable")
