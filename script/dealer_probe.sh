@@ -33,7 +33,7 @@ require_live_spotify_opt_in() {
 }
 
 ensure_nanyin_not_running() {
-    if pgrep -f '[N]anyin.app' >/dev/null; then
+    if pgrep -x Nanyin >/dev/null; then
         echo "ERROR: Nanyin is already running; stop it before starting the dealer probe." >&2
         exit 6
     fi
