@@ -37,7 +37,7 @@ final class ClassicChromeButtonView: NSView {
         wantsLayer = true
         layer?.addSublayer(backgroundLayer)
         layer?.addSublayer(borderLayer)
-        focusRingType = .default
+        focusRingType = .none
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
         setAccessibilityEnabled(true)
