@@ -1892,6 +1892,7 @@ final class AppModel {
         cancelPlaybackWatchdog()
         clearPendingPlayIntent()
         cancelAudioStallWatchdog()
+        clearVolumeConfirmation()
         deferredReconnectGeneration = nil
         playbackGeneration &+= 1
         activePlaybackGeneration = nil
@@ -1914,6 +1915,7 @@ final class AppModel {
         cancelPlaybackWatchdog()
         clearPendingPlayIntent()
         cancelAudioStallWatchdog()
+        clearVolumeConfirmation()
         accountEpoch += 1
         ArtworkCache.shared.cancelPrefetches()
         playbackGeneration &+= 1
@@ -2006,9 +2008,6 @@ final class AppModel {
         durationMs = 0
         isEditingVolume = false
         pendingVolumeCommit = nil
-        volumeConfirmation = nil
-        volumeConfirmationTask?.cancel()
-        volumeConfirmationTask = nil
         shuffle = false
         repeatMode = .off
         playbackConnectionState = .connecting
@@ -2213,6 +2212,7 @@ final class AppModel {
 
     private func beginPlaybackConnection() -> UInt64 {
         cancelAudioStallWatchdog()
+        clearVolumeConfirmation()
         deferredReconnectGeneration = nil
         playbackRetryAvailability = .none
         playbackGeneration &+= 1
