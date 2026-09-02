@@ -68,6 +68,17 @@ final class ClassicChromeButtonView: NSView {
         isEnabled
     }
 
+    override func becomeFirstResponder() -> Bool {
+        let focusedFromKeyboard = NSApp.currentEvent?.type == .keyDown
+        focusRingType = NSApp.isFullKeyboardAccessEnabled && focusedFromKeyboard ? .default : .none
+        return super.becomeFirstResponder()
+    }
+
+    override func resignFirstResponder() -> Bool {
+        focusRingType = .none
+        return super.resignFirstResponder()
+    }
+
     override func updateTrackingAreas() {
         if let trackingArea {
             removeTrackingArea(trackingArea)
@@ -94,6 +105,7 @@ final class ClassicChromeButtonView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         guard isEnabled else { return }
+        focusRingType = .none
         isPressed = true
         updateAppearance()
     }
