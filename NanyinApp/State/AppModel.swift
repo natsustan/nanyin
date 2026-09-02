@@ -3478,11 +3478,9 @@ final class AppModel {
         let encoded = pendingVolumeCommit
             ?? UInt16((min(max(volume, 0), 1) * Double(UInt16.max)).rounded())
         let result = Core.setVolume(encoded)
-        if result == 0 {
-            pendingVolumeCommit = nil
-            holdVolumeConfirmation(encoded)
-        } else {
-            pendingVolumeCommit = encoded
+        pendingVolumeCommit = nil
+        holdVolumeConfirmation(encoded)
+        if result != 0 {
             dlog("volume commit failed rc=\(result); retaining intent for reconnect")
         }
     }
