@@ -177,11 +177,6 @@ final nonisolated class AudioRenderer: @unchecked Sendable {
         start(generation: generation)
     }
 
-    var volume: Float {
-        get { engine.mainMixerNode.outputVolume }
-        set { engine.mainMixerNode.outputVolume = newValue }
-    }
-
     var playbackProgress: RendererPlaybackProgress {
         lock.withLock {
             RendererPlaybackProgress(

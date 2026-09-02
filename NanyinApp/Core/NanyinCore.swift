@@ -34,6 +34,7 @@ enum Core {
         )
         case shuffleChanged(Bool)
         case repeatChanged(context: Bool, track: Bool)
+        case volumeChanged(UInt16)
         case endOfTrack(playRequestID: UInt64)
     }
 
@@ -127,6 +128,9 @@ enum Core {
                 context: object["repeat_context"] as? Bool ?? false,
                 track: object["repeat_track"] as? Bool ?? false
             )
+        case "volume_changed":
+            guard let volume = (object["volume"] as? NSNumber)?.uint16Value else { return }
+            event = .volumeChanged(volume)
         default: return
         }
 
@@ -248,6 +252,9 @@ enum Core {
     nonisolated static func prev() -> Int32 { nanyin_prev() }
     nonisolated static func seek(_ positionMs: UInt32) -> Int32 { nanyin_seek(positionMs) }
     nonisolated static func setVolume(_ volume: UInt16) -> Int32 { nanyin_set_volume(volume) }
+    nonisolated static func setLocalVolume(_ volume: UInt16) -> Int32 {
+        nanyin_set_local_volume(volume)
+    }
     nonisolated static func setShuffle(_ on: Bool) -> Int32 { nanyin_shuffle(on) }
     nonisolated static func setRepeat(_ on: Bool) -> Int32 { nanyin_repeat(on) }
     nonisolated static func setRepeatTrack(_ on: Bool) -> Int32 { nanyin_repeat_track(on) }
@@ -257,6 +264,7 @@ enum Core {
 
     nonisolated static var isPlaying: Bool { nanyin_is_playing() == 1 }
     nonisolated static var positionMs: UInt32 { nanyin_get_position_ms() }
+    nonisolated static var volume: UInt16 { nanyin_get_volume() }
     nonisolated static var confirmedPositionMs: UInt32 { nanyin_get_confirmed_position_ms() }
     nonisolated static var durationMs: UInt32 { nanyin_get_duration_ms() }
     nonisolated static var playbackProgress: CorePlaybackProgress {

@@ -54,6 +54,8 @@ int32_t nanyin_next(void);
 int32_t nanyin_prev(void);
 int32_t nanyin_seek(uint32_t position_ms);
 int32_t nanyin_set_volume(uint16_t volume);
+/// Applies volume locally without publishing a Spotify Connect update.
+int32_t nanyin_set_local_volume(uint16_t volume);
 int32_t nanyin_shuffle(bool on);
 int32_t nanyin_repeat(bool on);
 int32_t nanyin_repeat_track(bool on);
@@ -66,6 +68,9 @@ int32_t nanyin_is_playing(void);
 
 /// Current playback position in ms (interpolated while playing).
 uint32_t nanyin_get_position_ms(void);
+
+/// Current local mixer volume (0–65535).
+uint16_t nanyin_get_volume(void);
 
 /// Last error message from a failed call, or NULL.
 /// Caller must free the returned string with nanyin_free_string.

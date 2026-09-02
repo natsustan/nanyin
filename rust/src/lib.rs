@@ -107,6 +107,7 @@ static RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
 static SESSION: Mutex<Option<Session>> = Mutex::new(None);
 static SPIRC: Mutex<Option<Arc<Spirc>>> = Mutex::new(None);
 static PLAYER: Mutex<Option<Arc<Player>>> = Mutex::new(None);
+static MIXER: Mutex<Option<Arc<SoftMixer>>> = Mutex::new(None);
 /// Serializes generation changes with publishing or clearing player slots.
 static PLAYER_LIFECYCLE: Mutex<()> = Mutex::new(());
 static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
@@ -121,6 +122,9 @@ static IS_PLAYING: AtomicBool = AtomicBool::new(false);
 static POSITION: Mutex<PlaybackPosition> = Mutex::new(PlaybackPosition::empty());
 static CONFIRMED_POSITION_MS: AtomicU32 = AtomicU32::new(0);
 static DURATION_MS: AtomicU32 = AtomicU32::new(0);
+/// The last locally requested or remotely confirmed volume. Unlike the mixer,
+/// this survives a player rebuild so reconnect cannot jump back to full volume.
+static DESIRED_VOLUME: AtomicU32 = AtomicU32::new(u16::MAX as u32);
 static CURRENT_URI: Mutex<Option<String>> = Mutex::new(None);
 const NO_PLAY_REQUEST: u64 = u64::MAX;
 static CURRENT_PLAY_REQUEST_ID: AtomicU64 = AtomicU64::new(NO_PLAY_REQUEST);
@@ -130,6 +134,14 @@ static LAST_ERROR: Mutex<Option<String>> = Mutex::new(None);
 
 fn set_last_error(msg: &str) {
     *LAST_ERROR.lock().unwrap() = Some(msg.to_string());
+}
+
+fn retain_and_clear_mixer() {
+    if let Some(mixer) = MIXER.lock().unwrap().take() {
+        // Spirc can change the shared mixer without emitting a player event
+        // while this device is inactive. Preserve the actual final value.
+        DESIRED_VOLUME.store(mixer.volume().into(), Ordering::Relaxed);
+    }
 }
 
 /// Returns the last error message from a failed call (caller must free with
@@ -370,6 +382,7 @@ pub extern "C" fn nanyin_init_player(
         let spirc = SPIRC.lock().unwrap().take();
         let session = SESSION.lock().unwrap().take();
         PLAYER.lock().unwrap().take();
+        retain_and_clear_mixer();
         (generation, spirc, session)
     };
     // Tear down stale state before rebuilding (spirc died or fresh start).
@@ -432,10 +445,12 @@ async fn init_player_async(
     // NOTE: do NOT connect here — Spirc::new() registers dealer listeners first
     // and then connects the session itself. Connecting twice yields NotConnected.
 
+    let initial_volume = DESIRED_VOLUME.load(Ordering::Relaxed) as u16;
     let mixer: Arc<SoftMixer> = Arc::new(
         SoftMixer::open(MixerConfig::default())
             .map_err(|e| PlayerInitFailure::other(format!("mixer: {e}")))?,
     );
+    mixer.set_volume(initial_volume);
 
     let player_config = PlayerConfig {
         bitrate: Bitrate::Bitrate320,
@@ -468,7 +483,7 @@ async fn init_player_async(
     let connect_config = ConnectConfig {
         name: "nanyin".to_string(),
         device_type: DeviceType::Computer,
-        initial_volume: 0xFFFF,
+        initial_volume,
         ..Default::default()
     };
 
@@ -479,7 +494,7 @@ async fn init_player_async(
             session.clone(),
             credentials,
             player.clone(),
-            mixer as Arc<dyn Mixer>,
+            mixer.clone() as Arc<dyn Mixer>,
         ),
     )
     .await
@@ -501,6 +516,7 @@ async fn init_player_async(
             *SESSION.lock().unwrap() = Some(session.clone());
             *SPIRC.lock().unwrap() = Some(spirc.clone());
             *PLAYER.lock().unwrap() = Some(player.clone());
+            *MIXER.lock().unwrap() = Some(mixer.clone());
             true
         }
     };
@@ -599,6 +615,7 @@ pub extern "C" fn nanyin_shutdown() -> i32 {
         let spirc = SPIRC.lock().unwrap().take();
         let session = SESSION.lock().unwrap().take();
         PLAYER.lock().unwrap().take();
+        retain_and_clear_mixer();
         (spirc, session)
     };
     IS_PLAYING.store(false, Ordering::SeqCst);
@@ -802,6 +819,13 @@ fn handle_player_event(
                 "event": "repeat_changed",
                 "repeat_context": context,
                 "repeat_track": track,
+            }), callback_generation);
+        }
+        PlayerEvent::VolumeChanged { volume } => {
+            DESIRED_VOLUME.store(volume.into(), Ordering::Relaxed);
+            emit_state(json!({
+                "event": "volume_changed",
+                "volume": volume,
             }), callback_generation);
         }
         _ => {}
@@ -1029,7 +1053,23 @@ pub extern "C" fn nanyin_seek(position_ms: u32) -> i32 {
 /// Sets volume (0–65535).
 #[no_mangle]
 pub extern "C" fn nanyin_set_volume(volume: u16) -> i32 {
+    let local_result = nanyin_set_local_volume(volume);
+    if local_result != 0 {
+        return local_result;
+    }
     require_spirc().map_or_else(|c| c, |s| s.set_volume(volume).map_or(-1, |_| 0))
+}
+
+/// Applies volume locally without publishing a Spotify Connect update.
+#[no_mangle]
+pub extern "C" fn nanyin_set_local_volume(volume: u16) -> i32 {
+    let mixer = MIXER.lock().unwrap();
+    let result = mixer.as_ref().map_or(-2, |mixer| {
+        mixer.set_volume(volume);
+        0
+    });
+    DESIRED_VOLUME.store(volume.into(), Ordering::Relaxed);
+    result
 }
 
 #[no_mangle]
@@ -1107,6 +1147,15 @@ pub extern "C" fn nanyin_get_position_ms() -> u32 {
 }
 
 #[no_mangle]
+pub extern "C" fn nanyin_get_volume() -> u16 {
+    MIXER
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map_or_else(|| DESIRED_VOLUME.load(Ordering::Relaxed) as u16, |mixer| mixer.volume())
+}
+
+#[no_mangle]
 pub extern "C" fn nanyin_get_duration_ms() -> u32 {
     DURATION_MS.load(Ordering::SeqCst)
 }
@@ -1151,9 +1200,11 @@ fn _unused(m: mpsc::UnboundedSender<()>) {}
 #[cfg(test)]
 mod tests {
     use super::{
-        accepts_play_request, interpolated_position_ms, nanyin_init_player,
+        accepts_play_request, interpolated_position_ms, nanyin_get_volume, nanyin_init_player,
+        nanyin_set_local_volume,
         with_current_player_generation, AccessPointAuthenticationError, ErrorCode,
         PlaybackPosition, PlayerInitFailure, PlayerInitFailureKind, CALLBACK_GENERATION,
+        DESIRED_VOLUME,
         NO_PLAY_REQUEST, PLAYER_GENERATION, PLAYER_INIT_CREDENTIALS_REJECTED, PLAYER_INIT_FAILED,
         PLAYER_LIFECYCLE,
     };
@@ -1207,6 +1258,17 @@ mod tests {
             nanyin_init_player(token.as_ptr(), invalid_utf8.as_ptr().cast(), 0),
             PLAYER_INIT_FAILED
         );
+    }
+
+    #[test]
+    fn local_volume_intent_survives_without_a_live_mixer() {
+        let previous = DESIRED_VOLUME.swap(u16::MAX as u32, Ordering::Relaxed);
+
+        assert_eq!(nanyin_set_local_volume(12_345), -2);
+        assert_eq!(DESIRED_VOLUME.load(Ordering::Relaxed), 12_345);
+        assert_eq!(nanyin_get_volume(), 12_345);
+
+        DESIRED_VOLUME.store(previous, Ordering::Relaxed);
     }
 
     #[test]
