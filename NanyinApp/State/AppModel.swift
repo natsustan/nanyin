@@ -131,6 +131,10 @@ final class AppModel {
     // the model (including every track row) — PlayerBar ticks it locally.
     private(set) var durationMs: UInt32 = 0
     private(set) var volume: Double = 1.0 // 0…1
+    private var isEditingVolume = false
+    private var pendingVolumeCommit: UInt16?
+    private var volumeConfirmation: (value: UInt16, expiresAt: ContinuousClock.Instant)?
+    private var volumeConfirmationTask: Task<Void, Never>?
     private(set) var shuffle = false
     /// Classic client repeat: off / all(context) / one(track).
     enum RepeatMode: Equatable {
@@ -1888,6 +1892,7 @@ final class AppModel {
         cancelPlaybackWatchdog()
         clearPendingPlayIntent()
         cancelAudioStallWatchdog()
+        clearVolumeConfirmation()
         deferredReconnectGeneration = nil
         playbackGeneration &+= 1
         activePlaybackGeneration = nil
@@ -1910,6 +1915,7 @@ final class AppModel {
         cancelPlaybackWatchdog()
         clearPendingPlayIntent()
         cancelAudioStallWatchdog()
+        clearVolumeConfirmation()
         accountEpoch += 1
         ArtworkCache.shared.cancelPrefetches()
         playbackGeneration &+= 1
@@ -2000,6 +2006,8 @@ final class AppModel {
         isPlaying = false
         isBuffering = false
         durationMs = 0
+        isEditingVolume = false
+        pendingVolumeCommit = nil
         shuffle = false
         repeatMode = .off
         playbackConnectionState = .connecting
@@ -2185,6 +2193,7 @@ final class AppModel {
             case .connected:
                 activePlaybackGeneration = generation
                 playbackConnectionState = .ready
+                acceptInitializedVolume()
                 nowPlayingMgr.activate()
                 pushNowPlayingInfo()
                 dlog("player init OK: \(startedAt.duration(to: .now))")
@@ -2203,6 +2212,7 @@ final class AppModel {
 
     private func beginPlaybackConnection() -> UInt64 {
         cancelAudioStallWatchdog()
+        clearVolumeConfirmation()
         deferredReconnectGeneration = nil
         playbackRetryAvailability = .none
         playbackGeneration &+= 1
@@ -2933,6 +2943,10 @@ final class AppModel {
     }
 
     private func handle(_ event: Core.Event, generation: UInt64) {
+        if case let .volumeChanged(volume) = event {
+            handleVolumeChanged(volume)
+            return
+        }
         var discardedLocalRestore = false
         // Keep startup restoration strictly local. While its explicit play is
         // starting, only a current Playing event may enter live state. A
@@ -3067,6 +3081,8 @@ final class AppModel {
             case (false, true): repeatMode = .one
             case (false, false): repeatMode = .off
             }
+        case .volumeChanged:
+            break
         case let .endOfTrack(playRequestID):
             cancelAudioStallWatchdog()
             localPlaybackOwnership = localPlaybackOwnership?
@@ -3190,6 +3206,7 @@ final class AppModel {
             case .connected:
                 activePlaybackGeneration = generation
                 playbackConnectionState = .ready
+                acceptInitializedVolume()
                 schedulePendingPlayReplay(epoch: epoch, generation: generation)
                 return
             case let .failed(code, message):
@@ -3215,6 +3232,7 @@ final class AppModel {
                 case .connected:
                     activePlaybackGeneration = generation
                     playbackConnectionState = .ready
+                    acceptInitializedVolume()
                     schedulePendingPlayReplay(epoch: epoch, generation: generation)
                 case let .credentialsRejected(message):
                     dlog("reconnect refreshed token rejected: \(message)")
@@ -3433,10 +3451,93 @@ final class AppModel {
 
     func setVolume(_ fraction: Double) {
         guard isPlaybackReady else { return }
-        volume = fraction
-        AudioRenderer.shared.volume = Float(fraction)
-        guard localPlaybackRestore == nil else { return }
-        _ = Core.setVolume(UInt16(fraction * 65_535))
+        let clamped = min(max(fraction, 0), 1)
+        let encoded = UInt16((clamped * Double(UInt16.max)).rounded())
+        volume = clamped
+        isEditingVolume = true
+        pendingVolumeCommit = encoded
+        let result = Core.setLocalVolume(encoded)
+        if result != 0 {
+            dlog("local volume preview failed rc=\(result)")
+        }
+        AudioRenderer.shared.volume = Core.volumeGain(encoded)
+    }
+
+    func beginVolumeEditing() {
+        guard isPlaybackReady else { return }
+        isEditingVolume = true
+    }
+
+    func commitVolume() {
+        isEditingVolume = false
+        guard isPlaybackReady else { return }
+        guard localPlaybackRestore == nil else {
+            pendingVolumeCommit = nil
+            clearVolumeConfirmation()
+            return
+        }
+        let encoded = pendingVolumeCommit
+            ?? UInt16((min(max(volume, 0), 1) * Double(UInt16.max)).rounded())
+        let result = Core.setVolume(encoded)
+        pendingVolumeCommit = nil
+        holdVolumeConfirmation(encoded)
+        if result != 0 {
+            dlog("volume commit failed rc=\(result); retaining intent for reconnect")
+        }
+    }
+
+    func cancelVolumeEditing() {
+        isEditingVolume = false
+    }
+
+    private func acceptInitializedVolume() {
+        // Rust initializes both the replacement mixer and Connect state from
+        // its retained desired volume, so no extra post-connect PUT is needed.
+        isEditingVolume = false
+        pendingVolumeCommit = nil
+        clearVolumeConfirmation()
+        let encoded = Core.volume
+        volume = Double(encoded) / Double(UInt16.max)
+        AudioRenderer.shared.volume = Core.volumeGain(encoded)
+    }
+
+    private func handleVolumeChanged(_ encoded: UInt16) {
+        guard !isEditingVolume, pendingVolumeCommit == nil else { return }
+        if let confirmation = volumeConfirmation {
+            if encoded == confirmation.value {
+                clearVolumeConfirmation()
+            } else if ContinuousClock.now < confirmation.expiresAt {
+                return
+            } else {
+                clearVolumeConfirmation()
+            }
+        }
+        volume = Double(encoded) / Double(UInt16.max)
+        AudioRenderer.shared.volume = Core.volumeGain(encoded)
+    }
+
+    private func holdVolumeConfirmation(_ encoded: UInt16) {
+        clearVolumeConfirmation()
+        volumeConfirmation = (
+            encoded,
+            ContinuousClock.now.advanced(by: .milliseconds(2_500))
+        )
+        volumeConfirmationTask = Task {
+            try? await Task.sleep(for: .milliseconds(2_500))
+            guard !Task.isCancelled,
+                  volumeConfirmation?.value == encoded else { return }
+            volumeConfirmation = nil
+            volumeConfirmationTask = nil
+            let confirmed = Core.volume
+            volume = Double(confirmed) / Double(UInt16.max)
+            AudioRenderer.shared.volume = Core.volumeGain(confirmed)
+        }
+    }
+
+    private func clearVolumeConfirmation() {
+        volumeConfirmation = nil
+        volumeConfirmationTask?.cancel()
+        volumeConfirmationTask = nil
     }
 
     func next() {

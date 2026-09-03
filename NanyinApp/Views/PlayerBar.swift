@@ -177,7 +177,13 @@ struct PlayerBar: View {
                 Slider(value: Binding(
                     get: { app.volume },
                     set: { app.setVolume($0) }
-                ), in: 0 ... 1)
+                ), in: 0 ... 1, onEditingChanged: { isEditing in
+                    if isEditing {
+                        app.beginVolumeEditing()
+                    } else {
+                        app.commitVolume()
+                    }
+                })
                 .controlSize(.mini)
                 .frame(width: 130)
                 .disabled(!app.isPlaybackReady)
@@ -224,7 +230,11 @@ struct PlayerBar: View {
                     ),
                     accessibilityLabel: "Volume",
                     onChanged: { app.setVolume($0) },
-                    onEnded: { app.setVolume($0) }
+                    onEnded: {
+                        app.setVolume($0)
+                        app.commitVolume()
+                    },
+                    onCancelled: app.cancelVolumeEditing
                 )
 
                 Image(systemName: "speaker.wave.2.fill")
