@@ -20,8 +20,8 @@ use librespot_core::cache::Cache;
 use librespot_core::config::{DeviceType, SessionConfig};
 use librespot_core::session::Session;
 use librespot_core::AccessPointAuthenticationError;
-use librespot_playback::config::{AudioFormat, Bitrate, PlayerConfig};
-use librespot_playback::mixer::softmixer::SoftMixer;
+use librespot_playback::config::{AudioFormat, Bitrate, PlayerConfig, VolumeCtrl};
+use librespot_playback::mixer::mappings::MappedCtrl;
 use librespot_playback::mixer::{Mixer, MixerConfig};
 use librespot_playback::player::Player;
 use librespot_protocol::keyexchange::ErrorCode;
@@ -107,7 +107,7 @@ static RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
 static SESSION: Mutex<Option<Session>> = Mutex::new(None);
 static SPIRC: Mutex<Option<Arc<Spirc>>> = Mutex::new(None);
 static PLAYER: Mutex<Option<Arc<Player>>> = Mutex::new(None);
-static MIXER: Mutex<Option<Arc<SoftMixer>>> = Mutex::new(None);
+static MIXER: Mutex<Option<Arc<TrackingMixer>>> = Mutex::new(None);
 /// Serializes generation changes with publishing or clearing player slots.
 static PLAYER_LIFECYCLE: Mutex<()> = Mutex::new(());
 static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
@@ -131,6 +131,32 @@ static CURRENT_PLAY_REQUEST_ID: AtomicU64 = AtomicU64::new(NO_PLAY_REQUEST);
 static DECODER_PACKETS: AtomicU64 = AtomicU64::new(0);
 
 static LAST_ERROR: Mutex<Option<String>> = Mutex::new(None);
+
+/// Tracks Spotify Connect volume while leaving PCM unscaled for the Swift
+/// output stage, where changes can affect audio already queued for playback.
+struct TrackingMixer {
+    volume: AtomicU32,
+}
+
+fn mapped_volume_gain(volume: u16) -> f32 {
+    VolumeCtrl::default().to_mapped(volume) as f32
+}
+
+impl Mixer for TrackingMixer {
+    fn open(_config: MixerConfig) -> Result<Self, librespot_core::Error> {
+        Ok(Self {
+            volume: AtomicU32::new(u16::MAX as u32),
+        })
+    }
+
+    fn volume(&self) -> u16 {
+        self.volume.load(Ordering::Relaxed) as u16
+    }
+
+    fn set_volume(&self, volume: u16) {
+        self.volume.store(volume.into(), Ordering::Relaxed);
+    }
+}
 
 fn set_last_error(msg: &str) {
     *LAST_ERROR.lock().unwrap() = Some(msg.to_string());
@@ -446,8 +472,8 @@ async fn init_player_async(
     // and then connects the session itself. Connecting twice yields NotConnected.
 
     let initial_volume = DESIRED_VOLUME.load(Ordering::Relaxed) as u16;
-    let mixer: Arc<SoftMixer> = Arc::new(
-        SoftMixer::open(MixerConfig::default())
+    let mixer: Arc<TrackingMixer> = Arc::new(
+        TrackingMixer::open(MixerConfig::default())
             .map_err(|e| PlayerInitFailure::other(format!("mixer: {e}")))?,
     );
     mixer.set_volume(initial_volume);
@@ -464,6 +490,8 @@ async fn init_player_async(
     let player = Player::new(
         player_config,
         session.clone(),
+        // TrackingMixer uses the default no-op software volume. Swift applies
+        // its mapped gain after the ring buffer for immediate volume changes.
         mixer.get_soft_volume(),
         move || mk_proxy_sink(None, audio_format, generation),
     );
@@ -1156,6 +1184,11 @@ pub extern "C" fn nanyin_get_volume() -> u16 {
 }
 
 #[no_mangle]
+pub extern "C" fn nanyin_volume_gain(volume: u16) -> f32 {
+    mapped_volume_gain(volume)
+}
+
+#[no_mangle]
 pub extern "C" fn nanyin_get_duration_ms() -> u32 {
     DURATION_MS.load(Ordering::SeqCst)
 }
@@ -1200,15 +1233,16 @@ fn _unused(m: mpsc::UnboundedSender<()>) {}
 #[cfg(test)]
 mod tests {
     use super::{
-        accepts_play_request, interpolated_position_ms, nanyin_get_volume, nanyin_init_player,
-        nanyin_set_local_volume,
+        accepts_play_request, interpolated_position_ms, mapped_volume_gain, nanyin_get_volume,
+        nanyin_init_player, nanyin_set_local_volume,
         with_current_player_generation, AccessPointAuthenticationError, ErrorCode,
         PlaybackPosition, PlayerInitFailure, PlayerInitFailureKind, CALLBACK_GENERATION,
-        DESIRED_VOLUME,
+        TrackingMixer, DESIRED_VOLUME,
         NO_PLAY_REQUEST, PLAYER_GENERATION, PLAYER_INIT_CREDENTIALS_REJECTED, PLAYER_INIT_FAILED,
         PLAYER_LIFECYCLE,
     };
     use librespot_core::Error;
+    use librespot_playback::mixer::{Mixer, MixerConfig};
     use std::ffi::CString;
     use std::io;
     use std::ptr;
@@ -1269,6 +1303,17 @@ mod tests {
         assert_eq!(nanyin_get_volume(), 12_345);
 
         DESIRED_VOLUME.store(previous, Ordering::Relaxed);
+    }
+
+    #[test]
+    fn tracking_mixer_leaves_pcm_unscaled_for_output_gain() {
+        let mixer = TrackingMixer::open(MixerConfig::default()).unwrap();
+        mixer.set_volume(12_345);
+
+        assert_eq!(mixer.volume(), 12_345);
+        assert_eq!(mixer.get_soft_volume().attenuation_factor(), 1.0);
+        assert_eq!(mapped_volume_gain(0), 0.0);
+        assert_eq!(mapped_volume_gain(u16::MAX), 1.0);
     }
 
     #[test]

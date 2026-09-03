@@ -72,6 +72,9 @@ uint32_t nanyin_get_position_ms(void);
 /// Current local mixer volume (0–65535).
 uint16_t nanyin_get_volume(void);
 
+/// Output gain mapped from a Spotify protocol volume (0.0–1.0).
+float nanyin_volume_gain(uint16_t volume);
+
 /// Last error message from a failed call, or NULL.
 /// Caller must free the returned string with nanyin_free_string.
 char* nanyin_last_error(void);

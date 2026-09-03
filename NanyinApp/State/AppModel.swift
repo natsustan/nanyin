@@ -3460,6 +3460,7 @@ final class AppModel {
         if result != 0 {
             dlog("local volume preview failed rc=\(result)")
         }
+        AudioRenderer.shared.volume = Core.volumeGain(encoded)
     }
 
     func beginVolumeEditing() {
@@ -3495,7 +3496,9 @@ final class AppModel {
         isEditingVolume = false
         pendingVolumeCommit = nil
         clearVolumeConfirmation()
-        volume = Double(Core.volume) / Double(UInt16.max)
+        let encoded = Core.volume
+        volume = Double(encoded) / Double(UInt16.max)
+        AudioRenderer.shared.volume = Core.volumeGain(encoded)
     }
 
     private func handleVolumeChanged(_ encoded: UInt16) {
@@ -3510,6 +3513,7 @@ final class AppModel {
             }
         }
         volume = Double(encoded) / Double(UInt16.max)
+        AudioRenderer.shared.volume = Core.volumeGain(encoded)
     }
 
     private func holdVolumeConfirmation(_ encoded: UInt16) {
@@ -3524,7 +3528,9 @@ final class AppModel {
                   volumeConfirmation?.value == encoded else { return }
             volumeConfirmation = nil
             volumeConfirmationTask = nil
-            volume = Double(Core.volume) / Double(UInt16.max)
+            let confirmed = Core.volume
+            volume = Double(confirmed) / Double(UInt16.max)
+            AudioRenderer.shared.volume = Core.volumeGain(confirmed)
         }
     }
 

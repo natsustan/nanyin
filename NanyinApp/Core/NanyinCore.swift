@@ -265,6 +265,9 @@ enum Core {
     nonisolated static var isPlaying: Bool { nanyin_is_playing() == 1 }
     nonisolated static var positionMs: UInt32 { nanyin_get_position_ms() }
     nonisolated static var volume: UInt16 { nanyin_get_volume() }
+    nonisolated static func volumeGain(_ volume: UInt16) -> Float {
+        nanyin_volume_gain(volume)
+    }
     nonisolated static var confirmedPositionMs: UInt32 { nanyin_get_confirmed_position_ms() }
     nonisolated static var durationMs: UInt32 { nanyin_get_duration_ms() }
     nonisolated static var playbackProgress: CorePlaybackProgress {
