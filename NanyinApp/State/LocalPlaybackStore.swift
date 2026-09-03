@@ -84,6 +84,11 @@ enum LocalPlaybackOwnership: Equatable {
         }
     }
 
+    func ownsCurrent(requestID: UInt64) -> Bool {
+        guard requestID != CorePlaybackProgress.noPlayRequest else { return false }
+        return self == .current(requestID: requestID)
+    }
+
     func expectingSuccessor(after requestID: UInt64) -> LocalPlaybackOwnership {
         guard requestID != CorePlaybackProgress.noPlayRequest else { return self }
         switch self {

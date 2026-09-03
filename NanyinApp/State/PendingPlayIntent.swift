@@ -7,6 +7,53 @@ struct PendingPlayIntent: Equatable {
         case context(uri: String, index: Int)
         case tracks(uris: [String], index: Int)
         case trackAt(uri: String, positionMs: UInt32)
+        case contextAtTrack(
+            uri: String,
+            trackURI: String,
+            positionMs: UInt32,
+            shuffle: Bool,
+            repeatContext: Bool,
+            repeatTrack: Bool
+        )
+        case tracksAtTrack(
+            uris: [String],
+            trackURI: String,
+            positionMs: UInt32,
+            shuffle: Bool,
+            repeatContext: Bool,
+            repeatTrack: Bool
+        )
+
+        func resumingCurrentTrack(
+            uri trackURI: String,
+            positionMs: UInt32,
+            shuffle: Bool,
+            repeatContext: Bool,
+            repeatTrack: Bool
+        ) -> Self? {
+            switch self {
+            case let .context(uri, _), let .contextAtTrack(uri, _, _, _, _, _):
+                .contextAtTrack(
+                    uri: uri,
+                    trackURI: trackURI,
+                    positionMs: positionMs,
+                    shuffle: shuffle,
+                    repeatContext: repeatContext,
+                    repeatTrack: repeatTrack
+                )
+            case let .tracks(uris, _), let .tracksAtTrack(uris, _, _, _, _, _):
+                .tracksAtTrack(
+                    uris: uris,
+                    trackURI: trackURI,
+                    positionMs: positionMs,
+                    shuffle: shuffle,
+                    repeatContext: repeatContext,
+                    repeatTrack: repeatTrack
+                )
+            case .trackAt:
+                nil
+            }
+        }
     }
 
     let call: Call

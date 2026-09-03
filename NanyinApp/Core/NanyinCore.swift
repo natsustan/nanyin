@@ -35,7 +35,12 @@ enum Core {
         case shuffleChanged(Bool)
         case repeatChanged(context: Bool, track: Bool)
         case volumeChanged(UInt16)
-        case endOfTrack(playRequestID: UInt64)
+        case endOfTrack(
+            uri: String,
+            positionMs: Int,
+            durationMs: Int,
+            playRequestID: UInt64
+        )
     }
 
     nonisolated(unsafe) static var onEvent: (@MainActor (UInt64, Event) -> Void)?
@@ -121,7 +126,13 @@ enum Core {
                 coverURL: object["cover_url"] as? String,
                 playRequestID: playRequestID
             )
-        case "end_of_track": event = .endOfTrack(playRequestID: playRequestID)
+        case "end_of_track":
+            event = .endOfTrack(
+                uri: uri,
+                positionMs: position,
+                durationMs: duration,
+                playRequestID: playRequestID
+            )
         case "shuffle_changed": event = .shuffleChanged(object["shuffle"] as? Bool ?? false)
         case "repeat_changed":
             event = .repeatChanged(
@@ -239,6 +250,53 @@ enum Core {
 
     nonisolated static func playContext(_ uri: String, startIndex: Int = 0) -> Int32 {
         uri.withCString { nanyin_play_context($0, UInt32(startIndex)) }
+    }
+
+    nonisolated static func resumeContext(
+        _ uri: String,
+        at trackURI: String,
+        positionMs: UInt32,
+        shuffle: Bool,
+        repeatContext: Bool,
+        repeatTrack: Bool
+    ) -> Int32 {
+        uri.withCString { context in
+            trackURI.withCString { track in
+                nanyin_resume_context_at_track(
+                    context,
+                    track,
+                    positionMs,
+                    shuffle,
+                    repeatContext,
+                    repeatTrack
+                )
+            }
+        }
+    }
+
+    nonisolated static func resumeTracks(
+        _ uris: [String],
+        at trackURI: String,
+        positionMs: UInt32,
+        shuffle: Bool,
+        repeatContext: Bool,
+        repeatTrack: Bool
+    ) -> Int32 {
+        guard let data = try? JSONSerialization.data(withJSONObject: uris),
+              let json = String(data: data, encoding: .utf8)
+        else { return -1 }
+        return json.withCString { context in
+            trackURI.withCString { track in
+                nanyin_resume_tracks_at_track(
+                    context,
+                    track,
+                    positionMs,
+                    shuffle,
+                    repeatContext,
+                    repeatTrack
+                )
+            }
+        }
     }
 
     nonisolated static func pause() -> Int32 { nanyin_pause() }

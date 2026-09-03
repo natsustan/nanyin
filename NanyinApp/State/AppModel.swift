@@ -122,6 +122,10 @@ final class AppModel {
     private(set) var isBuffering = false
     private var playbackWatchdog: Task<Void, Never>?
     private var pendingPlayIntent: PendingPlayIntent?
+    /// The last confirmed librespot load source. Kept after the one-shot
+    /// pending intent is cleared so a replacement Spirc can restore the same
+    /// context if the dealer dies while its Player finishes buffered audio.
+    private var activePlaybackCall: PendingPlayIntent.Call?
     private var pendingPlayExpiryTask: Task<Void, Never>?
     private var pendingPlayReplayTask: Task<Void, Never>?
     private var audioStallWatchdog: Task<Void, Never>?
@@ -1891,6 +1895,7 @@ final class AppModel {
         persistLocalPlaybackSnapshot()
         cancelPlaybackWatchdog()
         clearPendingPlayIntent()
+        activePlaybackCall = nil
         cancelAudioStallWatchdog()
         clearVolumeConfirmation()
         deferredReconnectGeneration = nil
@@ -1914,6 +1919,7 @@ final class AppModel {
         artistFollowMutationTasks.removeAll()
         cancelPlaybackWatchdog()
         clearPendingPlayIntent()
+        activePlaybackCall = nil
         cancelAudioStallWatchdog()
         clearVolumeConfirmation()
         accountEpoch += 1
@@ -2981,6 +2987,7 @@ final class AppModel {
             guard playRequestID != CorePlaybackProgress.noPlayRequest,
                   playRequestID == Core.playbackProgress.playRequestID else { return }
             let hadPendingPlay = !discardedLocalRestore && pendingPlayIntent != nil
+            let pendingCall = pendingPlayIntent?.call
             let confirmsPendingPlay = discardedLocalRestore
                 || pendingPlayIntent?.isConfirmed(
                     byPlayingURI: uri,
@@ -2989,6 +2996,9 @@ final class AppModel {
                 || pendingPlayIntent == nil
             if confirmsPendingPlay {
                 cancelPlaybackWatchdog()
+                if let pendingCall {
+                    activePlaybackCall = pendingCall
+                }
                 clearPendingPlayIntent()
                 if hadPendingPlay {
                     localPlaybackOwnership = .current(requestID: playRequestID)
@@ -2996,6 +3006,9 @@ final class AppModel {
                     localPlaybackOwnership = localPlaybackOwnership?
                         .confirmingPlaying(requestID: playRequestID)
                 }
+            }
+            if !hadPendingPlay, localPlaybackOwnership == nil {
+                activePlaybackCall = nil
             }
             isPlaying = true
             isBuffering = !confirmsPendingPlay
@@ -3023,6 +3036,7 @@ final class AppModel {
             ) != true else { return }
             cancelPlaybackWatchdog()
             clearPendingPlayIntent()
+            activePlaybackCall = nil
             cancelAudioStallWatchdog()
             isPlaying = false
             isBuffering = false
@@ -3083,10 +3097,34 @@ final class AppModel {
             }
         case .volumeChanged:
             break
-        case let .endOfTrack(playRequestID):
+        case let .endOfTrack(uri, positionMs, durationMs, playRequestID):
             cancelAudioStallWatchdog()
+            let ownsEndingRequest = localPlaybackOwnership?.ownsCurrent(
+                requestID: playRequestID
+            ) == true
             localPlaybackOwnership = localPlaybackOwnership?
                 .expectingSuccessor(after: playRequestID)
+            if deferredReconnectGeneration != nil,
+               ownsEndingRequest,
+               !uri.isEmpty,
+               let resumeCall = activePlaybackCall?.resumingCurrentTrack(
+                   uri: uri,
+                   positionMs: min(
+                       UInt32(clamping: positionMs),
+                       durationMs > 1_000 ? UInt32(clamping: durationMs - 1_000) : 0
+                   ),
+                   shuffle: shuffle,
+                   repeatContext: repeatMode == .all,
+                   repeatTrack: repeatMode == .one
+               ) {
+                setPendingPlayIntent(
+                    call: resumeCall,
+                    trackURI: uri,
+                    previousPlayRequestID: playRequestID
+                )
+                isBuffering = true
+                dlog("end of track after control-plane loss — restoring playback context")
+            }
             resumeDeferredReconnectIfNeeded()
             break // Spirc auto-advances within the context
         }
@@ -3309,6 +3347,46 @@ final class AppModel {
             case let .trackAt(uri, positionMs):
                 rc = Core.playTrack(uri, at: positionMs)
                 dlog("replay playTrack(\(uri), position \(positionMs)) rc=\(rc)")
+            case let .contextAtTrack(
+                uri,
+                trackURI,
+                positionMs,
+                shuffle,
+                repeatContext,
+                repeatTrack
+            ):
+                rc = Core.resumeContext(
+                    uri,
+                    at: trackURI,
+                    positionMs: positionMs,
+                    shuffle: shuffle,
+                    repeatContext: repeatContext,
+                    repeatTrack: repeatTrack
+                )
+                dlog(
+                    "replay resumeContext(\(uri), track \(trackURI), "
+                        + "position \(positionMs)) rc=\(rc)"
+                )
+            case let .tracksAtTrack(
+                uris,
+                trackURI,
+                positionMs,
+                shuffle,
+                repeatContext,
+                repeatTrack
+            ):
+                rc = Core.resumeTracks(
+                    uris,
+                    at: trackURI,
+                    positionMs: positionMs,
+                    shuffle: shuffle,
+                    repeatContext: repeatContext,
+                    repeatTrack: repeatTrack
+                )
+                dlog(
+                    "replay resumeTracks(\(uris.count), track \(trackURI), "
+                        + "position \(positionMs)) rc=\(rc)"
+                )
             }
             guard rc == 0 else {
                 failPendingPlay(intent)
