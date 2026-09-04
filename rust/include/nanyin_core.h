@@ -47,6 +47,28 @@ int32_t nanyin_play_track_at(const char* track_uri, uint32_t position_ms);
 /// "spotify:user:<name>:collection" for Liked Songs) starting at start_index.
 int32_t nanyin_play_context(const char* context_uri, uint32_t start_index);
 
+/// Restores a server-resolved context at a known track and position after
+/// replacing a failed Connect session.
+int32_t nanyin_resume_context_at_track(
+    const char* context_uri,
+    const char* track_uri,
+    uint32_t position_ms,
+    bool shuffle,
+    bool repeat_context,
+    bool repeat_track
+);
+
+/// Restores an ad-hoc track context at a known track and position after
+/// replacing a failed Connect session.
+int32_t nanyin_resume_tracks_at_track(
+    const char* track_uris_json,
+    const char* track_uri,
+    uint32_t position_ms,
+    bool shuffle,
+    bool repeat_context,
+    bool repeat_track
+);
+
 int32_t nanyin_pause(void);
 int32_t nanyin_resume(void);
 int32_t nanyin_stop(void);
