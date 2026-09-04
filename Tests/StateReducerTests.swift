@@ -1534,6 +1534,38 @@ private enum StateReducerTests {
             ),
             "a restored context must remain recoverable after its next track starts"
         )
+
+        let tracks = PendingPlayIntent.Call.tracks(
+            uris: ["spotify:track:def", "spotify:track:ghi"],
+            index: 0
+        )
+        expect(
+            tracks.resumingCurrentTrack(
+                uri: "spotify:track:ghi",
+                positionMs: 179_000,
+                shuffle: false,
+                repeatContext: false,
+                repeatTrack: false
+            ) == .tracksAtTrack(
+                uris: ["spotify:track:def", "spotify:track:ghi"],
+                trackURI: "spotify:track:ghi",
+                positionMs: 179_000,
+                shuffle: false,
+                repeatContext: false,
+                repeatTrack: false
+            ),
+            "a track inside a bounded context must remain recoverable"
+        )
+        expect(
+            tracks.resumingCurrentTrack(
+                uri: "spotify:track:queued",
+                positionMs: 179_000,
+                shuffle: false,
+                repeatContext: false,
+                repeatTrack: false
+            ) == nil,
+            "a queued track outside a bounded context must not produce an invalid restore"
+        )
     }
 
     private static func testSingleTrackCannotInventReconnectContext() {

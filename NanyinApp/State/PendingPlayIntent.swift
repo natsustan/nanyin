@@ -33,7 +33,7 @@ struct PendingPlayIntent: Equatable {
         ) -> Self? {
             switch self {
             case let .context(uri, _), let .contextAtTrack(uri, _, _, _, _, _):
-                .contextAtTrack(
+                return .contextAtTrack(
                     uri: uri,
                     trackURI: trackURI,
                     positionMs: positionMs,
@@ -42,7 +42,8 @@ struct PendingPlayIntent: Equatable {
                     repeatTrack: repeatTrack
                 )
             case let .tracks(uris, _), let .tracksAtTrack(uris, _, _, _, _, _):
-                .tracksAtTrack(
+                guard uris.contains(trackURI) else { return nil }
+                return .tracksAtTrack(
                     uris: uris,
                     trackURI: trackURI,
                     positionMs: positionMs,
@@ -51,7 +52,7 @@ struct PendingPlayIntent: Equatable {
                     repeatTrack: repeatTrack
                 )
             case .trackAt:
-                nil
+                return nil
             }
         }
     }
