@@ -1,0 +1,14 @@
+# Unified cargo settings for all invocations in this repo (agent_check.sh runs
+# `cargo test` from the repo root via --manifest-path, so this file must live
+# here rather than under rust/ — cargo discovers config from the cwd upward).
+#
+# `target` keeps every build in target/aarch64-apple-darwin/ — the same dir
+# rust/build.sh used to pass explicitly — instead of splitting artifacts
+# between target/debug/ and target/aarch64-apple-darwin/debug/.
+#
+# `rustflags` moves the Apple Silicon flags out of rust/build.sh's RUSTFLAGS
+# export so plain `cargo build/test/check` produces identical fingerprints and
+# doesn't rebuild the world with different flags.
+[build]
+target = "aarch64-apple-darwin"
+rustflags = ["-C", "target-cpu=apple-m1", "--cfg", "aes_armv8"]

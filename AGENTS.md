@@ -17,6 +17,9 @@ NANYIN_ALLOW_LIVE_SPOTIFY=1 ./script/build_and_run.sh [run|--live-smoke|--logs|-
 xcodebuild -project Nanyin.xcodeproj -scheme Nanyin -configuration Debug build
 # Rust core builds as a pre-build phase (cargo via mise: rust@stable)
 # Or standalone: ./rust/build.sh
+# Repo-root .cargo/config.toml pins target=aarch64-apple-darwin + Apple
+# Silicon rustflags so every cargo invocation shares rust/target/
+# aarch64-apple-darwin/ — never bypass it with a different --target.
 ```
 
 Run the binary with stderr captured for diagnostics — Swift `dlog` + Rust `eprintln` stream unbuffered. `RUST_LOG=librespot_connect=debug,librespot_core::dealer=warn` for librespot internals.

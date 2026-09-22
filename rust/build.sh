@@ -32,12 +32,11 @@ mkdir -p "$OUTPUT_DIR/include"
 
 cd "$RUST_DIR"
 
-# Enable hardware AES/NEON/SHA on Apple Silicon (same flags as NullSpot —
-# the `aes` crate needs the cfg to use ARMv8 crypto extensions).
-export RUSTFLAGS="${RUSTFLAGS:-} -C target-cpu=apple-m1 --cfg aes_armv8"
-
+# Target triple and Apple Silicon flags (hardware AES/NEON/SHA — the `aes`
+# crate needs the cfg for ARMv8 crypto extensions) live in the repo-root
+# .cargo/config.toml so every cargo invocation shares one target dir.
 echo "Building nanyin-core ($BUILD_TYPE) for aarch64-apple-darwin..."
-cargo build $CARGO_FLAGS --target aarch64-apple-darwin
+cargo build $CARGO_FLAGS
 cp "$RUST_DIR/target/aarch64-apple-darwin/$BUILD_TYPE/libnanyin_core.a" "$OUTPUT_DIR/lib/"
 
 # Header + modulemap are checked in; copy them so Swift compiles against a
