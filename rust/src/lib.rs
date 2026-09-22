@@ -14,7 +14,10 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use librespot_connect::{ConnectConfig, LoadRequest, LoadRequestOptions, Spirc};
+use librespot_connect::{
+    ConnectConfig, LoadContextOptions, LoadRequest, LoadRequestOptions, Options, PlayingTrack,
+    Spirc,
+};
 use librespot_core::authentication::Credentials;
 use librespot_core::cache::Cache;
 use librespot_core::config::{DeviceType, SessionConfig};
@@ -229,6 +232,21 @@ fn emit_state(value: serde_json::Value, callback_generation: u64) {
             callback(c_str.as_ptr(), callback_generation);
         }
     }
+}
+
+fn end_of_track_state(
+    track_uri: &str,
+    position_ms: u32,
+    duration_ms: u32,
+    play_request_id: u64,
+) -> serde_json::Value {
+    json!({
+        "event": "end_of_track",
+        "track_uri": track_uri,
+        "position_ms": position_ms,
+        "duration_ms": duration_ms,
+        "play_request_id": play_request_id,
+    })
 }
 
 fn notify_connected(callback_generation: u64) {
@@ -828,13 +846,22 @@ fn handle_player_event(
             }), callback_generation);
         }
         PlayerEvent::EndOfTrack {
-            play_request_id, ..
+            play_request_id,
+            track_id,
         } => {
             stop_position_clock();
-            emit_state(json!({
-                "event": "end_of_track",
-                "play_request_id": play_request_id,
-            }), callback_generation);
+            let position_ms = CONFIRMED_POSITION_MS.load(Ordering::Relaxed);
+            let duration_ms = DURATION_MS.load(Ordering::SeqCst);
+            let track_uri = track_id.to_string();
+            emit_state(
+                end_of_track_state(
+                    &track_uri,
+                    position_ms,
+                    duration_ms,
+                    play_request_id,
+                ),
+                callback_generation,
+            );
         }
         PlayerEvent::ShuffleChanged { shuffle } => {
             emit_state(
@@ -1028,6 +1055,130 @@ pub extern "C" fn nanyin_play_context(context_uri: *const c_char, start_index: u
             -1
         }
     }
+}
+
+fn resume_options(
+    position_ms: u32,
+    track_uri: String,
+    shuffle: bool,
+    repeat_context: bool,
+    repeat_track: bool,
+) -> LoadRequestOptions {
+    LoadRequestOptions {
+        start_playing: true,
+        seek_to: position_ms,
+        context_options: Some(LoadContextOptions::Options(Options {
+            shuffle,
+            repeat: repeat_context,
+            repeat_track,
+        })),
+        playing_track: Some(PlayingTrack::Uri(track_uri)),
+    }
+}
+
+fn resume_request(request: LoadRequest, position_ms: u32, description: &str) -> i32 {
+    let spirc = match require_spirc() {
+        Ok(spirc) => spirc,
+        Err(code) => return code,
+    };
+
+    eprintln!("nanyin_core: {description} → activate + load ({position_ms}ms)");
+    IS_PLAYING.store(false, Ordering::SeqCst);
+    update_position(position_ms);
+    if let Err(error) = spirc.activate() {
+        eprintln!("nanyin_core: {description}: activate FAILED: {error:?}");
+        set_last_error(&format!("activate: {error:?}"));
+        return -1;
+    }
+    match spirc.load(request) {
+        Ok(()) => {
+            eprintln!("nanyin_core: {description}: load command sent");
+            0
+        }
+        Err(error) => {
+            eprintln!("nanyin_core: {description}: load FAILED: {error:?}");
+            set_last_error(&format!("load: {error:?}"));
+            -1
+        }
+    }
+}
+
+/// Restores a server-resolved context after a failed Connect session. Starting
+/// from the last confirmed decoder position lets the rebuilt Spirc observe the
+/// same track's real EndOfTrack and retain its normal next-track behavior.
+#[no_mangle]
+pub extern "C" fn nanyin_resume_context_at_track(
+    context_uri: *const c_char,
+    track_uri: *const c_char,
+    position_ms: u32,
+    shuffle: bool,
+    repeat_context: bool,
+    repeat_track: bool,
+) -> i32 {
+    if context_uri.is_null() || track_uri.is_null() {
+        return -1;
+    }
+    let (context_uri, track_uri) = unsafe {
+        let Ok(context_uri) = CStr::from_ptr(context_uri).to_str() else {
+            return -1;
+        };
+        let Ok(track_uri) = CStr::from_ptr(track_uri).to_str() else {
+            return -1;
+        };
+        (context_uri.to_string(), track_uri.to_string())
+    };
+    let options = resume_options(
+        position_ms,
+        track_uri,
+        shuffle,
+        repeat_context,
+        repeat_track,
+    );
+    resume_request(
+        LoadRequest::from_context_uri(context_uri, options),
+        position_ms,
+        "resume_context_at_track",
+    )
+}
+
+/// Restores a bounded ad-hoc track context after a failed Connect session.
+#[no_mangle]
+pub extern "C" fn nanyin_resume_tracks_at_track(
+    track_uris_json: *const c_char,
+    track_uri: *const c_char,
+    position_ms: u32,
+    shuffle: bool,
+    repeat_context: bool,
+    repeat_track: bool,
+) -> i32 {
+    if track_uris_json.is_null() || track_uri.is_null() {
+        return -1;
+    }
+    let (raw, track_uri) = unsafe {
+        let Ok(raw) = CStr::from_ptr(track_uris_json).to_str() else {
+            return -1;
+        };
+        let Ok(track_uri) = CStr::from_ptr(track_uri).to_str() else {
+            return -1;
+        };
+        (raw, track_uri.to_string())
+    };
+    let uris = match serde_json::from_str::<Vec<String>>(raw) {
+        Ok(uris) if !uris.is_empty() => uris,
+        _ => return -1,
+    };
+    let options = resume_options(
+        position_ms,
+        track_uri,
+        shuffle,
+        repeat_context,
+        repeat_track,
+    );
+    resume_request(
+        LoadRequest::from_tracks(uris, options),
+        position_ms,
+        "resume_tracks_at_track",
+    )
 }
 
 #[no_mangle]
@@ -1233,13 +1384,12 @@ fn _unused(m: mpsc::UnboundedSender<()>) {}
 #[cfg(test)]
 mod tests {
     use super::{
-        accepts_play_request, interpolated_position_ms, mapped_volume_gain, nanyin_get_volume,
-        nanyin_init_player, nanyin_set_local_volume,
+        accepts_play_request, end_of_track_state, interpolated_position_ms, nanyin_init_player,
+        mapped_volume_gain, nanyin_get_volume, nanyin_set_local_volume, resume_options,
         with_current_player_generation, AccessPointAuthenticationError, ErrorCode,
-        PlaybackPosition, PlayerInitFailure, PlayerInitFailureKind, CALLBACK_GENERATION,
-        TrackingMixer, DESIRED_VOLUME,
-        NO_PLAY_REQUEST, PLAYER_GENERATION, PLAYER_INIT_CREDENTIALS_REJECTED, PLAYER_INIT_FAILED,
-        PLAYER_LIFECYCLE,
+        LoadContextOptions, Options, PlaybackPosition, PlayerInitFailure, PlayerInitFailureKind,
+        PlayingTrack, TrackingMixer, CALLBACK_GENERATION, DESIRED_VOLUME, NO_PLAY_REQUEST,
+        PLAYER_GENERATION, PLAYER_INIT_CREDENTIALS_REJECTED, PLAYER_INIT_FAILED, PLAYER_LIFECYCLE,
     };
     use librespot_core::Error;
     use librespot_playback::mixer::{Mixer, MixerConfig};
@@ -1366,6 +1516,44 @@ mod tests {
         assert!(accepts_play_request(2, None));
         assert!(accepts_play_request(2, Some(2)));
         assert!(!accepts_play_request(2, Some(1)));
+    }
+
+    #[test]
+    fn end_of_track_event_keeps_an_atomic_playback_snapshot() {
+        let event = end_of_track_state("spotify:track:ending", 179_000, 180_000, 42);
+
+        assert_eq!(event["event"], "end_of_track");
+        assert_eq!(event["track_uri"], "spotify:track:ending");
+        assert_eq!(event["position_ms"], 179_000);
+        assert_eq!(event["duration_ms"], 180_000);
+        assert_eq!(event["play_request_id"], 42);
+    }
+
+    #[test]
+    fn reconnect_resume_options_restore_track_position_and_context_modes() {
+        let options = resume_options(
+            179_000,
+            "spotify:track:4uLU6hMCjMI75M1A2tKUQC".to_string(),
+            true,
+            false,
+            true,
+        );
+
+        assert!(options.start_playing);
+        assert_eq!(options.seek_to, 179_000);
+        assert!(matches!(
+            options.playing_track,
+            Some(PlayingTrack::Uri(ref uri))
+                if uri == "spotify:track:4uLU6hMCjMI75M1A2tKUQC"
+        ));
+        assert!(matches!(
+            options.context_options,
+            Some(LoadContextOptions::Options(Options {
+                shuffle: true,
+                repeat: false,
+                repeat_track: true,
+            }))
+        ));
     }
 
     #[test]

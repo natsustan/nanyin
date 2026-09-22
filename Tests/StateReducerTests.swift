@@ -20,6 +20,7 @@ private enum StateReducerTests {
         testIdleLocalPlaybackRestoreAcceptsCurrentExternalPlayback()
         testLocalPlaybackOwnershipTransfersToExpectedSuccessor()
         testLocalPlaybackOwnershipRejectsUnexpectedReplacement()
+        testReconnectRestoreRequiresCurrentOwnership()
 
         testSaveOverrideInsertsAtTopAndBumpsCount()
         testRemoveOverrideDropsConfirmedRowAndCount()
@@ -71,6 +72,8 @@ private enum StateReducerTests {
         testPendingPlayIntentKeepsOriginalContextCall()
         testPendingPlayIntentMatchesPlayingEvent()
         testPendingPlayIntentIdentifiesPreviousRequestEvents()
+        testConfirmedContextBuildsReconnectResumeCall()
+        testSingleTrackCannotInventReconnectContext()
 
         testReconnectDefersWhileAudioIsProgressing()
         testReconnectDoesNotDeferWhenPlaybackNeedsControlPlane()
@@ -1142,6 +1145,28 @@ private enum StateReducerTests {
         )
     }
 
+    private static func testReconnectRestoreRequiresCurrentOwnership() {
+        let current = LocalPlaybackOwnership.current(requestID: 10)
+        let waiting = current.expectingSuccessor(after: 10)
+
+        expect(
+            current.ownsCurrent(requestID: 10),
+            "a confirmed locally-owned request may restore its context"
+        )
+        expect(
+            !current.ownsCurrent(requestID: 11),
+            "a replacement request must not reuse the previous context"
+        )
+        expect(
+            !waiting.ownsCurrent(requestID: 10),
+            "a duplicate EndOfTrack must not trigger another context restore"
+        )
+        expect(
+            !current.ownsCurrent(requestID: CorePlaybackProgress.noPlayRequest),
+            "an unidentified EndOfTrack must not restore a context"
+        )
+    }
+
     private static func localPlaybackSnapshot() -> LocalPlaybackSnapshot {
         LocalPlaybackSnapshot(
             accountID: "account-a",
@@ -1464,6 +1489,99 @@ private enum StateReducerTests {
         expect(
             !intent.isEventFromPreviousRequest(playRequestID: 11),
             "a terminal event from the new request must be handled normally"
+        )
+    }
+
+    private static func testConfirmedContextBuildsReconnectResumeCall() {
+        let call = PendingPlayIntent.Call.context(
+            uri: "spotify:album:abc",
+            index: 3
+        )
+        let resumed = call.resumingCurrentTrack(
+            uri: "spotify:track:def",
+            positionMs: 179_000,
+            shuffle: true,
+            repeatContext: false,
+            repeatTrack: false
+        )
+        expect(
+            resumed == .contextAtTrack(
+                uri: "spotify:album:abc",
+                trackURI: "spotify:track:def",
+                positionMs: 179_000,
+                shuffle: true,
+                repeatContext: false,
+                repeatTrack: false
+            ),
+            "a confirmed context must retain enough state to rebuild Spirc at the current track"
+        )
+
+        let nextResume = resumed?.resumingCurrentTrack(
+            uri: "spotify:track:ghi",
+            positionMs: 200_000,
+            shuffle: false,
+            repeatContext: true,
+            repeatTrack: false
+        )
+        expect(
+            nextResume == .contextAtTrack(
+                uri: "spotify:album:abc",
+                trackURI: "spotify:track:ghi",
+                positionMs: 200_000,
+                shuffle: false,
+                repeatContext: true,
+                repeatTrack: false
+            ),
+            "a restored context must remain recoverable after its next track starts"
+        )
+
+        let tracks = PendingPlayIntent.Call.tracks(
+            uris: ["spotify:track:def", "spotify:track:ghi"],
+            index: 0
+        )
+        expect(
+            tracks.resumingCurrentTrack(
+                uri: "spotify:track:ghi",
+                positionMs: 179_000,
+                shuffle: false,
+                repeatContext: false,
+                repeatTrack: false
+            ) == .tracksAtTrack(
+                uris: ["spotify:track:def", "spotify:track:ghi"],
+                trackURI: "spotify:track:ghi",
+                positionMs: 179_000,
+                shuffle: false,
+                repeatContext: false,
+                repeatTrack: false
+            ),
+            "a track inside a bounded context must remain recoverable"
+        )
+        expect(
+            tracks.resumingCurrentTrack(
+                uri: "spotify:track:queued",
+                positionMs: 179_000,
+                shuffle: false,
+                repeatContext: false,
+                repeatTrack: false
+            ) == nil,
+            "a queued track outside a bounded context must not produce an invalid restore"
+        )
+    }
+
+    private static func testSingleTrackCannotInventReconnectContext() {
+        let call = PendingPlayIntent.Call.trackAt(
+            uri: "spotify:track:def",
+            positionMs: 42_000
+        )
+        expect(
+            call.resumingCurrentTrack(
+                uri: "spotify:track:def",
+                positionMs: 179_000,
+                shuffle: false,
+                repeatContext: false,
+                repeatTrack: false
+            ) == nil,
+            "a one-track restore must not claim it has a successor context"
         )
     }
 
