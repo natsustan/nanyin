@@ -1,0 +1,3 @@
+# Unified patches need a single space for empty context lines. The vendor
+# guard separately checks whitespace in the resulting source checkout.
+patches/*.patch whitespace=-blank-at-eol

@@ -15,6 +15,7 @@ extern "C" {
 //  -2  = session disconnected
 //  -3  = session not ready — retry after the connected callback
 //  -4  = credentials rejected — refresh the playback token once
+//  -5  = account identity mismatch — do not refresh or reconnect automatically
 
 // === Lifecycle ===
 
@@ -30,8 +31,33 @@ int32_t nanyin_init_player(
     uint64_t callback_generation
 );
 
+/// GUI entry point. Requires the canonical Web API profile id and rejects a
+/// different AP account before publishing the player. No Web requests here.
+int32_t nanyin_init_player_for_account(
+    const char* access_token,
+    const char* device_id,
+    uint64_t callback_generation,
+    const char* expected_account
+);
+
+/// Called synchronously to persist a cooldown; return 0 only after saving.
+void nanyin_register_rate_limit_callback(int32_t (*callback)(uint64_t seconds));
+
+/// Remaining HTTP service cooldown, rounded up; does not contact Spotify.
+uint64_t nanyin_retry_after_seconds(void);
+
 /// Shuts down Spirc and the session (call on app quit).
 int32_t nanyin_shutdown(void);
+
+// === Library reads (existing verified session only) ===
+/// Reserve cancellation ownership before dispatch; 0 means the queue is full.
+uint64_t nanyin_library_request_new(void);
+void nanyin_library_request_cancel(uint64_t request_id);
+/// Blocking worker call, bounded to 15s including queued work. Never connects,
+/// refreshes credentials or changes playback. Returns owned JSON (page or error).
+/// Each request id is consumed once, including cancellation/invalid arguments.
+char* nanyin_playlist_page(uint64_t request_id, const char* expected_account,
+    uint64_t callback_generation, const char* playlist_id, uint32_t offset, uint32_t limit);
 
 // === Playback ===
 

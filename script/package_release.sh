@@ -112,7 +112,8 @@ build_app() {
   rm -rf "$DERIVED_DATA_PATH" "$RELEASE_DIR"
   mkdir -p "$RELEASE_DIR"
 
-  local build_settings=(CODE_SIGNING_ALLOWED=NO)
+  # Apply to Swift package dependencies too; the Rust bridge is arm64-only.
+  local build_settings=(CODE_SIGNING_ALLOWED=NO ARCHS=arm64)
   if [[ "$SIGN" == true ]]; then
     build_settings+=(SWIFT_ACTIVE_COMPILATION_CONDITIONS=NANYIN_DISTRIBUTION)
   fi
@@ -128,6 +129,23 @@ build_app() {
     archive
 
   ditto "$BUILT_APP" "$APP_BUNDLE"
+  # Embed the exact core inputs before signing. A release can then be checked
+  # for a missing patch without launching it or using Spotify credentials.
+  local provenance="$APP_BUNDLE/Contents/Resources/librespot-build.txt"
+  mkdir -p "$(dirname "$provenance")"
+  (
+    cd "$ROOT_DIR"
+    printf 'nanyin_revision=%s\n' "$(git rev-parse HEAD)"
+    printf 'nanyin_worktree_diff_sha256='
+    git diff --binary HEAD | shasum -a 256 | awk '{print $1}'
+    printf 'cargo_version=%s\n' "$(bash script/cargo.sh --version)"
+    printf 'librespot_revision=%s\n' "$(git -C research-repos/librespot rev-parse HEAD)"
+    printf 'librespot_worktree_diff_sha256='
+    git -C research-repos/librespot diff --binary HEAD | shasum -a 256 | awk '{print $1}'
+    shasum -a 256 .cargo/config.toml rust/Cargo.toml rust/Cargo.lock rust/build.sh \
+      rust/src/*.rs rust/include/nanyin_core.h rust-toolchain.toml \
+      script/cargo.sh script/librespot_config.sh patches/librespot-*.patch
+  ) > "$provenance"
 }
 
 validate_release_app() {
@@ -138,6 +156,15 @@ validate_release_app() {
 
   [[ -x "$executable" ]] || {
     echo "ERROR: release executable is missing: $executable" >&2
+    exit 1
+  }
+
+  [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$info_plist")" == "com.nanyin.app" ]] || {
+    echo "ERROR: bundle identity changed; preserve credential and update continuity" >&2
+    exit 1
+  }
+  [[ -s "$APP_BUNDLE/Contents/Resources/librespot-build.txt" ]] || {
+    echo "ERROR: release app is missing its librespot build provenance" >&2
     exit 1
   }
 
@@ -344,6 +371,7 @@ generate_sparkle_appcast() {
 main() {
   parse_args "$@"
   require_tools
+  bash "$ROOT_DIR/script/check_librespot.sh"
   build_app
   validate_release_app
 

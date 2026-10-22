@@ -1,0 +1,34 @@
+diff --git a/connect/src/spirc.rs b/connect/src/spirc.rs
+--- a/connect/src/spirc.rs
++++ b/connect/src/spirc.rs
+@@ -912,2 +912,6 @@
+-        let same_session = cluster.player_state.session_id == self.session.session_id()
+-            || cluster.player_state.session_id.is_empty();
++        // Only ever resume a state that belongs to *this* session — a dealer
++        // reconnect can legitimately continue our own interrupted playback.
++        // An empty cluster session id would let a fresh init adopt stale
++        // transfer_data left behind by another device, pulling playback to
++        // this machine with no user action.
++        let same_session = cluster.player_state.session_id == self.session.session_id();
+@@ -1003 +1007,2 @@
+-                self.handle_disconnect().await?;
++                // Stop playback before server bookkeeping: a failing PUT must
++                // never leave this device audible after another one took over.
+@@ -1004,0 +1010 @@
++                self.handle_disconnect().await?;
+@@ -1033,0 +1040,4 @@
++            self.player.emit_session_disconnected_event(
++                self.session.connection_id(), self.session.username(),
++            );
++            self.handle_stop();
+@@ -1316,0 +1327,6 @@
++        // Flag the device inactive before the state PUT — notifying while
++        // still active can re-claim the active slot mid-handover and bounce
++        // playback back to this device.
++        self.connect_state.set_active(false);
++        self.player
++            .emit_session_disconnected_event(self.session.connection_id(), self.session.username());
+@@ -1321,3 +1336,0 @@
+-        self.player
+-            .emit_session_disconnected_event(self.session.connection_id(), self.session.username());
+-

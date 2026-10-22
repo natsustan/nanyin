@@ -13,6 +13,7 @@
 #   3  SESSION DIED after connecting
 #   5  Keychain read or write failed
 #   6  Nanyin is already running
+#   7  playback cooldown/budget or local safety-store failure
 #  64  live Spotify opt-in missing
 #
 # Usage: NANYIN_ALLOW_LIVE_SPOTIFY=1 script/dealer_probe.sh [device_id]

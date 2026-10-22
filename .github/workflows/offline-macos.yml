@@ -1,0 +1,42 @@
+name: Offline macOS verification
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: offline-macos-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      NANYIN_ALLOW_LIVE_SPOTIFY: "0"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Prepare build tools
+        run: |
+          test "$(uname -m)" = arm64
+          brew install xcodegen ripgrep
+          channel="$(sed -n 's/^channel = "\([^"]*\)"$/\1/p' rust-toolchain.toml)"
+          rustup toolchain install "$channel" --profile minimal
+      - name: Prepare pinned dependencies from a clean checkout
+        run: |
+          ./script/vendor_librespot.sh
+          ./script/vendor_choutiui.sh
+          ./script/cargo.sh fetch --locked --manifest-path rust/Cargo.toml
+          xcodegen generate
+          xcodebuild -resolvePackageDependencies -project Nanyin.xcodeproj -scheme Nanyin
+      - name: Offline tests and unsigned Debug build
+        env:
+          CARGO_NET_OFFLINE: "true"
+        run: ./script/agent_check.sh
+      - name: Unsigned Release packaging
+        env:
+          CARGO_NET_OFFLINE: "true"
+        run: |
+          ./script/package_release.sh
+          hdiutil verify build/release/Nanyin-*-arm64.dmg

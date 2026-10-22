@@ -22,8 +22,29 @@ archive, rejects debug/preview dylibs and unexpected architectures, and writes:
 - `build/release/Nanyin-<version>-arm64.dmg`
 - `build/release/Nanyin-<version>-arm64.dmg.sha256`
 
+Before compiling, every supported build entry point checks the pinned librespot
+checkout and its four required patches. Cargo uses `--locked`. The packaged app
+also contains `Contents/Resources/librespot-build.txt` with source/patch hashes;
+inspect it without launching the app. Release validation rejects a changed
+`com.nanyin.app` bundle identifier so updates retain the expected identity.
+See [playback traffic policy](playback-safety.md) for the rationale and tests.
+
 These default artifacts are unsigned and are only suitable for local
 inspection.
+
+## macOS 27 Rust build tools
+
+The release build was observed failing with `can't find crate for tokio_macros`
+and `dlopen ... mis-aligned LINKEDIT string pool` on macOS 27 / Rust 1.97.1.
+This matches [rust-lang/rust#157750](https://github.com/rust-lang/rust/issues/157750):
+stripping debug information can produce proc-macro dylibs the host loader rejects.
+`[profile.release.build-override]` retains limited debug information and disables
+stripping for build-time tools. The shipped core still uses optimization level 3
+and LTO, and Xcode still strips the final application. Remove the workaround only
+after a clean Release archive succeeds on the affected host with a fixed toolchain.
+
+Release archiving passes `ARCHS=arm64` at the command line so Swift package
+dependencies also avoid an unnecessary x86_64 build.
 
 ## Developer ID signing
 
@@ -121,3 +142,10 @@ performed by the packaging script.
 
 A Homebrew cask remains a follow-up and should reference an already-published,
 versioned, notarized DMG.
+
+Rust builds now use the exact `rust-toolchain.toml` version via `script/cargo.sh`,
+including the Xcode pre-build phase. Install that version with rustup before
+building. `script/vendor_librespot.sh` prepares all five canonical patches;
+release provenance includes the toolchain file and shared patch configuration.
+The offline macOS CI workflow exercises clean dependency preparation, Debug
+verification and unsigned Release packaging without app launch or credentials.

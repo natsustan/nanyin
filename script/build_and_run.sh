@@ -159,12 +159,12 @@ print_recent_launch_logs() {
 }
 
 run_app() {
-  # Launch the inner binary directly so Swift dlog + Rust eprintln stderr is
-  # captured to LOG_FILE (AGENTS.md: diagnostics stream unbuffered to stderr;
-  # `open` would lose them).
+  # LaunchServices owns the GUI process independently of this shell. Explicit
+  # redirects preserve Swift dlog + Rust eprintln without a fragile nohup child.
   mkdir -p "$(dirname "$LOG_FILE")"
   : > "$LOG_FILE"
-  nohup "$APP_BINARY" >> "$LOG_FILE" 2>&1 < /dev/null &
+  /usr/bin/open -n --stdout "$LOG_FILE" --stderr "$LOG_FILE" \
+    --env "RUST_LOG=$RUST_LOG" "$APP_BUNDLE"
 
   if wait_for_app; then
     local first_pid
