@@ -21,4 +21,3 @@ for patch in "${LIBRESPOT_PATCHES[@]}"; do
     git -C "$LIBRESPOT_DIR" apply --reverse --check --unidiff-zero "$patch" \
         || fail "required librespot patch is not applied exactly: ${patch##*/}"
 done
-
