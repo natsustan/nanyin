@@ -10,6 +10,7 @@ import NanyinCore
 /// Callback storage is nonisolated (Rust invokes us on background threads);
 /// events hop to the MainActor via Task.
 enum Core {
+    static var retryAfterSeconds: Double { Double(nanyin_retry_after_seconds()) }
     enum InitializationResult: Equatable {
         case connected
         case credentialsRejected(message: String)
@@ -23,6 +24,7 @@ enum Core {
         case paused(uri: String, positionMs: Int, playRequestID: UInt64)
         case stopped(uri: String, playRequestID: UInt64)
         case position(positionMs: Int)
+        case seeked(positionMs: Int, playRequestID: UInt64)
         case trackChanged(
             uri: String,
             durationMs: Int,
@@ -36,6 +38,7 @@ enum Core {
         case repeatChanged(context: Bool, track: Bool)
         case volumeChanged(UInt16)
         case endOfTrack(playRequestID: UInt64)
+        case deactivated
     }
 
     nonisolated(unsafe) static var onEvent: (@MainActor (UInt64, Event) -> Void)?
@@ -51,6 +54,15 @@ enum Core {
     static func installCallbacks() {
         guard !registered else { return }
         registered = true
+        nanyin_register_rate_limit_callback { seconds in
+            do {
+                try TrafficSafetyStore.shared.recordCooldown(.playback, seconds: Double(seconds))
+                return 0
+            } catch {
+                dlog("could not persist playback HTTP cooldown: \(error)")
+                return -1
+            }
+        }
 
         nanyin_register_audio_data_callback { samples, count, generation in
             guard let samples else { return }
@@ -91,6 +103,10 @@ enum Core {
 
         let event: Event
         switch eventName {
+        case "deactivated":
+            event = .deactivated
+        case "seeked":
+            event = .seeked(positionMs: position, playRequestID: playRequestID)
         case "loading":
             event = .loading(
                 uri: uri,
@@ -174,7 +190,8 @@ enum Core {
     nonisolated static func initializePlayer(
         accessToken: String,
         deviceId: String,
-        generation: UInt64
+        generation: UInt64,
+        expectedAccountID: String?
     ) async -> InitializationResult {
         let initialization = beginInitialization()
         return await withCheckedContinuation { cont in
@@ -189,7 +206,8 @@ enum Core {
                 let result = initializePlayerBlocking(
                     accessToken: accessToken,
                     deviceId: deviceId,
-                    callbackGeneration: generation
+                    callbackGeneration: generation,
+                    expectedAccountID: expectedAccountID
                 )
                 guard acceptsInitialization(initialization) else {
                     _ = nanyin_shutdown()
@@ -207,12 +225,19 @@ enum Core {
     nonisolated private static func initializePlayerBlocking(
         accessToken: String,
         deviceId: String,
-        callbackGeneration: UInt64
+        callbackGeneration: UInt64,
+        expectedAccountID: String?
     ) -> InitializationResult {
         installCallbacks()
         let code = accessToken.withCString { token in
-            deviceId.withCString {
-                nanyin_init_player(token, $0, callbackGeneration)
+            deviceId.withCString { device in
+                if let expectedAccountID {
+                    return expectedAccountID.withCString {
+                        nanyin_init_player_for_account(token, device, callbackGeneration, $0)
+                    }
+                }
+                // Only the explicit idle probe has no library authorization.
+                return nanyin_init_player(token, device, callbackGeneration)
             }
         }
         let message = code == 0 ? "" : lastErrorMessage() ?? "unknown"
@@ -223,6 +248,56 @@ enum Core {
             return .credentialsRejected(message: message)
         default:
             return .failed(code: code, message: message)
+        }
+    }
+
+    // Rust admits at most eight reservations and serializes network reads.
+    // Concurrent workers let its 15s deadline include waiting for that permit.
+    private static let libraryQueue = DispatchQueue(
+        label: "com.nanyin.core.library", qos: .userInitiated, attributes: .concurrent
+    )
+
+    nonisolated static func playlistTracks(
+        _ playlistID: String, accountID: String, generation: UInt64
+    ) async throws -> [SpotifyClient.Track] {
+        try await SpotifyClient.sessionPlaylistTracks(playlistID) { offset in
+            try await playlistPage(playlistID, accountID: accountID, generation: generation, offset: offset)
+        }
+    }
+
+    nonisolated private static func playlistPage(
+        _ playlistID: String, accountID: String, generation: UInt64, offset: Int
+    ) async throws -> Data {
+        try Task.checkCancellation()
+        guard let offset = UInt32(exactly: offset) else {
+            throw SpotifyClient.SessionLibraryError(code: "invalid_argument", message: "Invalid playlist offset")
+        }
+        let requestID = nanyin_library_request_new()
+        guard requestID != 0 else {
+            throw SpotifyClient.SessionLibraryError(code: "busy", message: "Playlist reader is busy. Please retry.")
+        }
+        return try await withTaskCancellationHandler {
+            // Always consume the reservation, even if cancellation arrived
+            // before this block. Rust checks its saved flag before any I/O.
+            try await withCheckedThrowingContinuation { continuation in
+                libraryQueue.async {
+                    let pointer = accountID.withCString { account in
+                        playlistID.withCString { playlist in
+                            nanyin_playlist_page(requestID, account, generation, playlist, offset, 50)
+                        }
+                    }
+                    guard let pointer else {
+                        continuation.resume(throwing: SpotifyClient.SessionLibraryError(
+                            code: "unavailable", message: "Playlist read returned no response"))
+                        return
+                    }
+                    let data = Data(String(cString: pointer).utf8)
+                    nanyin_free_string(pointer)
+                    continuation.resume(returning: data)
+                }
+            }
+        } onCancel: {
+            nanyin_library_request_cancel(requestID)
         }
     }
 

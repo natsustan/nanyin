@@ -8,6 +8,7 @@
 //! credential strategy informed by cliamp (MIT, bjarneo/cliamp).
 
 mod proxy_sink;
+mod playlist_reads;
 
 use std::ffi::{c_char, CStr, CString};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
@@ -43,10 +44,12 @@ use proxy_sink::{mk_proxy_sink, pcm_writes};
 
 const PLAYER_INIT_FAILED: i32 = -1;
 const PLAYER_INIT_CREDENTIALS_REJECTED: i32 = -4;
+const PLAYER_INIT_ACCOUNT_MISMATCH: i32 = -5;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum PlayerInitFailureKind {
     CredentialsRejected,
+    AccountMismatch,
     Other,
 }
 
@@ -84,9 +87,22 @@ impl PlayerInitFailure {
     fn code(&self) -> i32 {
         match self.kind {
             PlayerInitFailureKind::CredentialsRejected => PLAYER_INIT_CREDENTIALS_REJECTED,
+            PlayerInitFailureKind::AccountMismatch => PLAYER_INIT_ACCOUNT_MISMATCH,
             PlayerInitFailureKind::Other => PLAYER_INIT_FAILED,
         }
     }
+}
+
+/// AP canonical usernames and Web API profile ids identify the same account.
+/// This is an identity failure, never authorization to refresh a token.
+fn validate_player_account(expected: Option<&str>, actual: &str) -> Result<(), PlayerInitFailure> {
+    if expected.is_some_and(|expected| expected.is_empty() || expected != actual) {
+        return Err(PlayerInitFailure {
+            kind: PlayerInitFailureKind::AccountMismatch,
+            message: "Library and playback authorizations belong to different Spotify accounts. Sign out and sign in to the same account.".into(),
+        });
+    }
+    Ok(())
 }
 
 // ============================================================================
@@ -113,6 +129,8 @@ static PLAYER_LIFECYCLE: Mutex<()> = Mutex::new(());
 static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
 /// Invalidates completion monitors from sessions replaced by a rebuild.
 static PLAYER_GENERATION: AtomicU64 = AtomicU64::new(0);
+/// Audio/events stay fenced until the account has been checked and published.
+static AUTHORIZED_PLAYER_GENERATION: AtomicU64 = AtomicU64::new(u64::MAX);
 /// Swift generation paired atomically with the active Rust player generation.
 static CALLBACK_GENERATION: AtomicU64 = AtomicU64::new(0);
 /// Coalesces Spirc and session failure signals for the active generation.
@@ -340,6 +358,40 @@ pub extern "C" fn nanyin_init_player(
     device_id: *const c_char,
     callback_generation: u64,
 ) -> i32 {
+    initialize_player(access_token, device_id, callback_generation, None)
+}
+
+/// GUI initialization binds playback to the canonical Web account. The older
+/// entry point is retained only for the explicitly authorized idle probe.
+#[no_mangle]
+pub extern "C" fn nanyin_init_player_for_account(
+    access_token: *const c_char,
+    device_id: *const c_char,
+    callback_generation: u64,
+    expected_account: *const c_char,
+) -> i32 {
+    if expected_account.is_null() {
+        set_last_error("A verified library account is required for playback");
+        return PLAYER_INIT_ACCOUNT_MISMATCH;
+    }
+    let expected = unsafe { CStr::from_ptr(expected_account).to_str() };
+    let Ok(expected) = expected else {
+        set_last_error("Library account id is invalid UTF-8");
+        return PLAYER_INIT_ACCOUNT_MISMATCH;
+    };
+    if expected.is_empty() {
+        set_last_error("A verified library account is required for playback");
+        return PLAYER_INIT_ACCOUNT_MISMATCH;
+    }
+    initialize_player(access_token, device_id, callback_generation, Some(expected))
+}
+
+fn initialize_player(
+    access_token: *const c_char,
+    device_id: *const c_char,
+    callback_generation: u64,
+    expected_account: Option<&str>,
+) -> i32 {
     let _ = env_logger::try_init();
     eprintln!("nanyin_core: init_player called");
 
@@ -385,7 +437,7 @@ pub extern "C" fn nanyin_init_player(
     // still be dead — every command would hit a closed connection while
     // init_player keeps answering "already initialized" (observed
     // 2026-08-19: reconnect loop no-oped against a ghost session).
-    let (generation, stale_spirc, stale_session) = {
+    let (generation, stale_spirc, stale_session, stale_player, identity_failure) = {
         let _lifecycle = PLAYER_LIFECYCLE.lock().unwrap();
         let needs_init = {
             let session = SESSION.lock().unwrap();
@@ -394,12 +446,16 @@ pub extern "C" fn nanyin_init_player(
                 || spirc.is_none()
                 || session.as_ref().is_some_and(|s| s.is_invalid())
         };
-        if !needs_init {
+        let identity_failure = SESSION.lock().unwrap().as_ref()
+            .filter(|session| !session.is_invalid())
+            .and_then(|session| validate_player_account(expected_account, &session.username()).err());
+        if !needs_init && identity_failure.is_none() {
             CALLBACK_GENERATION.store(callback_generation, Ordering::SeqCst);
             eprintln!("nanyin_core: init_player: already initialized");
             return 0;
         }
 
+        playlist_reads::cancel_all();
         let generation = PLAYER_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
         CALLBACK_GENERATION.store(callback_generation, Ordering::SeqCst);
         SHUTTING_DOWN.store(false, Ordering::SeqCst);
@@ -407,10 +463,14 @@ pub extern "C" fn nanyin_init_player(
         CURRENT_PLAY_REQUEST_ID.store(NO_PLAY_REQUEST, Ordering::Relaxed);
         let spirc = SPIRC.lock().unwrap().take();
         let session = SESSION.lock().unwrap().take();
-        PLAYER.lock().unwrap().take();
+        let player = PLAYER.lock().unwrap().take();
         retain_and_clear_mixer();
-        (generation, spirc, session)
+        (generation, spirc, session, player, identity_failure)
     };
+    // Stop local playback before fallible/asynchronous Connect bookkeeping.
+    if let Some(player) = stale_player {
+        player.stop();
+    }
     // Tear down stale state before rebuilding (spirc died or fresh start).
     if let Some(spirc) = stale_spirc {
         let _ = spirc.shutdown();
@@ -419,11 +479,16 @@ pub extern "C" fn nanyin_init_player(
         session.shutdown();
     }
 
+    if let Some(error) = identity_failure {
+        set_last_error(&error.message);
+        return error.code();
+    }
     let result = RUNTIME.block_on(init_player_async(
         &token,
         &device,
         generation,
         callback_generation,
+        expected_account,
     ));
 
     match result {
@@ -444,6 +509,7 @@ async fn init_player_async(
     device_id: &str,
     generation: u64,
     callback_generation: u64,
+    expected_account: Option<&str>,
 ) -> Result<(), PlayerInitFailure> {
     eprintln!("nanyin_core: init_player_async starting (device {device_id})");
 
@@ -467,7 +533,16 @@ async fn init_player_async(
         }
     };
 
+    let remaining = librespot_core::http_client::HttpClient::rate_limit_remaining();
+    if !remaining.is_zero() {
+        return Err(PlayerInitFailure::other(format!(
+            "playback service rate limited; retry after {}s", remaining.as_secs().saturating_add(1)
+        )));
+    }
     let session = Session::new(session_config, cache);
+    // One attempt at this layer. Swift owns bounded connection recovery;
+    // multiplying that budget by SpClient's default ten attempts is unsafe.
+    session.spclient().set_strategy(librespot_core::spclient::RequestStrategy::TryTimes(1));
     // NOTE: do NOT connect here — Spirc::new() registers dealer listeners first
     // and then connects the session itself. Connecting twice yields NotConnected.
 
@@ -498,10 +573,12 @@ async fn init_player_async(
 
     // Player event listener → global state + Swift callbacks.
     let mut events: librespot_playback::player::PlayerEventChannel = player.get_player_event_channel();
-    RUNTIME.spawn(async move {
+    let event_listener = RUNTIME.spawn(async move {
         while let Some(event) = events.recv().await {
             if !with_current_player_generation(generation, |callback_generation| {
-                handle_player_event(event, generation, callback_generation)
+                if AUTHORIZED_PLAYER_GENERATION.load(Ordering::SeqCst) == generation {
+                    handle_player_event(event, generation, callback_generation)
+                }
             }) {
                 return;
             }
@@ -515,7 +592,7 @@ async fn init_player_async(
         ..Default::default()
     };
 
-    let (spirc, spirc_task) = tokio::time::timeout(
+    let connection = tokio::time::timeout(
         PLAYER_INIT_TIMEOUT,
         Spirc::new(
             connect_config,
@@ -525,14 +602,30 @@ async fn init_player_async(
             mixer.clone() as Arc<dyn Mixer>,
         ),
     )
-    .await
-    .map_err(|_| {
-        PlayerInitFailure::other(
-            "spirc init: timed out — Spotify accesspoints unreachable (risk-control throttling?)",
-        )
-    })?
-    .map_err(|e| PlayerInitFailure::from_librespot(&e))?;
+    .await;
+    let (spirc, spirc_task) = match connection {
+        Ok(Ok(connected)) => connected,
+        failure => {
+            // Cancelling Spirc::new does not cancel tasks it already spawned.
+            // Explicitly close the partial session before Swift can retry.
+            session.shutdown();
+            player.stop();
+            event_listener.abort();
+            return Err(match failure {
+                Ok(Err(error)) => PlayerInitFailure::from_librespot(&error),
+                Err(_) => PlayerInitFailure::other("spirc init: connection timed out"),
+                Ok(Ok(_)) => unreachable!(),
+            });
+        }
+    };
 
+    if let Err(error) = validate_player_account(expected_account, &session.username()) {
+        let _ = spirc.shutdown();
+        session.shutdown();
+        player.stop();
+        event_listener.abort();
+        return Err(error);
+    }
     let spirc = Arc::new(spirc);
     let published = {
         let _lifecycle = PLAYER_LIFECYCLE.lock().unwrap();
@@ -545,12 +638,15 @@ async fn init_player_async(
             *SPIRC.lock().unwrap() = Some(spirc.clone());
             *PLAYER.lock().unwrap() = Some(player.clone());
             *MIXER.lock().unwrap() = Some(mixer.clone());
+            AUTHORIZED_PLAYER_GENERATION.store(generation, Ordering::SeqCst);
             true
         }
     };
     if !published {
         let _ = spirc.shutdown();
         session.shutdown();
+        player.stop();
+        event_listener.abort();
         return Err(PlayerInitFailure::other("player initialization cancelled"));
     }
 
@@ -599,7 +695,9 @@ async fn init_player_async(
             if PLAYER_GENERATION.load(Ordering::SeqCst) != generation {
                 return;
             }
-            if watcher_session.is_invalid() {
+            if watcher_session.is_invalid()
+                || !librespot_core::http_client::HttpClient::rate_limit_remaining().is_zero()
+            {
                 break;
             }
             if SHUTTING_DOWN.load(Ordering::SeqCst) {
@@ -633,12 +731,40 @@ async fn init_player_async(
     Ok(())
 }
 
+static RATE_LIMIT_CALLBACK: Mutex<Option<extern "C" fn(u64) -> i32>> = Mutex::new(None);
+
+/// The callback runs synchronously on the HTTP worker; it must only persist
+/// local state, never hop to MainActor or initiate another network request.
+#[no_mangle]
+pub extern "C" fn nanyin_register_rate_limit_callback(callback: extern "C" fn(u64) -> i32) {
+    *RATE_LIMIT_CALLBACK.lock().unwrap() = Some(callback);
+    librespot_core::http_client::HttpClient::set_rate_limit_observer(persist_rate_limit);
+}
+
+fn persist_rate_limit(duration: Duration) -> Result<(), librespot_core::Error> {
+    let callback = *RATE_LIMIT_CALLBACK.lock().unwrap();
+    let seconds = duration.as_secs().saturating_add(u64::from(duration.subsec_nanos() > 0));
+    match callback {
+        Some(callback) if callback(seconds) == 0 => Ok(()),
+        _ => Err(librespot_core::Error::resource_exhausted("could not persist playback cooldown")),
+    }
+}
+
+/// Remaining service cooldown, rounded up. Read-only; also available after
+/// initialization failure so Swift can persist it before allowing recovery.
+#[no_mangle]
+pub extern "C" fn nanyin_retry_after_seconds() -> u64 {
+    let duration = librespot_core::http_client::HttpClient::rate_limit_remaining();
+    duration.as_secs().saturating_add(u64::from(duration.subsec_nanos() > 0))
+}
+
 /// Shuts down Spirc and the session (app quit).
 #[no_mangle]
 pub extern "C" fn nanyin_shutdown() -> i32 {
     let (spirc, session) = {
         let _lifecycle = PLAYER_LIFECYCLE.lock().unwrap();
         SHUTTING_DOWN.store(true, Ordering::SeqCst);
+        playlist_reads::cancel_all();
         PLAYER_GENERATION.fetch_add(1, Ordering::SeqCst);
         let spirc = SPIRC.lock().unwrap().take();
         let session = SESSION.lock().unwrap().take();
@@ -716,6 +842,10 @@ fn handle_player_event(
     }
 
     match event {
+        PlayerEvent::SessionDisconnected { .. } => {
+            stop_position_clock();
+            emit_state(json!({ "event": "deactivated" }), callback_generation);
+        }
         PlayerEvent::Loading {
             play_request_id,
             track_id,
@@ -783,8 +913,9 @@ fn handle_player_event(
             }
             confirm_position(position_ms);
             emit_state(json!({
-                "event": "position",
+                "event": if matches!(event, PlayerEvent::Seeked { .. }) { "seeked" } else { "position" },
                 "position_ms": position_ms,
+                "play_request_id": CURRENT_PLAY_REQUEST_ID.load(Ordering::Relaxed),
             }), callback_generation);
         }
         PlayerEvent::PositionChanged { position_ms, .. } => {
@@ -937,6 +1068,12 @@ pub extern "C" fn nanyin_play_track_at(track_uri: *const c_char, position_ms: u3
 }
 
 fn play_tracks(uris: Vec<String>, start_index: u32, position_ms: u32) -> i32 {
+    // The bridge must enforce the same bounded upload as the UI. Reject the
+    // whole request rather than silently changing queue order or its offset.
+    if !valid_track_window(&uris, start_index) {
+        set_last_error("expected 1–50 Spotify track URIs and an in-range start index");
+        return -1;
+    }
     let spirc = match require_spirc() {
         Ok(s) => s,
         Err(code) => return code,
@@ -977,6 +1114,17 @@ fn play_tracks(uris: Vec<String>, start_index: u32, position_ms: u32) -> i32 {
             -1
         }
     }
+}
+
+fn valid_track_window(uris: &[String], start_index: u32) -> bool {
+    !uris.is_empty()
+        && uris.len() <= 50
+        && (start_index as usize) < uris.len()
+        && uris.iter().all(|uri| {
+            uri.strip_prefix("spotify:track:").is_some_and(|id| {
+                id.len() == 22 && id.bytes().all(|byte| byte.is_ascii_alphanumeric())
+            })
+        })
 }
 
 /// Plays a server-resolved context (playlist / album / collection) starting
@@ -1253,6 +1401,39 @@ mod tests {
     use std::time::{Duration, Instant};
 
     #[test]
+    fn track_uploads_are_bounded_and_validated_before_connect() {
+        let uri = "spotify:track:0123456789ABCDEFGHIJKL".to_owned();
+        assert!(super::valid_track_window(&vec![uri.clone(); 50], 49));
+        assert!(!super::valid_track_window(&vec![uri.clone(); 51], 0));
+        assert!(!super::valid_track_window(&[], 0));
+        assert!(!super::valid_track_window(&[uri.clone()], 1));
+        assert!(!super::valid_track_window(&[uri.clone()], u32::MAX));
+        assert!(!super::valid_track_window(&["spotify:track:bad".into()], 0));
+        assert!(!super::valid_track_window(&[uri.replace("track", "album")], 0));
+        let raw = CString::new(serde_json::to_string(&vec![uri; 51]).unwrap()).unwrap();
+        assert_eq!(super::nanyin_play_tracks(raw.as_ptr(), 0), -1);
+    }
+
+    #[test]
+    fn playback_account_binding_rejects_mismatch_without_refresh() {
+        assert!(super::validate_player_account(Some("alice"), "alice").is_ok());
+        // The explicit probe has no Web grant to compare.
+        assert!(super::validate_player_account(None, "alice").is_ok());
+        for (expected, actual) in [("alice", "bob"), ("alice", ""), ("", "alice")] {
+            let failure = super::validate_player_account(Some(expected), actual).unwrap_err();
+            assert_eq!(failure.code(), super::PLAYER_INIT_ACCOUNT_MISMATCH);
+            assert_ne!(failure.code(), PLAYER_INIT_CREDENTIALS_REJECTED);
+        }
+        // All invalid identity inputs fail before creating any session.
+        let empty = CString::new("").unwrap();
+        let invalid_utf8 = [0xff_u8, 0];
+        for identity in [ptr::null(), empty.as_ptr(), invalid_utf8.as_ptr().cast()] {
+            assert_eq!(super::nanyin_init_player_for_account(ptr::null(), ptr::null(), 0, identity),
+                super::PLAYER_INIT_ACCOUNT_MISMATCH);
+        }
+    }
+
+    #[test]
     fn player_init_refreshes_only_after_typed_credential_rejection() {
         for code in [ErrorCode::BadCredentials, ErrorCode::CouldNotValidateCredentials] {
             let error = Error::permission_denied(AccessPointAuthenticationError::LoginFailed(code));
@@ -1417,3 +1598,6 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod bounded_http_tests;

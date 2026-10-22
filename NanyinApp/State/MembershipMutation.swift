@@ -63,3 +63,26 @@ struct MembershipMutation: Equatable {
         return .rollback(to: confirmedSaved)
     }
 }
+
+/// A new prefix proves positions only for the rows it actually returned.
+/// Keep the old tail visible while loading, but do not use its stale offsets.
+enum LikedTrackPositions {
+    static func mergePrefix(
+        cached: [SpotifyClient.Track], prefix: [SpotifyClient.Track]
+    ) -> [SpotifyClient.Track] {
+        let ids = Set(prefix.map(\.id))
+        return prefix + cached.filter { !ids.contains($0.id) }.map { track in
+            var copy = track
+            copy.contextPosition = nil
+            return copy
+        }
+    }
+
+    static func prefixMatches(cached: [SpotifyClient.Track], page: SpotifyClient.LikedTracksPage) -> Bool {
+        // An entirely filtered prefix supplies no identity anchor.
+        guard !page.tracks.isEmpty || page.rawCount == 0 else { return false }
+        let cachedPrefix = Array(cached.prefix(page.tracks.count))
+        return cachedPrefix.map(\.id) == page.tracks.map(\.id)
+            && cachedPrefix.map(\.contextPosition) == page.tracks.map(\.contextPosition)
+    }
+}

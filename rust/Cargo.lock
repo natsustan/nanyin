@@ -1506,7 +1506,10 @@ dependencies = [
 name = "nanyin-core"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "env_logger",
+ "futures-util",
+ "http",
  "librespot-audio",
  "librespot-connect",
  "librespot-core",
@@ -1515,6 +1518,7 @@ dependencies = [
  "librespot-protocol",
  "log",
  "once_cell",
+ "protobuf",
  "serde_json",
  "tokio",
 ]

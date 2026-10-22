@@ -158,27 +158,23 @@ and `List` rows stay pure SwiftUI.
 ## Development
 
 Prerequisites: macOS 15+, Apple Silicon, Xcode command-line tools,
-[mise](https://mise.jdx.dev) (at least `rust@stable` and `xcodegen`).
+[rustup](https://rustup.rs/) and `xcodegen` (Homebrew or mise).
 
 ```sh
-mise use -g rust@stable xcodegen
+rustup toolchain install 1.97.1 --profile minimal
+brew install xcodegen ripgrep
 ```
 
 ### Vendor checkouts
 
-Librespot is pinned to `9c7d756` with three local patches. Do **not** switch
+Librespot is pinned to `9c7d756` with five local patches. Do **not** switch
 `rust/Cargo.toml` to crates.io or a git rev until
 [librespot#1741](https://github.com/librespot-org/librespot/pull/1741) lands
 upstream — that would drop the Connect state-echo fix.
 
 ```sh
 mkdir -p research-repos
-git clone https://github.com/librespot-org/librespot.git research-repos/librespot
-git -C research-repos/librespot checkout 9c7d75615fc093bdcbdb29adbce3fed38c531852
-git -C research-repos/librespot apply --unidiff-zero ../../patches/librespot-pr-1741.patch
-git -C research-repos/librespot apply --unidiff-zero ../../patches/librespot-auth-error-classification.patch
-git -C research-repos/librespot apply --unidiff-zero ../../patches/librespot-audio-progress.patch
-
+./script/vendor_librespot.sh  # pinned revision + all five required patches
 ./script/vendor_choutiui.sh   # ChouTiUI + ChouTi + ComposeUI at pinned SHAs
 ```
 
@@ -189,7 +185,26 @@ Patches:
 | `librespot-pr-1741.patch` | Active Connect device must not answer its own cluster update with another state PUT (echo loop → 429) |
 | `librespot-auth-error-classification.patch` | Re-export access-point auth errors so Swift can tell `BadCredentials` from generic `PermissionDenied` |
 | `librespot-audio-progress.patch` | Expose download-wait metrics for the local stall watchdog |
+| `librespot-deactivation-handover.patch` | Stop local audio before handover bookkeeping; never reclaim a foreign transfer |
+| `librespot-bounded-http.patch` | Share control/CDN and metadata-envelope 429 holds, persist cooldown synchronously, bound headers and stalled bodies |
 | `choutiui-path-dependencies.patch` | Point ChouTiUI at the vendored ChouTi / ComposeUI checkouts |
+
+Every Xcode build, `rust/build.sh`, and release archive runs `script/check_librespot.sh`; a missing
+patch or changed vendor revision fails the build. Cargo builds use `--locked` and
+`script/cargo.sh` enforces the version in `rust-toolchain.toml`, including under Xcode.
+Release bundles include `Contents/Resources/librespot-build.txt` with the pinned
+revision and patch/lockfile hashes. See [playback traffic policy](docs/playback-safety.md)
+for the spotifast comparison, command coalescing, and cooldown behavior.
+Healthy launches do not consume the six-per-ten-minute recovery budget. Failed
+or interrupted connections retain recovery state across relaunch; consecutive
+failures back off, and the notice shows when manual Retry becomes available.
+Server-requested cooldowns always apply, including to normal startup.
+
+Playlist pages reuse a ready, account-verified playback session for bounded
+range and metadata reads. Browsing without that session uses Web OAuth.
+Session reads never create a player, refresh credentials or automatically
+fall back after an error; cancellation and snapshot validation prevent stale
+or mixed results from entering the page cache.
 
 ### Agent-safe verification (default)
 
@@ -244,7 +259,7 @@ signed bundle is installed elsewhere.
 
 ## Tests
 
-`script/agent_check.sh` is the suite. It compiles three Swift test binaries
+`script/agent_check.sh` is the suite. It compiles the Swift test binaries
 plus Rust lib tests:
 
 | File | Covers |
@@ -252,7 +267,9 @@ plus Rust lib tests:
 | `Tests/StateReducerTests.swift` | Likes, saved albums, followed artists, playlist merge, home feed decode, local playback restore, stall detector, pending play, reconnect policy, sign-out fences |
 | `Tests/ThemePreferenceTests.swift` | Theme id persistence and fill semantics |
 | `Tests/ArtworkCacheTests.swift` | Shared downloads, prefetch tiers, cancellation, concurrency limits |
-| `rust/src` `#[cfg(test)]` | FFI init failure classification, proxy sink |
+| `Tests/PlaybackTrafficTests.swift` | Playback confirmation queue, persisted cooldowns and request throttling |
+| `Tests/PlaylistReadTests.swift` | Web/session playlist pagination, raw positions, revision checks, Liked Songs and album reads |
+| `rust/src` `#[cfg(test)]` | FFI init/account checks, audio generation, bounded HTTP and session playlist reads |
 
 Live Spotify verification is never part of the default check.
 

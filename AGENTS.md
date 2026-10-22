@@ -15,7 +15,7 @@ NANYIN_ALLOW_LIVE_SPOTIFY=1 ./script/build_and_run.sh [run|--live-smoke|--logs|-
 # terminate → xcodegen (if needed) → xcodebuild → package to dist/ → launch.
 # stderr (dlog + eprintln) captured to build/nanyin-launch.log.
 xcodebuild -project Nanyin.xcodeproj -scheme Nanyin -configuration Debug build
-# Rust core builds as a pre-build phase (cargo via mise: rust@stable)
+# Rust core builds as a pre-build phase (script/cargo.sh enforces rust-toolchain.toml)
 # Or standalone: ./rust/build.sh
 # Repo-root .cargo/config.toml pins target=aarch64-apple-darwin + Apple
 # Silicon rustflags so every cargo invocation shares rust/target/
@@ -30,6 +30,7 @@ Run the binary with stderr captured for diagnostics — Swift `dlog` + Rust `epr
 
 - **PR #1741** (connect: don't answer our own cluster update with another state update). Without it, being an active Connect device causes a state-PUT echo loop that has repeatedly ended in Spotify 429 responses. Dealer ghosting, spirc termination, and credential rejection were observed in the same incident, but the server-side causal chain is not publicly documented.
 - **Typed AP authentication error re-export** (local): lets the Rust bridge distinguish explicit `BadCredentials` / `CouldNotValidateCredentials` responses from unrelated `PermissionDenied` failures. Without it, reconnect could rotate the playback token after client-token HTTP 403 responses.
+- **Deactivation handover fixes** (local): three Connect takeover holes that made another device grabbing playback leave nanyin audible or bounce playback back — (a) `handle_cluster_update` ran `handle_disconnect` (PUTs that can fail) before `handle_stop`, and the no-payload arm never stopped the player; now local playback stops first, unconditionally; (b) `handle_disconnect` PUT a state update while still flagged `is_active`, which could re-claim the active slot mid-handover — now `set_active(false)` precedes the PUT; (c) `handle_connection_id_update` auto-resumed `cluster.transfer_data` when the cluster session id was merely empty, letting a fresh init adopt a stale transfer blob from another device — now auto-resume requires an exact session-id match.
 
 The canonical patch artifact is checked in at
 `patches/librespot-pr-1741.patch`; `script/agent_check.sh` verifies that the
@@ -41,7 +42,40 @@ bridge uses it to distinguish an explicit credential rejection from generic
 `PermissionDenied` failures such as client-token HTTP 403 responses. Keep this
 patch until upstream exposes an equivalent typed classification.
 
+`patches/librespot-deactivation-handover.patch` holds the takeover fixes
+above. On deactivation the local player must stop regardless of PUT success,
+and reconnect must never consume a foreign `transfer_data` blob.
+
 DO NOT "upgrade" the librespot dependency to crates.io or a git rev until #1741 is merged upstream — you would silently drop the patch and re-enter the echo loop. Check upstream: https://github.com/librespot-org/librespot/pull/1741
+
+`patches/librespot-bounded-http.patch` removes automatic HTTP 429 replay,
+preserves service cooldowns across Rust session rebuilds, and bounds control
+requests and CDN header/body-idle waits to 15 seconds. HTTP 429 holds are saved
+synchronously before the response returns; failed persistence blocks new HTTP
+requests. Nanyin sets SpClient to one attempt. Keep this patch in
+`script/librespot_config.sh`; `script/vendor_librespot.sh` prepares all five
+patches for a fresh checkout. Playback cooldowns and recovery budgets
+are persisted before recovery; relaunch/sign-out must not reset them. Connection
+recovery must not automatically replay a previous play/context load. A Connect
+deactivation event must cancel queued playback intents before track filtering.
+Playback commands wait for matching request/seek confirmation, with a bounded
+queue; never treat FFI rc=0 alone as confirmation or replay a timed-out command.
+Delayed queue refreshes must validate the account and playback generation.
+Normal successful startup must not consume recovery capacity. Use six recovery
+attempts per ten minutes, preserving history across successes and relaunches.
+Persist an unfinished-attempt marker before startup/authentication; only a
+successful connection clears it, so failed startup/relaunch stays recovery.
+Consecutive failures use 5/15/60/120/300/600-second backoff. Keep service 429 holds
+separate and intact. The v1→v2 migration removes the old mixed startup counters
+once; it must not discard service holds. Countdown updates belong in the notice
+view, not app-wide observable state. Expiry enables Retry without sending I/O.
+
+Playlist reads may reuse the existing verified playback session; never create
+or refresh a playback session for browsing. Keep the 50-slot range/batch bound,
+request cancellation, account/generation fences and cross-page revision checks
+in `rust/src/playlist_reads.rs` and `SpotifyClient.sessionPlaylistTracks`.
+Session-read failures must not trigger automatic Web fallback or replay.
+Metadata-envelope 429s share the persisted HTTP cooldown, even under cancellation.
 
 `research-repos/` also vendors cliamp (Go, MIT) and NullSpot (Swift+Rust, MIT) as design references. All three are git-ignored; NullSpot's `rust/src/lib.rs` is the reference for Spirc wiring, cliamp's `docs/spotify.md` documents Web API pitfalls.
 
@@ -89,6 +123,12 @@ In the observed incident, the suspected restriction decayed within hours to abou
 ## librespot API traps (verified the hard way)
 
 - `Spirc::new` connects the session itself — never `session.connect()` before it (`NotConnected` error).
+- GUI playback uses `nanyin_init_player_for_account` with the verified Web
+  profile ID. Rust compares it to the AP canonical username before publishing
+  the player or admitting audio/events. Account mismatch (`-5`) is not token
+  rejection: stop locally, retain browsing, and require explicit sign-in with
+  matching grants. Never refresh or auto-reconnect on this error. The unbound
+  `nanyin_init_player` entry point is only for the explicitly authorized idle probe.
 - `spirc.activate()` before `load()` — commands are ignored while the device is Not Active (silent: rc=0, nothing happens).
 - A spirc task exit means the session is unusable; `nanyin_init_player` rebuilds stale state (it does NOT no-op when spirc died — that was a bug).
 - `get_player_event_channel()` creates a NEW broadcast channel per call — multiple listeners all receive events.

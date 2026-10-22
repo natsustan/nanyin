@@ -15,7 +15,7 @@ use once_cell::sync::Lazy;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
-use crate::PLAYER_GENERATION;
+use crate::{AUTHORIZED_PLAYER_GENERATION, PLAYER_GENERATION};
 
 /// FFI callback for sending audio data to Swift.
 type AudioDataCallback = extern "C" fn(*const f32, usize, u64);
@@ -66,6 +66,7 @@ impl ProxySink {
     fn is_current(&self) -> bool {
         accepts_generation(
             PLAYER_GENERATION.load(Ordering::SeqCst),
+            AUTHORIZED_PLAYER_GENERATION.load(Ordering::SeqCst),
             self.generation,
         )
     }
@@ -76,8 +77,8 @@ impl ProxySink {
     }
 }
 
-fn accepts_generation(current: u64, sink: u64) -> bool {
-    current == sink
+fn accepts_generation(current: u64, authorized: u64, sink: u64) -> bool {
+    current == sink && authorized == sink
 }
 
 impl Sink for ProxySink {
@@ -137,7 +138,9 @@ mod tests {
 
     #[test]
     fn stale_sink_is_fenced_after_player_rebuild() {
-        assert!(accepts_generation(7, 7));
-        assert!(!accepts_generation(8, 7));
+        assert!(accepts_generation(7, 7, 7));
+        assert!(!accepts_generation(8, 8, 7));
+        assert!(!accepts_generation(8, 7, 8), "new player is not yet account-verified");
+        assert!(accepts_generation(8, 8, 8));
     }
 }

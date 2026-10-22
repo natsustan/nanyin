@@ -2,20 +2,13 @@
 # Build script for the nanyin Rust core (macOS arm64 only for now).
 # Invoked by Xcode as a build phase (before Compile Sources) or manually.
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUST_DIR="$SCRIPT_DIR"
 OUTPUT_DIR="$SCRIPT_DIR/../build/rust"
 
-# Find cargo: mise shim first, then rustup, then Homebrew.
-if command -v cargo >/dev/null 2>&1; then
-    :
-elif [ -f "$HOME/.cargo/bin/cargo" ]; then
-    export PATH="$HOME/.cargo/bin:$PATH"
-elif [ -f "/opt/homebrew/bin/cargo" ]; then
-    export PATH="/opt/homebrew/bin:$PATH"
-fi
+bash "$SCRIPT_DIR/../script/check_librespot.sh"
 
 # Xcode passes CONFIGURATION (Debug/Release); default Release.
 CONFIGURATION="${CONFIGURATION:-Release}"
@@ -36,7 +29,7 @@ cd "$RUST_DIR"
 # crate needs the cfg for ARMv8 crypto extensions) live in the repo-root
 # .cargo/config.toml so every cargo invocation shares one target dir.
 echo "Building nanyin-core ($BUILD_TYPE) for aarch64-apple-darwin..."
-cargo build $CARGO_FLAGS
+bash "$SCRIPT_DIR/../script/cargo.sh" build --locked $CARGO_FLAGS
 cp "$RUST_DIR/target/aarch64-apple-darwin/$BUILD_TYPE/libnanyin_core.a" "$OUTPUT_DIR/lib/"
 
 # Header + modulemap are checked in; copy them so Swift compiles against a

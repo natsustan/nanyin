@@ -44,8 +44,11 @@ final class AppModel {
     private var playbackAccessToken: String = ""
     private var webAccessToken: String = ""
     private var webTokenExpiry: Date = .distantPast
+    private var webTransport = SpotifyWebTransport()
     private var api: SpotifyClient?
     private var accountEpoch = 0
+    private let trafficSafety = TrafficSafetyStore.shared
+    private let playbackCommands = PlaybackCommandQueue()
     private var playbackGeneration: UInt64 = 0
     private var activePlaybackGeneration: UInt64?
     private var deferredReconnectGeneration: UInt64?
@@ -85,34 +88,37 @@ final class AppModel {
         return token.accessToken
     }
 
-    /// Same as ensureWebToken but rebuilds the API client with a fresh token.
+    /// Returns a client only after token refresh succeeds. A failed refresh
+    /// must not silently fall through to a stale client.
     private func refreshAPIClient(
-        for expectedEpoch: Int? = nil,
+        for epoch: Int,
         forceRefresh: Bool = false
-    ) async {
-        let epoch = expectedEpoch ?? accountEpoch
-        guard let token = try? await ensureWebToken(for: epoch, forceRefresh: forceRefresh),
-              epoch == accountEpoch else { return }
-        api = SpotifyClient(accessToken: token)
+    ) async throws -> (client: SpotifyClient, token: String) {
+        try Task.checkCancellation()
+        let token = try await ensureWebToken(for: epoch, forceRefresh: forceRefresh)
+        try Task.checkCancellation()
+        guard epoch == accountEpoch else { throw CancellationError() }
+        let client = SpotifyClient(accessToken: token, transport: webTransport)
+        api = client
+        return (client, token)
     }
 
-    /// Retries one Web API operation with a fresh token after an actual 401.
+    /// Retries once after an actual Web API 401. Concurrent old-token 401s
+    /// reuse a replacement already installed by another operation.
     private func withAPIAuthRetry<T>(
         for epoch: Int,
         operation: (SpotifyClient) async throws -> T
     ) async throws -> T {
-        guard epoch == accountEpoch else { throw CancellationError() }
-        await refreshAPIClient(for: epoch)
-        guard epoch == accountEpoch, let api else { throw CancellationError() }
+        let authorized = try await refreshAPIClient(for: epoch)
         do {
-            return try await operation(api)
+            return try await operation(authorized.client)
         } catch SpotifyClient.APIError.needsAuth {
+            try Task.checkCancellation()
             guard epoch == accountEpoch else { throw CancellationError() }
-            await refreshAPIClient(for: epoch, forceRefresh: true)
-            guard epoch == accountEpoch, let refreshedAPI = self.api else {
-                throw CancellationError()
-            }
-            return try await operation(refreshedAPI)
+            let refreshed = try await refreshAPIClient(
+                for: epoch, forceRefresh: webAccessToken == authorized.token
+            )
+            return try await operation(refreshed.client)
         }
     }
 
@@ -123,7 +129,6 @@ final class AppModel {
     private var playbackWatchdog: Task<Void, Never>?
     private var pendingPlayIntent: PendingPlayIntent?
     private var pendingPlayExpiryTask: Task<Void, Never>?
-    private var pendingPlayReplayTask: Task<Void, Never>?
     private var audioStallWatchdog: Task<Void, Never>?
     private var audioStallDetector = PlaybackStallDetector()
     // NOTE: playback position is intentionally NOT stored here. Polling it at
@@ -160,6 +165,7 @@ final class AppModel {
     private var localPlaybackRestore: LocalPlaybackRestoreState?
     private var localPlaybackOwnership: LocalPlaybackOwnership?
     private(set) var playbackConnectionState: PlaybackConnectionState = .connecting
+    private(set) var playbackConnectionWait: PlaybackConnectionWait?
 
     var isPlaybackReady: Bool {
         playbackConnectionState == .ready
@@ -184,7 +190,7 @@ final class AppModel {
         case .ready:
             nil
         case let .unavailable(message):
-            message
+            playbackConnectionWait?.message() ?? message
         }
     }
 
@@ -239,6 +245,7 @@ final class AppModel {
     /// landed (possibly empty) or failed — never perpetual loading.
     private(set) var hasLoadedPlaylists = false
     private(set) var playlistsLoadFailed = false
+    private var playlistLoadTask: Task<Void, Never>?
 
     /// New Playlist sheet state. `isCreatingPlaylist` blocks duplicate
     /// submission and dismissal while the request is in flight.
@@ -535,9 +542,9 @@ final class AppModel {
         }
         likedServerTotal = total
         likedCount = max(0, count)
-        if serverSnapshotIsComplete {
-            likedCacheNeedsFullReconciliation = false
-        }
+        // A failed tail read must not let the next identical prefix probe
+        // declare this speculative merge complete.
+        likedCacheNeedsFullReconciliation = !serverSnapshotIsComplete
         for (id, override) in likeOverrides {
             guard !activeLikeMutations.contains(id) else { continue }
             if override.liked && confirmedServerIDs.contains(id) {
@@ -555,8 +562,7 @@ final class AppModel {
         cached: [SpotifyClient.Track],
         prefix: [SpotifyClient.Track]
     ) -> [SpotifyClient.Track] {
-        let prefixIDs = Set(prefix.map(\.id))
-        return prefix + cached.filter { !prefixIDs.contains($0.id) }
+        LikedTrackPositions.mergePrefix(cached: cached, prefix: prefix)
     }
 
     private func rememberLikeOverride(_ track: SpotifyClient.Track, liked: Bool) {
@@ -638,7 +644,7 @@ final class AppModel {
                 }
                 guard epoch == accountEpoch else { return }
                 let cached = tracksByContext["liked"] ?? []
-                let prefixMatches = Array(cached.prefix(prefix.tracks.count)).map(\.id) == prefix.tracks.map(\.id)
+                let prefixMatches = LikedTrackPositions.prefixMatches(cached: cached, page: prefix)
                 let previousTotal = likedServerTotal ?? likedCount
                 // Skip a full re-page when the newest 50 and the total agree.
                 if likedSnapshotComplete,
@@ -653,7 +659,7 @@ final class AppModel {
                     return
                 }
 
-                if prefix.total <= prefix.tracks.count {
+                if prefix.nextOffset == nil {
                     applyLikedSnapshot(
                         displayTracks: prefix.tracks,
                         confirmedServerIDs: Set(prefix.tracks.map(\.id)),
@@ -676,15 +682,12 @@ final class AppModel {
                         displayIsComplete: likedSnapshotComplete,
                         serverSnapshotIsComplete: false
                     )
-                    let reconciled = likedSnapshotComplete && likeOverrides.isEmpty
-                        && !likedCacheNeedsFullReconciliation
-                        && (merged.count - cached.count) == (prefix.total - previousTotal)
-                    if reconciled { return }
                 } else {
                     // First visit: show the newest 50 so the page is not blank
                     // while the tail pages in. Do not replace likedIDs — a
                     // prefix-only snapshot would unpin hearts on other pages.
                     tracksByContext["liked"] = prefix.tracks
+                    likedCacheNeedsFullReconciliation = true
                     likedIDs.formUnion(prefix.tracks.map(\.id))
                     knownLikeIDs.formUnion(prefix.tracks.map(\.id))
                     likedServerTotal = prefix.total
@@ -727,7 +730,14 @@ final class AppModel {
     }
 
     func retryPlaybackConnection() {
-        guard canRetryPlaybackConnection else { return }
+        guard canRetryPlaybackConnection,
+              (playbackConnectionWait?.remaining() ?? 0) == 0 else { return }
+        if playbackAccessToken.isEmpty {
+            // Startup may have been stopped by the durable budget before any
+            // token was loaded. Resume that path instead of submitting "".
+            restorePlayback(for: accountEpoch)
+            return
+        }
         reconnect(
             disconnectedGeneration: playbackGeneration,
             preserveActiveAudio: false
@@ -1785,6 +1795,7 @@ final class AppModel {
     private(set) var tracksError: [String: String] = [:]
     /// Increments on every open() — stale load tasks compare and discard.
     private var loadEpoch = 0
+    private var pageLoadTask: Task<Void, Never>?
 
     func isLoadingTracks(contextKey: String) -> Bool {
         trackLoadingTokens[contextKey] != nil
@@ -1806,6 +1817,11 @@ final class AppModel {
 
     init() {
         installCoreCallbacks()
+        playbackCommands.onTimeout = { [weak self] in
+            self?.cancelPendingPlayForUserCommand()
+            self?.isBuffering = false
+            dlog("playback command confirmation timed out; queued commands discarded")
+        }
     }
 
     private var nowPlayingMgr: NowPlayingManager { NowPlayingManager.shared }
@@ -1888,12 +1904,20 @@ final class AppModel {
 
     /// Clean shutdown of the Rust core (Connect goodbye) — app quit path.
     func shutdown() {
+        playlistLoadTask?.cancel()
+        playlistLoadTask = nil
+        pageLoadTask?.cancel()
+        pageLoadTask = nil
+        loadEpoch += 1
+        playbackCommands.cancel()
+        delayedQueueRefresh.cancel()
         persistLocalPlaybackSnapshot()
         cancelPlaybackWatchdog()
         clearPendingPlayIntent()
         cancelAudioStallWatchdog()
         clearVolumeConfirmation()
         deferredReconnectGeneration = nil
+        playbackConnectionWait = nil
         playbackGeneration &+= 1
         activePlaybackGeneration = nil
         _ = Core.shutdown()
@@ -1904,6 +1928,12 @@ final class AppModel {
     /// Invalidates every task carrying the current account epoch before any
     /// replacement credentials can be installed.
     private func invalidateAccountSession() {
+        playlistLoadTask?.cancel()
+        playlistLoadTask = nil
+        webTransport.invalidate()
+        webTransport = SpotifyWebTransport()
+        playbackCommands.cancel()
+        delayedQueueRefresh.cancel()
         for task in albumSaveMutationTasks.values {
             task.cancel()
         }
@@ -1921,8 +1951,11 @@ final class AppModel {
         playbackGeneration &+= 1
         activePlaybackGeneration = nil
         deferredReconnectGeneration = nil
+        playbackConnectionWait = nil
         playbackRetryAvailability = .none
         loadEpoch += 1
+        pageLoadTask?.cancel()
+        pageLoadTask = nil
         searchEpoch += 1
         SpotifyAuth.invalidateInteractiveSignIn()
         _ = Core.shutdown()
@@ -2043,7 +2076,7 @@ final class AppModel {
     private func apply(webToken: SpotifyAuth.Token) {
         webAccessToken = webToken.accessToken
         webTokenExpiry = webToken.expiresAt
-        api = SpotifyClient(accessToken: webToken.accessToken)
+        api = SpotifyClient(accessToken: webToken.accessToken, transport: webTransport)
     }
 
     private func apply(playbackToken: SpotifyAuth.Token) {
@@ -2093,63 +2126,136 @@ final class AppModel {
         ))
     }
 
+    /// Playback may start only after the library grant identifies its account.
+    /// The profile request shares the Web transport with startup library reads.
+    private func verifiedPlaybackAccount(for epoch: Int) async throws -> String {
+        guard epoch == accountEpoch, authState == .loggedIn else { throw CancellationError() }
+        if !userId.isEmpty { return userId }
+        let profile = try await withAPIAuthRetry(for: epoch) { try await $0.currentUser() }
+        guard epoch == accountEpoch, authState == .loggedIn else { throw CancellationError() }
+        guard !profile.id.isEmpty else { throw SpotifyClient.APIError.http(0, "Spotify returned no account identity") }
+        if userId.isEmpty {
+            userDisplayName = profile.displayName ?? profile.id
+            userId = profile.id
+            restoreLocalPlaybackSnapshot(for: profile.id)
+        }
+        return userId
+    }
+
     private func restoreUserAndLibrary(for epoch: Int) {
         Task {
             guard epoch == accountEpoch, authState == .loggedIn else { return }
             let startedAt = ContinuousClock.now
             do {
-                let profile = try await withAPIAuthRetry(for: epoch) { api in
-                    try await api.currentUser()
-                }
-                guard epoch == accountEpoch, authState == .loggedIn else { return }
-                userDisplayName = profile.displayName ?? profile.id
-                userId = profile.id
-                restoreLocalPlaybackSnapshot(for: profile.id)
+                _ = try await verifiedPlaybackAccount(for: epoch)
                 dlog("/v1/me OK: \(startedAt.duration(to: .now))")
             } catch {
                 dlog("/v1/me failed: \(error)")
             }
         }
-        Task {
-            guard epoch == accountEpoch, authState == .loggedIn, let api else { return }
+        refreshPlaylists()
+        refreshLiked(force: true)
+        refreshSavedAlbums(force: true)
+        refreshFollowedArtists(force: true)
+    }
+
+    /// Startup and explicit retry share one library read. A failure remains
+    /// retryable without signing out or rebuilding the playback connection.
+    func refreshPlaylists() {
+        guard authState == .loggedIn, playlistLoadTask == nil else { return }
+        let epoch = accountEpoch
+        playlistsLoadFailed = false
+        playlistLoadTask = Task {
+            defer { if epoch == accountEpoch { playlistLoadTask = nil } }
             let startedAt = ContinuousClock.now
             do {
-                let loadedPlaylists = try await api.playlists()
+                let loadedPlaylists = try await withAPIAuthRetry(for: epoch) { api in
+                    try await api.playlists()
+                }
+                try Task.checkCancellation()
                 guard epoch == accountEpoch, authState == .loggedIn else { return }
                 applyPlaylistsSnapshot(loadedPlaylists)
                 ArtworkCache.shared.replacePrefetch(
                     urls: loadedPlaylists.compactMap { $0.artworkURL },
                     in: .library
                 )
-                // Recently-played playlist contexts resolve names/covers
-                // from this list — re-derive the strip if home loaded first.
-                if !homeHistory.isEmpty {
-                    publishHomeRecentlyPlayed()
-                }
+                if !homeHistory.isEmpty { publishHomeRecentlyPlayed() }
                 dlog("playlists loaded: \(startedAt.duration(to: .now))")
             } catch {
-                guard epoch == accountEpoch, authState == .loggedIn else { return }
+                guard !Task.isCancelled, epoch == accountEpoch, authState == .loggedIn else { return }
                 playlistsLoadFailed = true
                 dlog("library load failed: \(error)")
             }
-            guard epoch == accountEpoch, authState == .loggedIn else { return }
-            refreshLiked(force: true)
-            refreshSavedAlbums(force: true)
-            refreshFollowedArtists(force: true)
         }
     }
 
+    private func recordPlaybackCooldown() {
+        let delay = Core.retryAfterSeconds
+        guard delay > 0 else { return }
+        do { try trafficSafety.recordCooldown(.playback, seconds: delay) }
+        catch { dlog("could not persist playback cooldown: \(error)") }
+    }
+
+    private func admitPlaybackConnection(recovery: Bool = false) -> Bool {
+        do {
+            playbackConnectionWait = try trafficSafety.connectionWait(admit: true, recovery: recovery)
+            guard playbackConnectionWait == nil else {
+                playbackRetryAvailability = .manual
+                playbackConnectionState = .unavailable("Playback connection waiting")
+                return false
+            }
+            return true
+        } catch {
+            playbackConnectionWait = nil
+            playbackRetryAvailability = .manual
+            playbackConnectionState = .unavailable("Cannot save playback connection limits — check local storage")
+            return false
+        }
+    }
+
+    private func offerPlaybackRetry(_ message: String) {
+        playbackRetryAvailability = .manual
+        do {
+            playbackConnectionWait = try trafficSafety.connectionWait(admit: false)
+            playbackConnectionState = .unavailable(message)
+        } catch {
+            playbackConnectionWait = nil
+            playbackConnectionState = .unavailable("Cannot read playback connection limits — check local storage")
+        }
+    }
+
+    @discardableResult
+    private func acceptPlaybackConnection(_ generation: UInt64) -> Bool {
+        do {
+            try trafficSafety.connectionSucceeded()
+        } catch {
+            _ = Core.shutdown()
+            AudioRenderer.shared.stop()
+            isPlaying = false
+            isBuffering = false
+            offerPlaybackRetry("Cannot save playback connection status — check local storage")
+            return false
+        }
+        playbackConnectionWait = nil
+        activePlaybackGeneration = generation
+        playbackConnectionState = .ready
+        acceptInitializedVolume()
+        return true
+    }
+
     private func restorePlayback(for epoch: Int) {
+        guard admitPlaybackConnection() else { return }
+        let generation = beginPlaybackConnection()
         Task {
             do {
                 let startedAt = ContinuousClock.now
                 let playback = try await SpotifyAuth.refreshAccessToken(for: .playback)
-                guard epoch == accountEpoch, authState == .loggedIn else { return }
+                guard isCurrentPlayback(epoch: epoch, generation: generation) else { return }
                 apply(playbackToken: playback)
                 dlog("playback refresh OK: \(startedAt.duration(to: .now))")
-                initializePlayback(for: epoch, accessToken: playback.accessToken)
+                initializePlayback(for: epoch, accessToken: playback.accessToken, alreadyAdmitted: true)
             } catch {
-                guard epoch == accountEpoch, authState == .loggedIn else { return }
+                guard isCurrentPlayback(epoch: epoch, generation: generation) else { return }
                 dlog("playback refresh failed, keeping Web session: \(error)")
                 if case SpotifyAuth.AuthError.refreshTokenRevoked = error {
                     playbackConnectionState = .unavailable(
@@ -2160,40 +2266,40 @@ final class AppModel {
                         "Playback authorization unavailable — sign out and sign in again"
                     )
                 } else {
-                    playbackConnectionState = .unavailable(
-                        "Playback service unavailable — will retry on relaunch"
-                    )
+                    offerPlaybackRetry("Playback service unavailable — retry when the connection recovers")
                 }
             }
         }
     }
 
-    private func initializePlayback(for epoch: Int, accessToken: String) {
+    private func initializePlayback(for epoch: Int, accessToken: String, alreadyAdmitted: Bool = false) {
+        guard alreadyAdmitted || admitPlaybackConnection() else { return }
         let generation = beginPlaybackConnection()
         Task {
             guard isCurrentPlayback(epoch: epoch, generation: generation) else { return }
             let deviceId: String
+            let expectedAccountID: String
             do {
+                expectedAccountID = try await verifiedPlaybackAccount(for: epoch)
+                guard isCurrentPlayback(epoch: epoch, generation: generation) else { return }
                 deviceId = try KeychainStore.spotifyDeviceId()
             } catch {
                 guard isCurrentPlayback(epoch: epoch, generation: generation) else { return }
-                dlog("device id persistence failed: \(error)")
-                playbackRetryAvailability = .manual
-                playbackConnectionState = .unavailable("Playback connection unavailable")
+                dlog("playback account/device verification failed: \(error)")
+                offerPlaybackRetry("Could not verify the playback account or device. Please retry.")
                 return
             }
             let startedAt = ContinuousClock.now
             let result = await Core.initializePlayer(
                 accessToken: accessToken,
                 deviceId: deviceId,
-                generation: generation
+                generation: generation,
+                expectedAccountID: expectedAccountID
             )
             guard isCurrentPlayback(epoch: epoch, generation: generation) else { return }
             switch result {
             case .connected:
-                activePlaybackGeneration = generation
-                playbackConnectionState = .ready
-                acceptInitializedVolume()
+                guard acceptPlaybackConnection(generation) else { return }
                 nowPlayingMgr.activate()
                 pushNowPlayingInfo()
                 dlog("player init OK: \(startedAt.duration(to: .now))")
@@ -2203,17 +2309,31 @@ final class AppModel {
                     "Playback authorization expired — sign out and sign in again"
                 )
             case let .failed(code, message):
+                recordPlaybackCooldown()
                 dlog("player init rc=\(code): \(message)")
-                playbackRetryAvailability = .manual
-                playbackConnectionState = .unavailable("Playback connection unavailable")
+                if code == -5 {
+                    AudioRenderer.shared.stop()
+                    isPlaying = false
+                    isBuffering = false
+                    playbackRetryAvailability = .none
+                    playbackConnectionState = .unavailable(message)
+                } else {
+                    offerPlaybackRetry("Playback connection unavailable")
+                }
             }
         }
     }
 
     private func beginPlaybackConnection() -> UInt64 {
+        playbackCommands.cancel()
+        delayedQueueRefresh.cancel()
+        queueEpoch += 1
+        isLoadingQueue = false
+        queueRefreshPending = false
         cancelAudioStallWatchdog()
         clearVolumeConfirmation()
         deferredReconnectGeneration = nil
+        playbackConnectionWait = nil
         playbackRetryAvailability = .none
         playbackGeneration &+= 1
         activePlaybackGeneration = nil
@@ -2317,6 +2437,7 @@ final class AppModel {
     private(set) var isLoadingQueue = false
     private var queueEpoch = 0
     private var queueRefreshPending = false
+    private let delayedQueueRefresh = PlaybackDeferredRefresh()
     private var pendingQueueHistory: (nowPlaying: NowPlaying, durationMs: UInt32)?
 
     /// Refreshes the queue from GET /v1/me/player/queue (the active device's
@@ -2325,6 +2446,7 @@ final class AppModel {
     /// websocket rejects SUBSCRIBE frames), so this polls on the events that
     /// change the queue instead.
     func refreshQueue() {
+        delayedQueueRefresh.cancel()
         guard authState == .loggedIn else { return }
         guard !isLoadingQueue else {
             queueRefreshPending = true
@@ -2334,9 +2456,10 @@ final class AppModel {
         queueEpoch += 1
         let epoch = queueEpoch
         let account = accountEpoch
+        let playback = playbackGeneration
         Task {
             defer {
-                if epoch == queueEpoch {
+                if epoch == queueEpoch, account == accountEpoch, playback == playbackGeneration {
                     isLoadingQueue = false
                     if queueRefreshPending {
                         queueRefreshPending = false
@@ -2350,6 +2473,7 @@ final class AppModel {
                 }
                 guard account == accountEpoch,
                       epoch == queueEpoch,
+                      playback == playbackGeneration,
                       authState == .loggedIn else { return }
                 queueCurrent = result.current
                 queueUpcoming = result.upcoming.map { QueueItem(track: $0) }
@@ -2365,9 +2489,13 @@ final class AppModel {
 
     /// Delayed refresh after an add-to-queue (server needs a moment to settle).
     func refreshQueueSoon() {
-        Task {
-            try? await Task.sleep(for: .seconds(1.5))
-            refreshQueue()
+        let account = accountEpoch
+        let generation = playbackGeneration
+        delayedQueueRefresh.schedule { [weak self] in
+            guard let self, self.accountEpoch == account,
+                  self.playbackGeneration == generation,
+                  self.authState == .loggedIn else { return }
+            self.refreshQueue()
         }
     }
 
@@ -2422,9 +2550,24 @@ final class AppModel {
         navigate(to: next)
     }
 
+    /// Session reads reuse the verified playback account and never initialize
+    /// playback for browsing. Without a ready session, browsing uses Web OAuth.
+    private func loadPlaylistTracks(_ id: String, account: Int) async throws -> [SpotifyClient.Track] {
+        guard account == accountEpoch else { throw CancellationError() }
+        if let generation = activePlaybackGeneration, isPlaybackReady, !userId.isEmpty {
+            let tracks = try await Core.playlistTracks(id, accountID: userId, generation: generation)
+            guard account == accountEpoch, generation == activePlaybackGeneration else { throw CancellationError() }
+            return tracks
+        }
+        return try await withAPIAuthRetry(for: account) { try await $0.playlistTracks(id) }
+    }
+
     /// Applies the page and loads its content only when the cache misses
     /// (back/forward into an already-visited page is instant).
     private func navigate(to newPage: Page) {
+        pageLoadTask?.cancel()
+        pageLoadTask = nil
+        loadEpoch += 1
         page = newPage
         if case .queue = newPage {
             refreshQueue()
@@ -2451,56 +2594,65 @@ final class AppModel {
         guard let key = newPage.contextKey, tracksByContext[key] == nil else { return }
         let loadingToken = beginTrackLoading(contextKey: key)
         tracksError[key] = nil
-        loadEpoch += 1
         let epoch = loadEpoch
-        Task {
-            defer { endTrackLoading(contextKey: key, token: loadingToken) }
+        let account = accountEpoch
+        pageLoadTask = Task {
+            defer {
+                endTrackLoading(contextKey: key, token: loadingToken)
+                if epoch == loadEpoch { pageLoadTask = nil }
+            }
             do {
-                // Token may have expired while the app sat idle — revalidate.
-                await refreshAPIClient()
-                guard epoch == loadEpoch, let api else { return }
                 var discography: [SpotifyClient.AlbumInfo]?
                 let tracks: [SpotifyClient.Track]
-                switch newPage {
-                case .liked:
-                    tracks = try await api.likedTracks()
-                case let .playlist(id, _):
-                    tracks = try await api.playlistTracks(id)
-                case let .artist(id, _, _):
-                    // Top tracks and discography in parallel; discography is a
-                    // bonus section — its failure must not fail the page.
-                    async let albums = api.artistAlbums(id)
-                    do {
-                        tracks = try await api.artistTopTracks(id)
-                    } catch {
-                        // Preserve a successful discography even when the
-                        // top-tracks endpoint fails, so the artist page can
-                        // still show Albums/Singles alongside the error.
-                        if let releases = try? await albums, epoch == loadEpoch {
-                            publishDiscography(releases, contextKey: key)
-                            dlog("discography \(key) → \(releases.count) releases (top tracks failed)")
+                if case let .playlist(id, _) = newPage {
+                    tracks = try await loadPlaylistTracks(id, account: account)
+                } else {
+                    tracks = try await withAPIAuthRetry(for: account) { api in
+                        switch newPage {
+                        case .liked:
+                            return try await api.likedTracks()
+                        case .playlist:
+                            return [] // handled by the session/Web router above
+                        case let .artist(id, _, _):
+                            // Top tracks and discography in parallel; discography is a
+                            // bonus section — its failure must not fail the page.
+                            async let albums = api.artistAlbums(id)
+                            let tracks: [SpotifyClient.Track]
+                            do {
+                                tracks = try await api.artistTopTracks(id)
+                            } catch {
+                                // Preserve a successful discography even when the
+                                // top-tracks endpoint fails, so the artist page can
+                                // still show Albums/Singles alongside the error.
+                                if let releases = try? await albums, epoch == loadEpoch {
+                                    publishDiscography(releases, contextKey: key)
+                                    dlog("discography \(key) → \(releases.count) releases (top tracks failed)")
+                                }
+                                throw error
+                            }
+                            discography = try? await albums
+                            return tracks
+                        case let .album(id, _, _, _):
+                            return try await api.albumTracks(id)
+                        case .search:
+                            // Results are fetched by search(), not by page-open.
+                            return []
+                        case .queue, .home, .savedAlbums, .followedArtists:
+                            // Live views — nothing to prefetch.
+                            return []
                         }
-                        throw error
                     }
-                    discography = try? await albums
-                case let .album(id, _, _, _):
-                    tracks = try await api.albumTracks(id)
-                case .search:
-                    // Results are fetched by search(), not by page-open.
-                    return
-                case .queue, .home, .savedAlbums, .followedArtists:
-                    // Live views — nothing to prefetch.
-                    return
                 }
                 // Discard if the user navigated elsewhere mid-flight (P0-3).
-                guard epoch == loadEpoch else { return }
+                try Task.checkCancellation()
+                guard epoch == loadEpoch, account == accountEpoch else { return }
                 tracksByContext[key] = tracks
                 if let discography {
                     publishDiscography(discography, contextKey: key)
                     dlog("discography \(key) → \(discography.count) releases")
                 }
             } catch {
-                guard epoch == loadEpoch else { return }
+                guard !Task.isCancelled, epoch == loadEpoch, account == accountEpoch else { return }
                 tracksError[key] = error.localizedDescription
                 dlog("tracks load failed: \(error)")
             }
@@ -2603,10 +2755,34 @@ final class AppModel {
     /// Plays a track within its loaded context. Large contexts go through
     /// server-resolved context URIs (liked = spotify:user:<id>:collection,
     /// playlist = spotify:playlist:<id>) — uploading thousands of URIs into
-    /// Connect state gets 429-rejected. Falls back to a bounded track window
-    /// if the context path doesn't start audio in time.
+    /// Connect state can be rejected. Ad-hoc selections use a bounded window;
+    /// a slow server context is never automatically replaced with another load.
     func play(track: SpotifyClient.Track, contextKey: String, index preferredIndex: Int? = nil) {
-        cancelPendingPlayForUserCommand()
+        guard isPlaybackReady else { return }
+        let selectedPage = page
+        let selectedIndex = preferredIndex
+            ?? tracksByContext[contextKey]?.firstIndex(where: { $0.uri == track.uri })
+            ?? 0
+        playbackCommands.submit(kind: .selection) {
+            let previous = Core.playbackProgress.playRequestID
+            let tracks = self.tracksByContext[contextKey] ?? []
+            let currentIndex = tracks.indices.contains(selectedIndex) && tracks[selectedIndex].uri == track.uri
+                ? selectedIndex : tracks.firstIndex(where: { $0.uri == track.uri })
+            // A queued row may move/disappear before dispatch. Do not submit
+            // its old server-context offset and accidentally play another row.
+            if let currentIndex {
+                self.performPlay(track: tracks[currentIndex], contextKey: contextKey,
+                                 index: currentIndex, page: selectedPage)
+            } else {
+                self.performPlayURI(track.uri)
+            }
+            guard self.pendingPlayIntent != nil else { return nil }
+            return .init(previousRequestID: previous, expectedURI: track.uri)
+        }
+    }
+
+    private func performPlay(track: SpotifyClient.Track, contextKey: String, index: Int, page: Page) {
+        cancelPendingPlayForUserCommand(cancelQueuedCommands: false)
         guard isPlaybackReady else { return }
         discardLocalPlaybackRestore()
         localPlaybackOwnership = nil
@@ -2618,38 +2794,46 @@ final class AppModel {
         isBuffering = true
         let previousPlayRequestID = Core.playbackProgress.playRequestID
 
-        let index = preferredIndex
-            ?? tracksByContext[contextKey]?.firstIndex(where: { $0.uri == track.uri })
-            ?? 0
         let contextURI: String?
+        var contextIndex = index
         switch page {
         case .liked:
             // A newly inserted/removed local row may not have reached Spotify's
             // server-resolved collection yet, so its local index is unsafe.
+            let position = track.contextPosition
             contextURI = userId.isEmpty || hasPendingLikeOverrides()
-                ? nil
-                : "spotify:user:\(userId):collection"
+                || likedCacheNeedsFullReconciliation || position?.source != "liked"
+                ? nil : "spotify:user:\(userId):collection"
+            contextIndex = position?.index ?? index
         case let .playlist(id, _):
-            contextURI = "spotify:playlist:\(id)"
+            // The UI omits null/local/unavailable entries. Keep the original
+            // server offset; a newly appended local row has no confirmed one.
+            let position = track.contextPosition
+            contextURI = position?.source == "spotify:playlist:\(id)" ? "spotify:playlist:\(id)" : nil
+            contextIndex = position?.index ?? index
         case let .album(id, _, _, _):
-            contextURI = "spotify:album:\(id)"
+            let position = track.contextPosition
+            contextURI = position?.source == "spotify:album:\(id)" ? position?.source : nil
+            contextIndex = position?.index ?? index
         case .search, .artist, .queue, .home, .savedAlbums, .followedArtists:
             // Ad-hoc context: results are small — play the window directly.
             contextURI = nil
         }
 
         if let contextURI {
-            let rc = Core.playContext(contextURI, startIndex: index)
-            dlog("playContext(\(contextURI), index \(index)) rc=\(rc)")
+            let rc = Core.playContext(contextURI, startIndex: contextIndex)
+            dlog("playContext(\(contextURI), index \(contextIndex)) rc=\(rc)")
             if rc == 0 {
                 setPendingPlayIntent(
-                    call: .context(uri: contextURI, index: index),
+                    call: .context(uri: contextURI, index: contextIndex),
                     trackURI: track.uri,
                     previousPlayRequestID: previousPlayRequestID
                 )
-                scheduleContextFallback(track: track, contextKey: contextKey, index: index)
+                scheduleContextTimeout(track: track)
                 return
             }
+            isBuffering = false
+            return
         }
 
         playWindowed(track: track, contextKey: contextKey, index: index)
@@ -2672,8 +2856,15 @@ final class AppModel {
             }
             return
         }
-        let window = context.map(\.uri).dropFirst(index).prefix(50)
-        let uris = Array(window)
+        // A list may refresh while the selection is being coalesced. Never
+        // replace the clicked track with the row now occupying its old index.
+        let window: [String]
+        if context.indices.contains(index), context[index].uri == track.uri {
+            window = Array(context.lazy.map(\.uri).dropFirst(index).prefix(50))
+        } else {
+            window = [track.uri]
+        }
+        let uris = window
         let rc = Core.playTracks(uris, startIndex: 0)
         dlog("playWindowed(\(window.count) uris) rc=\(rc)")
         if rc == 0 {
@@ -2687,8 +2878,8 @@ final class AppModel {
         }
     }
 
-    /// If a context load doesn't produce audio within 8s, retry windowed.
-    private func scheduleContextFallback(track: SpotifyClient.Track, contextKey: String, index: Int) {
+    /// Slow context resolution is not permission to send a second load.
+    private func scheduleContextTimeout(track: SpotifyClient.Track) {
         let uri = track.uri
         playbackWatchdog = Task {
             try? await Task.sleep(for: .seconds(8))
@@ -2698,10 +2889,10 @@ final class AppModel {
                 playbackWatchdog = nil
                 return
             }
-            dlog("context load stalled — falling back to windowed tracks")
+            dlog("context load timed out — waiting for explicit user retry")
             playbackWatchdog = nil
             clearPendingPlayIntent()
-            playWindowed(track: track, contextKey: contextKey, index: index)
+            isBuffering = false
         }
     }
 
@@ -2709,7 +2900,17 @@ final class AppModel {
     /// playlist, liked collection) — never uploads a track-URI list (M4.3
     /// roadmap rule; large context uploads get 429-rejected silently).
     private func playServerContext(_ contextURI: String) {
-        cancelPendingPlayForUserCommand()
+        guard isPlaybackReady else { return }
+        playbackCommands.submit(kind: .selection) {
+            let previous = Core.playbackProgress.playRequestID
+            self.performPlayServerContext(contextURI)
+            guard let intent = self.pendingPlayIntent else { return nil }
+            return .init(previousRequestID: previous, expectedURI: intent.trackURI)
+        }
+    }
+
+    private func performPlayServerContext(_ contextURI: String) {
+        cancelPendingPlayForUserCommand(cancelQueuedCommands: false)
         guard isPlaybackReady else { return }
         discardLocalPlaybackRestore()
         localPlaybackOwnership = nil
@@ -2789,11 +2990,10 @@ final class AppModel {
         pendingPlayIntent = nil
         pendingPlayExpiryTask?.cancel()
         pendingPlayExpiryTask = nil
-        pendingPlayReplayTask?.cancel()
-        pendingPlayReplayTask = nil
     }
 
-    private func cancelPendingPlayForUserCommand() {
+    private func cancelPendingPlayForUserCommand(cancelQueuedCommands: Bool = true) {
+        if cancelQueuedCommands { playbackCommands.cancel() }
         if pendingPlayIntent != nil {
             isBuffering = false
         }
@@ -2943,6 +3143,24 @@ final class AppModel {
     }
 
     private func handle(_ event: Core.Event, generation: UInt64) {
+        if case .deactivated = event {
+            delayedQueueRefresh.cancel()
+            cancelPendingPlayForUserCommand()
+            cancelAudioStallWatchdog()
+            discardLocalPlaybackRestore()
+            localPlaybackOwnership = nil
+            deferredReconnectGeneration = nil
+            isPlaying = false
+            isBuffering = false
+            nowPlayingMgr.clear()
+            return
+        }
+        if case let .seeked(positionMs, requestID) = event {
+            guard requestID == Core.playbackProgress.playRequestID else { return }
+            playbackCommands.acknowledge(uri: nil, requestID: requestID, seekPosition: positionMs)
+            if isPlaying { scheduleAudioStallWatchdog(generation: generation) }
+            return
+        }
         if case let .volumeChanged(volume) = event {
             handleVolumeChanged(volume)
             return
@@ -3003,7 +3221,10 @@ final class AppModel {
                 scheduleAudioStallWatchdog(generation: generation)
             }
             pushNowPlayingInfo()
-        case let .paused(_, positionMs, playRequestID):
+            if confirmsPendingPlay {
+                playbackCommands.acknowledge(uri: uri, requestID: playRequestID)
+            }
+        case let .paused(uri, positionMs, playRequestID):
             guard playRequestID == Core.playbackProgress.playRequestID else { return }
             guard pendingPlayIntent?.isEventFromPreviousRequest(
                 playRequestID: playRequestID
@@ -3014,6 +3235,7 @@ final class AppModel {
             isPlaying = false
             isBuffering = false
             _ = positionMs
+            playbackCommands.acknowledge(uri: uri, requestID: playRequestID, paused: true)
             pushNowPlayingInfo()
             resumeDeferredReconnectIfNeeded()
         case let .stopped(_, playRequestID):
@@ -3021,12 +3243,16 @@ final class AppModel {
             guard pendingPlayIntent?.isEventFromPreviousRequest(
                 playRequestID: playRequestID
             ) != true else { return }
+            playbackCommands.cancel()
             cancelPlaybackWatchdog()
             clearPendingPlayIntent()
             cancelAudioStallWatchdog()
             isPlaying = false
             isBuffering = false
-            pushNowPlayingInfo()
+            // A stopped session means another device took over (or the stream
+            // ended). Release the Now Playing claim so media keys don't keep
+            // routing to a dead session.
+            nowPlayingMgr.clear()
             resumeDeferredReconnectIfNeeded()
         case let .loading(uri, _, playRequestID):
             guard playRequestID == Core.playbackProgress.playRequestID else { return }
@@ -3081,7 +3307,7 @@ final class AppModel {
             case (false, true): repeatMode = .one
             case (false, false): repeatMode = .off
             }
-        case .volumeChanged:
+        case .volumeChanged, .deactivated, .seeked:
             break
         case let .endOfTrack(playRequestID):
             cancelAudioStallWatchdog()
@@ -3143,54 +3369,70 @@ final class AppModel {
     /// Session dropped: re-init the player with the existing token first
     /// (session drops are usually network/dealer events, NOT expired tokens).
     /// Only refresh the token when the existing one is actually rejected —
-    /// aggressive refresh on every disconnect rotates tokens in a loop,
-    /// which Spotify's risk control treats as abuse and revokes everything
-    /// (learned the hard way: refresh token got invalidated).
+    /// refreshing on every disconnect risks a token rotation storm. The
+    /// reconnect budget also covers successful but short-lived sessions.
     private func reconnect(
         disconnectedGeneration: UInt64,
         preserveActiveAudio: Bool = true
     ) {
         guard authState == .loggedIn,
               playbackGeneration == disconnectedGeneration else { return }
-        if preserveActiveAudio,
+        // A connection recovery never carries permission to restart playback.
+        // Another device may have taken ownership while this session was down.
+        let hadPendingPlay = pendingPlayIntent != nil
+        let rateLimited = Core.retryAfterSeconds > 0
+        recordPlaybackCooldown()
+        cancelPendingPlayForUserCommand()
+        if preserveActiveAudio, !rateLimited,
            PlaybackReconnectPolicy.shouldDeferRebuild(
                isPlaying: isPlaying,
                isBuffering: isBuffering,
-               hasPendingPlay: pendingPlayIntent != nil
+               hasPendingPlay: hadPendingPlay
            ) {
             deferredReconnectGeneration = disconnectedGeneration
             playbackConnectionState = .connecting
             dlog("control plane disconnected — deferring rebuild while audio is progressing")
             return
         }
-        if PlaybackReconnectPolicy.shouldWaitForActivation(
+        if !rateLimited, PlaybackReconnectPolicy.shouldWaitForActivation(
             isAppActive: isAppActive,
             isPlaying: isPlaying,
             isBuffering: isBuffering,
-            hasPendingPlay: pendingPlayIntent != nil
+            hasPendingPlay: hadPendingPlay
         ) {
             playbackRetryAvailability = .whenActivated
             playbackConnectionState = .unavailable("Playback connection unavailable")
             dlog("control plane disconnected while inactive — waiting for app activation")
             return
         }
-        if pendingPlayIntent != nil {
-            cancelPlaybackWatchdog()
+        guard admitPlaybackConnection(recovery: true) else {
+            let unavailable = playbackConnectionState
+            let waiting = playbackConnectionWait
+            _ = beginPlaybackConnection()
+            cancelPendingPlayForUserCommand()
+            _ = Core.shutdown()
+            AudioRenderer.shared.stop()
+            isPlaying = false
+            isBuffering = false
+            playbackRetryAvailability = .manual
+            playbackConnectionState = unavailable
+            playbackConnectionWait = waiting
+            return
         }
         let epoch = accountEpoch
         let accessToken = playbackAccessToken
         let generation = beginPlaybackConnection()
         Task {
             let deviceId: String
+            let expectedAccountID: String
             do {
+                expectedAccountID = try await verifiedPlaybackAccount(for: epoch)
+                guard isCurrentPlayback(epoch: epoch, generation: generation) else { return }
                 deviceId = try KeychainStore.spotifyDeviceId()
             } catch {
                 guard isCurrentPlayback(epoch: epoch, generation: generation) else { return }
-                dlog("device id persistence failed: \(error)")
-                playbackRetryAvailability = .manual
-                playbackConnectionState = .unavailable(
-                    "Playback connection unavailable"
-                )
+                dlog("playback account/device verification failed: \(error)")
+                offerPlaybackRetry("Could not verify the playback account or device. Please retry.")
                 return
             }
             // 1) Try re-init with the CURRENT access token — cheap and usually
@@ -3199,20 +3441,26 @@ final class AppModel {
             let result = await Core.initializePlayer(
                 accessToken: accessToken,
                 deviceId: deviceId,
-                generation: generation
+                generation: generation,
+                expectedAccountID: expectedAccountID
             )
             guard isCurrentPlayback(epoch: epoch, generation: generation) else { return }
             switch result {
             case .connected:
-                activePlaybackGeneration = generation
-                playbackConnectionState = .ready
-                acceptInitializedVolume()
-                schedulePendingPlayReplay(epoch: epoch, generation: generation)
+                guard acceptPlaybackConnection(generation) else { return }
                 return
             case let .failed(code, message):
+                recordPlaybackCooldown()
                 dlog("reconnect kept current token after init rc=\(code): \(message)")
-                playbackRetryAvailability = .manual
-                playbackConnectionState = .unavailable("Playback connection unavailable")
+                if code == -5 {
+                    AudioRenderer.shared.stop()
+                    isPlaying = false
+                    isBuffering = false
+                    playbackRetryAvailability = .none
+                    playbackConnectionState = .unavailable(message)
+                } else {
+                    offerPlaybackRetry("Playback connection unavailable")
+                }
                 return
             case let .credentialsRejected(message):
                 dlog("reconnect credentials rejected: \(message)")
@@ -3225,24 +3473,30 @@ final class AppModel {
                 let retry = await Core.initializePlayer(
                     accessToken: token.accessToken,
                     deviceId: deviceId,
-                    generation: generation
+                    generation: generation,
+                    expectedAccountID: expectedAccountID
                 )
                 guard isCurrentPlayback(epoch: epoch, generation: generation) else { return }
                 switch retry {
                 case .connected:
-                    activePlaybackGeneration = generation
-                    playbackConnectionState = .ready
-                    acceptInitializedVolume()
-                    schedulePendingPlayReplay(epoch: epoch, generation: generation)
+                    acceptPlaybackConnection(generation)
                 case let .credentialsRejected(message):
                     dlog("reconnect refreshed token rejected: \(message)")
                     playbackConnectionState = .unavailable(
                         "Playback authorization expired — sign out and sign in again"
                     )
                 case let .failed(code, message):
+                    recordPlaybackCooldown()
                     dlog("reconnect refreshed token init rc=\(code): \(message)")
-                    playbackRetryAvailability = .manual
-                    playbackConnectionState = .unavailable("Playback connection unavailable")
+                    if code == -5 {
+                        AudioRenderer.shared.stop()
+                        isPlaying = false
+                        isBuffering = false
+                        playbackRetryAvailability = .none
+                        playbackConnectionState = .unavailable(message)
+                    } else {
+                        offerPlaybackRetry("Playback connection unavailable")
+                    }
                 }
             } catch {
                 guard isCurrentPlayback(epoch: epoch, generation: generation) else { return }
@@ -3255,7 +3509,7 @@ final class AppModel {
                         "Playback authorization expired — sign out and sign in again"
                     )
                 } else {
-                    playbackConnectionState = .unavailable("Connection lost — sign in again")
+                    offerPlaybackRetry("Playback service unavailable — retry when the connection recovers")
                 }
             }
         }
@@ -3270,77 +3524,20 @@ final class AppModel {
         )
     }
 
-    private func schedulePendingPlayReplay(epoch: Int, generation: UInt64) {
-        guard pendingPlayIntent != nil else { return }
-        pendingPlayReplayTask?.cancel()
-        pendingPlayReplayTask = Task {
-            do {
-                try await Task.sleep(for: .seconds(3))
-            } catch {
-                return
-            }
-            guard isCurrentPlayback(epoch: epoch, generation: generation),
-                  playbackConnectionState == .ready,
-                  var intent = pendingPlayIntent else { return }
-            if intent.replayed {
-                failPendingPlay(intent)
-                return
-            }
-            guard intent.markReplayedIfEligible(
-                accountEpoch: accountEpoch,
-                previousPlayRequestID: Core.playbackProgress.playRequestID
-            ) else {
-                if pendingPlayIntent == intent {
-                    clearPendingPlayIntent()
-                    isBuffering = false
-                }
-                return
-            }
-            pendingPlayIntent = intent
-
-            let rc: Int32
-            switch intent.call {
-            case let .context(uri, index):
-                rc = Core.playContext(uri, startIndex: index)
-                dlog("replay playContext(\(uri), index \(index)) rc=\(rc)")
-            case let .tracks(uris, index):
-                rc = Core.playTracks(uris, startIndex: index)
-                dlog("replay playTracks(\(uris.count), index \(index)) rc=\(rc)")
-            case let .trackAt(uri, positionMs):
-                rc = Core.playTrack(uri, at: positionMs)
-                dlog("replay playTrack(\(uri), position \(positionMs)) rc=\(rc)")
-            }
-            guard rc == 0 else {
-                failPendingPlay(intent)
-                return
-            }
-
-            do {
-                try await Task.sleep(for: .seconds(3))
-            } catch {
-                return
-            }
-            guard isCurrentPlayback(epoch: epoch, generation: generation),
-                  pendingPlayIntent == intent else { return }
-            failPendingPlay(intent)
-        }
-    }
-
-    private func failPendingPlay(_ intent: PendingPlayIntent) {
-        guard pendingPlayIntent == intent else { return }
-        restoreIdlePlaybackIfStarting()
-        clearPendingPlayIntent()
-        cancelPlaybackWatchdog()
-        isBuffering = false
-        playbackConnectionState = .unavailable(
-            "Connection lost — playback did not start"
-        )
-    }
-
     // MARK: - Playback commands
 
     func playURI(_ input: String) {
-        cancelPendingPlayForUserCommand()
+        guard isPlaybackReady else { return }
+        playbackCommands.submit(kind: .selection) {
+            let previous = Core.playbackProgress.playRequestID
+            self.performPlayURI(input)
+            guard let intent = self.pendingPlayIntent else { return nil }
+            return .init(previousRequestID: previous, expectedURI: intent.trackURI)
+        }
+    }
+
+    private func performPlayURI(_ input: String) {
+        cancelPendingPlayForUserCommand(cancelQueuedCommands: false)
         guard isPlaybackReady else { return }
         discardLocalPlaybackRestore()
         localPlaybackOwnership = nil
@@ -3438,6 +3635,7 @@ final class AppModel {
 
     func seek(to fraction: Double) {
         guard isPlaybackReady, localPlaybackRestore?.isStarting != true else { return }
+        cancelPendingPlayForUserCommand()
         let positionMs = UInt32(fraction * Double(max(durationMs, 1)))
         if let restore = localPlaybackRestore {
             let updated = restore.snapshot.withPosition(positionMs)
@@ -3541,27 +3739,55 @@ final class AppModel {
     }
 
     func next() {
-        cancelPendingPlayForUserCommand()
         guard isPlaybackReady, localPlaybackRestore == nil else { return }
+        playbackCommands.submit(kind: .next) {
+            let previous = Core.playbackProgress.playRequestID
+            let wasPaused = !Core.isPlaying
+            guard self.performNext() else { return nil }
+            return .init(previousRequestID: previous, acceptsPaused: wasPaused)
+        }
+    }
+
+    private func performNext() -> Bool {
+        cancelPendingPlayForUserCommand(cancelQueuedCommands: false)
+        guard isPlaybackReady, localPlaybackRestore == nil else { return false }
         discardLocalPlaybackRestore()
         cancelAudioStallWatchdog()
         let requestID = Core.playbackProgress.playRequestID
         if Core.next() == 0 {
             localPlaybackOwnership = localPlaybackOwnership?
                 .expectingSuccessor(after: requestID)
+            return true
         }
+        return false
     }
 
     func prev() {
-        cancelPendingPlayForUserCommand()
         guard isPlaybackReady, localPlaybackRestore == nil else { return }
+        playbackCommands.submit(kind: .previous) {
+            let previous = Core.playbackProgress.playRequestID
+            let seeksToStart = Core.positionMs >= 3000
+            let wasPaused = !Core.isPlaying
+            guard self.performPrevious() else { return nil }
+            return .init(previousRequestID: previous, acceptsSeek: seeksToStart, acceptsPaused: wasPaused)
+        }
+    }
+
+    private func performPrevious() -> Bool {
+        cancelPendingPlayForUserCommand(cancelQueuedCommands: false)
+        guard isPlaybackReady, localPlaybackRestore == nil else { return false }
         discardLocalPlaybackRestore()
         cancelAudioStallWatchdog()
         let requestID = Core.playbackProgress.playRequestID
+        let seeksToStart = Core.positionMs >= 3000
         if Core.prev() == 0 {
-            localPlaybackOwnership = localPlaybackOwnership?
-                .expectingSuccessor(after: requestID)
+            if !seeksToStart {
+                localPlaybackOwnership = localPlaybackOwnership?
+                    .expectingSuccessor(after: requestID)
+            }
+            return true
         }
+        return false
     }
 
 }

@@ -1,0 +1,354 @@
+diff --git a/core/src/http_client.rs b/core/src/http_client.rs
+index 03af57e..4c5fa32 100644
+--- a/core/src/http_client.rs
++++ b/core/src/http_client.rs
+@@ -1,9 +1,12 @@
+ use std::{
+-    sync::OnceLock,
++    sync::{Mutex, OnceLock, atomic::{AtomicBool, Ordering}},
++    future::Future,
++    pin::Pin,
++    task::{Context, Poll},
+     time::{Duration, Instant},
+ };
+ 
+-use bytes::Bytes;
++use bytes::{Bytes, BytesMut};
+ use futures_util::{FutureExt, future::IntoStream};
+ use governor::{
+     Quota, RateLimiter, clock::MonotonicClock, middleware::NoOpMiddleware,
+@@ -14,7 +17,7 @@ use http_body_util::{BodyExt, Full};
+ use hyper::{HeaderMap, Request, Response, StatusCode, body::Incoming, header::USER_AGENT};
+ use hyper_proxy2::{Intercept, Proxy, ProxyConnector};
+ use hyper_util::{
+-    client::legacy::{Client, ResponseFuture, connect::HttpConnector},
++    client::legacy::{Client, connect::HttpConnector},
+     rt::TokioExecutor,
+ };
+ use nonzero_ext::nonzero;
+@@ -37,7 +40,12 @@ use crate::{
+ // is a guesstimate and probably subject to licensing (purchasing extra calls)
+ // and may change at any time.
+ pub const RATE_LIMIT_INTERVAL: Duration = Duration::from_secs(30);
+-pub const RATE_LIMIT_MAX_WAIT: Duration = Duration::from_secs(10);
++/// Bound control-plane requests, including response-body consumption.
++pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
++// Shared across Session rebuilds. A new client must not bypass a service 429.
++static SERVICE_COOLDOWN: Mutex<Option<(Instant, Duration)>> = Mutex::new(None);
++static RATE_LIMIT_OBSERVER: OnceLock<fn(Duration) -> Result<(), Error>> = OnceLock::new();
++static COOLDOWN_STORAGE_FAILED: AtomicBool = AtomicBool::new(false);
+ pub const RATE_LIMIT_CALLS_PER_INTERVAL: u32 = 300;
+ 
+ #[derive(Debug, Error)]
+@@ -94,6 +102,20 @@ impl From<HttpClientError> for Error {
+ 
+ type HyperClient = Client<ProxyConnector<HttpsConnector<HttpConnector>>, Full<bytes::Bytes>>;
+ 
++/// The same checked response future is used by control and CDN requests.
++pub struct HttpResponseFuture(Pin<Box<dyn Future<Output = Result<Response<Incoming>, Error>> + Send>>);
++impl std::fmt::Debug for HttpResponseFuture {
++    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        f.write_str("HttpResponseFuture")
++    }
++}
++impl Future for HttpResponseFuture {
++    type Output = Result<Response<Incoming>, Error>;
++    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
++        self.0.as_mut().poll(cx)
++    }
++}
++
+ pub struct HttpClient {
+     user_agent: HeaderValue,
+     proxy_url: Option<Url>,
+@@ -181,56 +203,86 @@ impl HttpClient {
+     pub async fn request(&self, req: Request<Bytes>) -> Result<Response<Incoming>, Error> {
+         debug!("Requesting {}", req.uri());
+ 
+-        // `Request` does not implement `Clone` because its `Body` may be a single-shot stream.
+-        // As correct as that may be technically, we now need all this boilerplate to clone it
+-        // ourselves, as any `Request` is moved in the loop.
+-        let (parts, body_as_bytes) = req.into_parts();
+-
+-        loop {
+-            let mut req = Request::builder()
+-                .method(parts.method.clone())
+-                .uri(parts.uri.clone())
+-                .version(parts.version)
+-                .body(body_as_bytes.clone())?;
+-            *req.headers_mut() = parts.headers.clone();
+-
+-            let request = self.request_fut(req)?;
+-            let response = request.await;
+-
+-            if let Ok(response) = &response {
+-                let code = response.status();
+-
+-                if code == StatusCode::TOO_MANY_REQUESTS {
+-                    if let Some(duration) = Self::get_retry_after(response.headers()) {
+-                        warn!(
+-                            "Rate limited by service, retrying in {} seconds...",
+-                            duration.as_secs()
+-                        );
+-                        tokio::time::sleep(duration).await;
+-                        continue;
+-                    }
+-                }
++        self.request_fut(req)?.await
++    }
+ 
+-                if !code.is_success() {
+-                    return Err(HttpClientError::StatusCode(code).into());
+-                }
++    fn check_response(response: Response<Incoming>) -> Result<Response<Incoming>, Error> {
++        let code = response.status();
++        if code == StatusCode::TOO_MANY_REQUESTS {
++            let delay = Self::get_retry_after(response.headers())
++                .unwrap_or(Duration::from_secs(30));
++            Self::record_rate_limit(delay)?;
++            // Never replay a mutation or hide repeated 429s inside this layer.
++        }
++        if !code.is_success() {
++            return Err(HttpClientError::StatusCode(code).into());
++        }
++        Ok(response)
++    }
++
++    /// Record service throttling reported inside a successful protocol envelope,
++    /// using the same synchronous persistence and fail-closed gate as HTTP 429.
++    pub fn record_rate_limit(delay: Duration) -> Result<(), Error> {
++        let mut cooldown = SERVICE_COOLDOWN.lock().unwrap();
++        let remaining = cooldown.as_ref()
++            .map(|(start, duration)| duration.saturating_sub(start.elapsed()))
++            .unwrap_or_default();
++        let delay = delay.max(remaining);
++        *cooldown = Some((Instant::now(), delay));
++        drop(cooldown);
++        // Persist before returning the 429, not via a later polling callback.
++        if let Some(observer) = RATE_LIMIT_OBSERVER.get() {
++            if let Err(error) = observer(delay) {
++                COOLDOWN_STORAGE_FAILED.store(true, Ordering::SeqCst);
++                return Err(error);
+             }
++        }
++        Ok(())
++    }
++
++    /// Set once by the embedding application before starting any sessions.
++    pub fn set_rate_limit_observer(observer: fn(Duration) -> Result<(), Error>) {
++        let _ = RATE_LIMIT_OBSERVER.set(observer);
++    }
+ 
+-            let response = response?;
+-            return Ok(response);
++    pub fn rate_limit_remaining() -> Duration {
++        if COOLDOWN_STORAGE_FAILED.load(Ordering::SeqCst) {
++            return Duration::MAX;
+         }
++        SERVICE_COOLDOWN.lock().unwrap().as_ref()
++            .map(|(start, duration)| duration.saturating_sub(start.elapsed()))
++            .unwrap_or_default()
+     }
+ 
+     pub async fn request_body(&self, req: Request<Bytes>) -> Result<Bytes, Error> {
+-        let response = self.request(req).await?;
+-        Ok(response.into_body().collect().await?.to_bytes())
++        tokio::time::timeout(REQUEST_TIMEOUT, async {
++            let response = self.request(req).await?;
++            Ok(response.into_body().collect().await?.to_bytes())
++        }).await.map_err(Error::deadline_exceeded)?
+     }
+ 
+-    pub fn request_stream(&self, req: Request<Bytes>) -> Result<IntoStream<ResponseFuture>, Error> {
++    /// Bound idle time between body frames, not the total time of a progressing
++    /// download. Control requests additionally retain their overall deadline.
++    pub async fn collect_stream_body(mut body: Incoming) -> Result<Bytes, Error> {
++        let mut bytes = BytesMut::new();
++        while let Some(frame) = tokio::time::timeout(REQUEST_TIMEOUT, body.frame())
++            .await.map_err(Error::deadline_exceeded)?
++        {
++            if let Ok(data) = frame?.into_data() {
++                bytes.extend_from_slice(&data);
++            }
++        }
++        Ok(bytes.freeze())
++    }
++
++    pub fn request_stream(&self, req: Request<Bytes>) -> Result<IntoStream<HttpResponseFuture>, Error> {
+         Ok(self.request_fut(req)?.into_stream())
+     }
+ 
+-    pub fn request_fut(&self, mut req: Request<Bytes>) -> Result<ResponseFuture, Error> {
++    pub fn request_fut(&self, mut req: Request<Bytes>) -> Result<HttpResponseFuture, Error> {
++        if !Self::rate_limit_remaining().is_zero() {
++            return Err(HttpClientError::StatusCode(StatusCode::TOO_MANY_REQUESTS).into());
++        }
+         let headers_mut = req.headers_mut();
+         headers_mut.insert(USER_AGENT, self.user_agent.clone());
+ 
+@@ -253,49 +305,44 @@ impl HttpClient {
+             ))
+         })?;
+ 
+-        Ok(self.hyper_client().request(req.map(Full::new)))
++        let client = self.hyper_client().clone();
++        Ok(HttpResponseFuture(Box::pin(async move {
++            // CDN requests can wait for a download slot after construction.
++            // A 429 received meanwhile must block them before network dispatch.
++            if !Self::rate_limit_remaining().is_zero() {
++                return Err(HttpClientError::StatusCode(StatusCode::TOO_MANY_REQUESTS).into());
++            }
++            let response = client.request(req.map(Full::new));
++            let response = tokio::time::timeout(REQUEST_TIMEOUT, response)
++                .await.map_err(Error::deadline_exceeded)??;
++            Self::check_response(response)
++        })))
+     }
+ 
+     pub fn get_retry_after(headers: &HeaderMap<HeaderValue>) -> Option<Duration> {
+         let now = Date::now_utc().as_timestamp_ms();
+-
+-        let mut retry_after_ms = None;
+-        if let Some(header_val) = headers.get("X-RateLimit-Next") {
+-            // *.akamaized.net (Akamai)
+-            if let Ok(date_str) = header_val.to_str() {
+-                if let Ok(target) = Date::from_iso8601(date_str) {
+-                    retry_after_ms = Some(target.as_timestamp_ms().saturating_sub(now))
+-                }
+-            }
+-        } else if let Some(header_val) = headers.get("Fastly-RateLimit-Reset") {
+-            // *.scdn.co (Fastly)
+-            if let Ok(timestamp) = header_val.to_str() {
+-                if let Ok(target) = timestamp.parse::<i64>() {
+-                    retry_after_ms = Some(target.saturating_sub(now))
++        let milliseconds = |ms: i64| Duration::from_millis(ms.max(1000) as u64);
++        let akamai = headers.get("X-RateLimit-Next")
++            .and_then(|header| header.to_str().ok())
++            .and_then(|value| Date::from_iso8601(value).ok())
++            .map(|date| milliseconds(date.as_timestamp_ms().saturating_sub(now)));
++        let fastly = headers.get("Fastly-RateLimit-Reset")
++            .and_then(|header| header.to_str().ok())
++            .and_then(|value| value.parse::<i64>().ok())
++            .map(|timestamp| milliseconds(timestamp.saturating_sub(now)));
++        let standard = headers.get("Retry-After")
++            .and_then(|header| header.to_str().ok())
++            .and_then(|value| {
++                if let Ok(seconds) = value.parse::<u64>() {
++                    Some(Duration::from_secs(seconds.max(1)))
++                } else if value.parse::<i64>().is_ok() {
++                    Some(Duration::from_secs(1))
++                } else {
++                    time::OffsetDateTime::parse(value, &time::format_description::well_known::Rfc2822)
++                        .ok().map(|date| milliseconds(Date::from(date).as_timestamp_ms().saturating_sub(now)))
+                 }
+-            }
+-        } else if let Some(header_val) = headers.get("Retry-After") {
+-            // Generic RFC compliant (including *.spotify.com)
+-            if let Ok(retry_after) = header_val.to_str() {
+-                if let Ok(duration) = retry_after.parse::<i64>() {
+-                    retry_after_ms = Some(duration * 1000)
+-                }
+-            }
+-        }
+-
+-        if let Some(retry_after) = retry_after_ms {
+-            let duration = Duration::from_millis(retry_after as u64);
+-            if duration <= RATE_LIMIT_MAX_WAIT {
+-                return Some(duration);
+-            } else {
+-                debug!(
+-                    "Waiting {} seconds would exceed {} second limit",
+-                    duration.as_secs(),
+-                    RATE_LIMIT_MAX_WAIT.as_secs()
+-                );
+-            }
+-        }
+-
+-        None
++            });
++        // A malformed or shorter vendor header must not hide Retry-After.
++        [akamai, fastly, standard].into_iter().flatten().max()
+     }
+ }
+diff --git a/core/src/spclient.rs b/core/src/spclient.rs
+--- a/core/src/spclient.rs
++++ b/core/src/spclient.rs
+@@ -34,7 +34,7 @@
+     HeaderMap, Method, Request,
+     header::{ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, HeaderName, RANGE},
+ };
+-use hyper_util::client::legacy::ResponseFuture;
++use crate::http_client::HttpResponseFuture;
+ use protobuf::{Enum, EnumOrUnknown, Message, MessageFull};
+ use rand::RngCore;
+ use serde::Serialize;
+@@ -783,7 +783,7 @@
+         cdn_url: U,
+         offset: usize,
+         length: usize,
+-    ) -> Result<IntoStream<ResponseFuture>, Error>
++    ) -> Result<IntoStream<HttpResponseFuture>, Error>
+     where
+         U: TryInto<Uri>,
+         <U as TryInto<Uri>>::Error: Into<http::Error>,
+diff --git a/audio/src/fetch/mod.rs b/audio/src/fetch/mod.rs
+--- a/audio/src/fetch/mod.rs
++++ b/audio/src/fetch/mod.rs
+@@ -14,7 +14,7 @@
+ 
+ use futures_util::{StreamExt, TryFutureExt, future::IntoStream};
+ use hyper::{Response, StatusCode, body::Incoming, header::CONTENT_RANGE};
+-use hyper_util::client::legacy::ResponseFuture;
++use librespot_core::http_client::HttpResponseFuture;
+ 
+ use tempfile::NamedTempFile;
+ use thiserror::Error;
+@@ -157,7 +157,7 @@
+ 
+ #[derive(Debug)]
+ pub struct StreamingRequest {
+-    streamer: IntoStream<ResponseFuture>,
++    streamer: IntoStream<HttpResponseFuture>,
+     initial_response: Option<Response<Incoming>>,
+     offset: usize,
+     length: usize,
+diff --git a/audio/src/fetch/receive.rs b/audio/src/fetch/receive.rs
+--- a/audio/src/fetch/receive.rs
++++ b/audio/src/fetch/receive.rs
+@@ -7,7 +7,6 @@
+ 
+ use bytes::Bytes;
+ use futures_util::StreamExt;
+-use http_body_util::BodyExt;
+ use hyper::StatusCode;
+ use tempfile::NamedTempFile;
+ use tokio::sync::{mpsc, oneshot};
+@@ -83,27 +82,11 @@
+ 
+         let code = response.status();
+         if code != StatusCode::PARTIAL_CONTENT {
+-            if code == StatusCode::TOO_MANY_REQUESTS {
+-                if let Some(duration) = HttpClient::get_retry_after(response.headers()) {
+-                    warn!(
+-                        "Rate limiting, retrying in {} seconds...",
+-                        duration.as_secs()
+-                    );
+-                    // sleeping here means we hold onto this streamer "slot"
+-                    // (we don't decrease the number of open requests)
+-                    tokio::time::sleep(duration).await;
+-                }
+-            }
+-
+             break Err(AudioFileError::StatusCode(code).into());
+         }
+ 
+         let body = response.into_body();
+-        let data = match body
+-            .collect()
+-            .await
+-            .map(http_body_util::Collected::to_bytes)
+-        {
++        let data = match HttpClient::collect_stream_body(body).await {
+             Ok(bytes) => bytes,
+             Err(e) => break Err(e.into()),
+         };

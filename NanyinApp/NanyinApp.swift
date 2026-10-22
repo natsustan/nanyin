@@ -61,6 +61,19 @@ private enum NanyinMain {
             return 64
         }
 
+        // Explicit live authorization does not waive an existing service hold.
+        // Reserve the same installation budget before reading/refreshing tokens.
+        do {
+            let wait = try TrafficSafetyStore.shared.connectionDelay(admit: true, recovery: true)
+            guard wait == 0 else {
+                FileHandle.standardError.write(Data("ERROR: probe paused by playback connection limits; wait \(String(format: "%.0f", wait.rounded(.up)))s.\n".utf8))
+                return 7
+            }
+        } catch {
+            FileHandle.standardError.write(Data("ERROR: probe cannot persist playback connection limits.\n".utf8))
+            return 7
+        }
+
         let token: SpotifyAuth.Token
         do {
             token = try await SpotifyAuth.refreshAccessToken(for: .playback)
@@ -90,7 +103,8 @@ private enum NanyinMain {
         switch await Core.initializePlayer(
             accessToken: token.accessToken,
             deviceId: deviceId,
-            generation: 1
+            generation: 1,
+            expectedAccountID: nil
         ) {
         case .connected:
             break
@@ -116,6 +130,12 @@ private enum NanyinMain {
         }
 
         _ = Core.shutdown()
+        do {
+            try TrafficSafetyStore.shared.connectionSucceeded()
+        } catch {
+            print("ERROR: probe could not save successful connection status.")
+            return 7
+        }
         print("RESULT: idle dealer session remained stable for 300s; investigate the application path next")
         return 0
     }

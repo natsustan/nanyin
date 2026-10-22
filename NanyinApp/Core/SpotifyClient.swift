@@ -21,6 +21,14 @@ struct SpotifyClient {
         let albumName: String
         let albumId: String?
         let artworkURL: URL?
+        /// Position in the unfiltered server context, including unavailable
+        /// and non-track entries. Display row numbers are not playback offsets.
+        var contextPosition: ContextPosition? = nil
+
+        struct ContextPosition: Hashable {
+            let source: String
+            let index: Int
+        }
 
         init(
             id: String,
@@ -47,7 +55,7 @@ struct SpotifyClient {
         /// Copy with album name/artwork/id filled in — album endpoints return
         /// simplified track objects without the album field.
         func withAlbum(_ album: String, artwork: URL?, albumId: String?) -> Track {
-            Track(
+            var track = Track(
                 id: id,
                 uri: uri,
                 name: name,
@@ -58,6 +66,8 @@ struct SpotifyClient {
                 albumId: albumId ?? self.albumId,
                 artworkURL: artworkURL ?? artwork
             )
+            track.contextPosition = contextPosition
+            return track
         }
     }
 
@@ -154,8 +164,11 @@ struct SpotifyClient {
 
     private var accessToken: String
 
-    init(accessToken: String) {
+    private let transport: SpotifyWebTransport
+
+    init(accessToken: String, transport: SpotifyWebTransport = SpotifyWebTransport()) {
         self.accessToken = accessToken
+        self.transport = transport
     }
 
     private static let iso8601Parser = ISO8601DateFormatter()
@@ -191,55 +204,19 @@ struct SpotifyClient {
         req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Accept")
 
-        var attempt = 0
-        while true {
-            let (data, response) = try await URLSession.shared.data(for: req)
-            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-            if status == 200 {
-                return data
-            }
-            // 429: honor Retry-After, retry a bounded number of times (cliamp pattern).
-            if status == 429, attempt < retries {
-                let retryAfter = Double((response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Retry-After") ?? "") ?? 2.0
-                let wait = min(max(retryAfter, 1.0), 30.0)
-                dlog("web api 429 on \(path), retrying in \(wait)s")
-                try await Task.sleep(for: .seconds(wait))
-                attempt += 1
-                continue
-            }
-            if status == 401 { throw APIError.needsAuth }
-            throw APIError.http(status, String(data: data, encoding: .utf8) ?? "")
-        }
+        return try await transport.send(req, retries: retries)
     }
 
-    /// Generic Web API write (M4.5): accepts the endpoint's normal 2xx
-    /// successes (200/201/204), keeps the bounded Retry-After handling on
-    /// 429 and the typed 401. Returns the response body when present.
+    /// Only explicit 429 responses are retried. Ambiguous failed writes must
+    /// not be replayed: a playlist insertion might already have succeeded.
     private func mutate(
         path: String,
         method: String,
         body: Data? = nil,
         retries: Int = 2
     ) async throws -> Data? {
-        let req = request(path: path, method: method, body: body)
-        var attempt = 0
-        while true {
-            try Task.checkCancellation()
-            let (data, response) = try await URLSession.shared.data(for: req)
-            let httpResponse = response as? HTTPURLResponse
-            let status = httpResponse?.statusCode ?? 0
-            if (200..<300).contains(status) { return data.isEmpty ? nil : data }
-            if status == 429, attempt < retries {
-                let retryAfter = Double(httpResponse?.value(forHTTPHeaderField: "Retry-After") ?? "") ?? 2.0
-                let wait = min(max(retryAfter, 1.0), 30.0)
-                dlog("web api 429 on \(method) \(path), retrying in \(wait)s")
-                try await Task.sleep(for: .seconds(wait))
-                attempt += 1
-                continue
-            }
-            if status == 401 { throw APIError.needsAuth }
-            throw APIError.http(status, String(data: data, encoding: .utf8) ?? "")
-        }
+        let data = try await transport.send(request(path: path, method: method, body: body), retries: retries)
+        return data.isEmpty ? nil : data
     }
 
     private struct ArtistDTO: Codable {
@@ -270,16 +247,19 @@ struct SpotifyClient {
         let artists: [ArtistDTO]?
         let album: AlbumDTO?
         let isPlayable: Bool?
+        let isLocal: Bool?
 
         enum CodingKeys: String, CodingKey {
             case id, uri, name, artists, album
             case durationMs = "duration_ms"
             case isPlayable = "is_playable"
+            case isLocal = "is_local"
         }
 
         var toTrack: Track? {
             guard let id, let uri, let name else { return nil }
             guard isPlayable ?? true else { return nil } // unavailable in market
+            guard isLocal != true, uri.hasPrefix("spotify:track:") else { return nil }
             return Track(
                 id: id,
                 uri: uri,
@@ -293,12 +273,60 @@ struct SpotifyClient {
         }
     }
 
-    private struct PagedTracksDTO: Codable {
-        struct Item: Codable {
-            let track: TrackDTO?
-        }
-        let items: [Item]
+    struct LikedTracksPage {
+        let tracks: [Track]
         let total: Int
+        let nextOffset: Int?
+        let rawCount: Int
+    }
+
+    private struct PagedTracksDTO: Decodable {
+        struct Item: Decodable { let track: TrackDTO? }
+        let items: [Item?]
+        let total: Int
+        let offset: Int?
+        let next: String?
+
+        func decoded(after requestedOffset: Int) throws -> LikedTracksPage {
+            let page = PlaylistPageDTO(items: items, offset: offset, next: next)
+            let nextOffset = try page.nextOffset(after: requestedOffset)
+            let tracks = items.enumerated().compactMap { index, item -> Track? in
+                guard var track = item?.track?.toTrack else { return nil }
+                track.contextPosition = .init(source: "liked", index: requestedOffset + index)
+                return track
+            }
+            return .init(tracks: tracks, total: total, nextOffset: nextOffset, rawCount: items.count)
+        }
+    }
+
+    private struct PlaylistItemDTO: Decodable {
+        let item: TrackDTO?
+        let track: TrackDTO?
+        let is_local: Bool?
+
+        var playableTrack: Track? {
+            guard is_local != true else { return nil }
+            return (item ?? track)?.toTrack
+        }
+    }
+
+    /// Keep null slots until after assigning the server position. A page of
+    /// unavailable entries still advances pagination by its raw item count.
+    private struct PlaylistPageDTO<Item: Decodable>: Decodable {
+        let items: [Item?]
+        let offset: Int?
+        let next: String?
+
+        func nextOffset(after requestedOffset: Int) throws -> Int? {
+            guard offset == nil || offset == requestedOffset else {
+                throw APIError.http(0, "Spotify returned an unexpected playlist page offset")
+            }
+            guard next != nil else { return nil }
+            guard !items.isEmpty else {
+                throw APIError.http(0, "Spotify returned an empty playlist page with more results")
+            }
+            return requestedOffset + items.count
+        }
     }
 
     private struct PlaylistDTO: Codable {
@@ -337,11 +365,6 @@ struct SpotifyClient {
         }
     }
 
-    private struct PagedPlaylistsDTO: Codable {
-        let items: [PlaylistDTO]?
-        let total: Int
-    }
-
     private struct DiscographyAlbumDTO: Codable {
         let id: String
         let name: String
@@ -354,8 +377,10 @@ struct SpotifyClient {
         let tracks: TracksPageDTO?
 
         struct TracksPageDTO: Codable {
-            let items: [TrackDTO]?
+            let items: [TrackDTO?]?
             let total: Int?
+            let offset: Int?
+            let next: String?
         }
 
         enum CodingKeys: String, CodingKey {
@@ -420,10 +445,6 @@ struct SpotifyClient {
         let artists: ArtistsPage
     }
 
-    private struct AlbumTracksPageDTO: Codable {
-        let items: [TrackDTO]?
-        let total: Int
-    }
     private struct SearchDTO: Codable {
         struct TracksDTO: Codable {
             let items: [TrackDTO]?
@@ -532,15 +553,15 @@ struct SpotifyClient {
         var offset = 0
         let limit = 50
         while true {
-            let page: PagedPlaylistsDTO = try await get(
+            let page: PlaylistPageDTO<PlaylistDTO> = try await get(
                 "/v1/me/playlists",
                 query: ["limit": "\(limit)", "offset": "\(offset)"]
             )
-            for p in page.items ?? [] {
+            for p in page.items.compactMap({ $0 }) {
                 result.append(p.toPlaylistInfo)
             }
-            offset += limit
-            if offset >= page.total { break }
+            guard let next = try page.nextOffset(after: offset) else { break }
+            offset = next
         }
         return result
     }
@@ -551,47 +572,103 @@ struct SpotifyClient {
         var offset = 0
         let limit = 50
         while true {
-            let page: PagedTracksDTO = try await get(
+            let page: PlaylistPageDTO<PlaylistItemDTO> = try await get(
                 "/v1/playlists/\(playlistId)/items",
                 query: ["limit": "\(limit)", "offset": "\(offset)"]
             )
-            result += page.items.compactMap(\.track?.toTrack)
-            offset += limit
-            if offset >= page.total { break }
+            let next = try page.nextOffset(after: offset)
+            result += page.items.enumerated().compactMap { index, item in
+                guard var track = item?.playableTrack else { return nil }
+                track.contextPosition = .init(source: "spotify:playlist:\(playlistId)", index: offset + index)
+                return track
+            }
+            guard let next else { break }
+            offset = next
         }
         return result
     }
 
-    /// First page of Liked Songs plus the library total. Used as a cheap
-    /// change probe so a revisit does not re-page the whole collection.
-    func likedTracksPrefix(limit: Int = 50) async throws -> (tracks: [Track], total: Int) {
-        let page: PagedTracksDTO = try await get(
-            "/v1/me/tracks",
-            query: ["limit": "\(limit)", "offset": "0"]
-        )
-        return (page.items.compactMap(\.track?.toTrack), page.total)
+    struct SessionLibraryError: LocalizedError, Decodable {
+        let code: String
+        let message: String
+        var errorDescription: String? { message }
     }
 
-    /// Liked songs, paginated. Pass a prefix to skip repeating the first page.
-    func likedTracks(
-        after prefix: (tracks: [Track], total: Int)? = nil,
-        pageSize: Int = 50
+    /// Shared decoder/walker for the Rust bridge and offline protocol fixtures.
+    /// One revision must cover the whole list; never cache a mixed snapshot.
+    static func sessionPlaylistTracks(
+        _ playlistID: String,
+        readPage: (Int) async throws -> Data
     ) async throws -> [Track] {
-        let first: (tracks: [Track], total: Int)
-        if let prefix {
-            first = prefix
-        } else {
-            first = try await likedTracksPrefix(limit: pageSize)
+        struct Envelope: Decodable { let error: SessionLibraryError? }
+        struct Header: Decodable { let snapshot_id: String; let total: Int }
+        var tracks: [Track] = []
+        var offset = 0
+        var revision: String?
+        var total: Int?
+        while true {
+            try Task.checkCancellation()
+            let data = try await readPage(offset)
+            try Task.checkCancellation()
+            let decoder = JSONDecoder()
+            if let error = try decoder.decode(Envelope.self, from: data).error {
+                if error.code == "cancelled" { throw CancellationError() }
+                throw error
+            }
+            let header = try decoder.decode(Header.self, from: data)
+            let page = try decoder.decode(PlaylistPageDTO<PlaylistItemDTO>.self, from: data)
+            guard !header.snapshot_id.isEmpty, header.total >= 0,
+                  page.offset == offset, page.items.count <= 50,
+                  page.items.count == min(50, max(0, header.total - offset)),
+                  revision == nil || revision == header.snapshot_id,
+                  total == nil || total == header.total else {
+                throw SessionLibraryError(code: "changed", message: "Playlist changed while loading. Please retry.")
+            }
+            let next = try page.nextOffset(after: offset)
+            guard (next != nil) == (offset + page.items.count < header.total) else {
+                throw SessionLibraryError(code: "invalid_response", message: "Incomplete playlist response")
+            }
+            revision = header.snapshot_id
+            total = header.total
+            tracks += page.items.enumerated().compactMap { index, item in
+                guard var track = item?.playableTrack else { return nil }
+                track.contextPosition = .init(source: "spotify:playlist:\(playlistID)", index: offset + index)
+                return track
+            }
+            guard let next else { return tracks }
+            offset = next
         }
+    }
+
+    /// First page of Liked Songs plus the library total. Used as a cheap
+    /// change probe so a revisit does not re-page the whole collection.
+    func likedTracksPrefix(limit: Int = 50) async throws -> LikedTracksPage {
+        let page: PagedTracksDTO = try await get(
+            "/v1/me/tracks",
+            query: ["limit": "\(Self.clampedLimit(limit))", "offset": "0"]
+        )
+        return try page.decoded(after: 0)
+    }
+
+    /// Continue from the server prefix's raw offset, not the number of visible
+    /// songs or a presumed 50-row page. A changing total is not a full snapshot.
+    func likedTracks(after prefix: LikedTracksPage? = nil, pageSize: Int = 50) async throws -> [Track] {
+        let first: LikedTracksPage
+        if let prefix { first = prefix }
+        else { first = try await likedTracksPrefix(limit: pageSize) }
         var result = first.tracks
-        var offset = pageSize
-        while offset < first.total {
-            let page: PagedTracksDTO = try await get(
+        var nextOffset = first.nextOffset
+        while let offset = nextOffset {
+            let dto: PagedTracksDTO = try await get(
                 "/v1/me/tracks",
-                query: ["limit": "\(pageSize)", "offset": "\(offset)"]
+                query: ["limit": "\(Self.clampedLimit(pageSize))", "offset": "\(offset)"]
             )
-            result += page.items.compactMap(\.track?.toTrack)
-            offset += pageSize
+            let page = try dto.decoded(after: offset)
+            guard page.total == first.total else {
+                throw APIError.http(0, "Liked Songs changed while loading. Please retry.")
+            }
+            result += page.tracks
+            nextOffset = page.nextOffset
         }
         return result
     }
@@ -687,25 +764,7 @@ struct SpotifyClient {
 
     private func mutateSavedTracks(ids: [String], method: String, retries: Int = 2) async throws {
         let body = try JSONEncoder().encode(SaveTracksBody(ids: ids))
-        let req = request(path: "/v1/me/tracks", method: method, body: body)
-        var attempt = 0
-
-        while true {
-            let (_, response) = try await URLSession.shared.data(for: req)
-            let httpResponse = response as? HTTPURLResponse
-            let status = httpResponse?.statusCode ?? 0
-            if (200..<300).contains(status) { return }
-            if status == 429, attempt < retries {
-                let retryAfter = Double(httpResponse?.value(forHTTPHeaderField: "Retry-After") ?? "") ?? 2.0
-                let wait = min(max(retryAfter, 1.0), 30.0)
-                dlog("web api 429 on \(method) /v1/me/tracks, retrying in \(wait)s")
-                try await Task.sleep(for: .seconds(wait))
-                attempt += 1
-                continue
-            }
-            if status == 401 { throw APIError.needsAuth }
-            throw APIError.http(status, "")
-        }
+        _ = try await mutate(path: "/v1/me/tracks", method: method, body: body, retries: retries)
     }
 
     // MARK: - Saved Albums (M4.3)
@@ -794,25 +853,7 @@ struct SpotifyClient {
         var req = URLRequest(url: components.url!)
         req.httpMethod = method
         req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        var attempt = 0
-
-        while true {
-            try Task.checkCancellation()
-            let (_, response) = try await URLSession.shared.data(for: req)
-            let httpResponse = response as? HTTPURLResponse
-            let status = httpResponse?.statusCode ?? 0
-            if (200..<300).contains(status) { return }
-            if status == 429, attempt < retries {
-                let retryAfter = Double(httpResponse?.value(forHTTPHeaderField: "Retry-After") ?? "") ?? 2.0
-                let wait = min(max(retryAfter, 1.0), 30.0)
-                dlog("web api 429 on \(method) /v1/me/library, retrying in \(wait)s")
-                try await Task.sleep(for: .seconds(wait))
-                attempt += 1
-                continue
-            }
-            if status == 401 { throw APIError.needsAuth }
-            throw APIError.http(status, "")
-        }
+        _ = try await transport.send(req, retries: retries)
     }
 
     // MARK: - Followed Artists (M4.9)
@@ -933,20 +974,28 @@ struct SpotifyClient {
     /// album object. Simplified tracks get the album's name/artwork filled in.
     func albumTracks(_ albumId: String) async throws -> [Track] {
         let dto: DiscographyAlbumDTO = try await get("/v1/albums/\(albumId)", query: ["market": "from_token"])
-        let albumName = dto.name
-        let artwork = dto.images?.first?.url
-        var result = (dto.tracks?.items ?? []).compactMap(\.toTrack)
-        let total = dto.tracks?.total ?? result.count
-        var offset = max(result.count, 50)
-        while offset < total {
-            let page: AlbumTracksPageDTO = try await get(
-                "/v1/albums/\(albumId)/tracks",
-                query: ["limit": "50", "offset": "\(offset)", "market": "from_token"]
-            )
-            result += (page.items ?? []).compactMap(\.toTrack)
-            offset += 50
+        var result: [Track] = []
+        var offset = 0
+        var page: PlaylistPageDTO<TrackDTO>
+        if let embedded = dto.tracks, let items = embedded.items {
+            page = .init(items: items, offset: embedded.offset, next: embedded.next)
+        } else {
+            page = try await get("/v1/albums/\(albumId)/tracks",
+                query: ["limit": "50", "offset": "0", "market": "from_token"])
         }
-        return result.map { $0.withAlbum(albumName, artwork: artwork, albumId: albumId) }
+        while true {
+            let next = try page.nextOffset(after: offset)
+            result += page.items.enumerated().compactMap { index, item in
+                guard var track = item?.toTrack else { return nil }
+                track.contextPosition = .init(source: "spotify:album:\(albumId)", index: offset + index)
+                return track.withAlbum(dto.name, artwork: dto.images?.first?.url, albumId: albumId)
+            }
+            guard let next else { break }
+            offset = next
+            page = try await get("/v1/albums/\(albumId)/tracks",
+                query: ["limit": "50", "offset": "\(offset)", "market": "from_token"])
+        }
+        return result
     }
 
     /// Extracts the 22-char base62 id from any URI/URL form.
@@ -975,5 +1024,233 @@ private extension Array {
             result.append(try await transform(element))
         }
         return result
+    }
+}
+
+
+/// Request pacing per transport, with a durable installation-wide cooldown. Playback credentials and librespot never pass through this object.
+final class SpotifyWebTransport: @unchecked Sendable {
+    private let lock = NSLock()
+    private let session: URLSession
+    private let safetyStore: TrafficSafetyStore
+    private let gate: SpotifyRequestGate
+    private let requests = SpotifyRequestCoordinator()
+    private var valid = true
+    private var excessiveCooldown = false
+    private var cooldownUntil = ContinuousClock.now
+    private var nextStart = ContinuousClock.now
+
+    init(session: URLSession = .shared, safetyStore: TrafficSafetyStore = .shared,
+         gate: SpotifyRequestGate = .shared) {
+        self.session = session
+        self.safetyStore = safetyStore
+        self.gate = gate
+    }
+
+    func invalidate() {
+        lock.withLock { valid = false }
+        Task { await requests.invalidate() }
+    }
+
+    static func retryAfter(_ header: String?, now: Date = Date()) -> TimeInterval {
+        if let header, let seconds = Double(header), seconds.isFinite, seconds >= 0 {
+            return max(1, seconds)
+        }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss z"
+        if let header, let date = formatter.date(from: header) {
+            return max(1, date.timeIntervalSince(now))
+        }
+        return 5
+    }
+
+    private func reserveStart() throws -> Duration {
+        try lock.withLock {
+            guard valid else { throw CancellationError() }
+            if excessiveCooldown {
+                throw SpotifyClient.APIError.http(429, "Spotify requested an unusually long cooldown.")
+            }
+            let durableDelay = try safetyStore.cooldown(.web)
+            guard durableDelay <= 30 else {
+                throw SpotifyClient.APIError.http(429, "Spotify requested a cooldown. Try again later.")
+            }
+            let now = ContinuousClock.now
+            let delay = max(.seconds(durableDelay), now.duration(to: max(cooldownUntil, nextStart)))
+            // Report long cooldowns promptly instead of leaving every library
+            // screen spinning. The full deadline remains enforced on retries.
+            if delay > .seconds(30) {
+                throw SpotifyClient.APIError.http(429, "Spotify requested a cooldown. Try again later.")
+            }
+            if delay <= .zero { nextStart = now.advanced(by: .milliseconds(150)) }
+            return max(.zero, delay)
+        }
+    }
+
+    private func recordRateLimit(_ header: String?) throws {
+        let delay = Self.retryAfter(header)
+        try safetyStore.recordCooldown(.web, seconds: delay)
+        lock.withLock {
+            // Reject an unrepresentable deadline without making more requests.
+            guard delay < Double(Int32.max) else {
+                excessiveCooldown = true
+                return
+            }
+            // No cap: in particular, a 120s Retry-After must never become 30s.
+            cooldownUntil = max(cooldownUntil, .now.advanced(by: .seconds(delay)))
+        }
+    }
+
+    func send(_ request: URLRequest, retries: Int = 2) async throws -> Data {
+        guard lock.withLock({ valid }) else { throw CancellationError() }
+        return try await requests.perform(request, retries: retries) { [self] in
+            try await sendUnshared(request, retries: retries)
+        }
+    }
+
+    private enum Attempt { case wait(Duration), response(Data, Int) }
+
+    private func attempt(_ request: URLRequest) async throws -> Attempt {
+        try Task.checkCancellation()
+        let wait = try reserveStart()
+        if wait > .zero { return .wait(wait) }
+        try Task.checkCancellation()
+        let (data, response) = try await session.data(for: request)
+        let http = response as? HTTPURLResponse
+        let status = http?.statusCode ?? 0
+        if status == 429 {
+            // Publish the hold before handing this permit to another request.
+            try recordRateLimit(http?.value(forHTTPHeaderField: "Retry-After"))
+        }
+        guard lock.withLock({ valid }) else { throw CancellationError() }
+        return .response(data, status)
+    }
+
+    private func sendUnshared(_ request: URLRequest, retries: Int) async throws -> Data {
+        var retry = 0
+        while true {
+            try Task.checkCancellation()
+            try await gate.acquire()
+            let result: Attempt
+            do {
+                result = try await attempt(request)
+            } catch {
+                await gate.release()
+                throw error
+            }
+            await gate.release()
+            switch result {
+            case let .wait(duration):
+                try await Task.sleep(for: duration)
+            case let .response(data, status):
+                if status == 429, retry < retries {
+                    retry += 1
+                    continue
+                }
+                if status == 401 { throw SpotifyClient.APIError.needsAuth }
+                guard (200..<300).contains(status) else {
+                    throw SpotifyClient.APIError.http(status, String(data: data, encoding: .utf8) ?? "")
+                }
+                return data
+            }
+        }
+    }
+}
+
+/// Shared across transports/account changes. Rate spacing alone cannot bound
+/// requests that remain in flight during a slow network or server response.
+actor SpotifyRequestGate {
+    static let shared = SpotifyRequestGate(limit: 2)
+    private let limit: Int
+    private var active = 0
+    private var waiting: [(UUID, CheckedContinuation<Void, Error>)] = []
+    init(limit: Int) { precondition(limit > 0); self.limit = limit }
+
+    func acquire() async throws {
+        let id = UUID()
+        try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            try await withCheckedThrowingContinuation { continuation in
+                if active < limit {
+                    active += 1
+                    continuation.resume()
+                } else {
+                    waiting.append((id, continuation))
+                }
+            }
+        } onCancel: {
+            Task { await self.cancel(id) }
+        }
+    }
+    private func cancel(_ id: UUID) {
+        guard let index = waiting.firstIndex(where: { $0.0 == id }) else { return }
+        waiting.remove(at: index).1.resume(throwing: CancellationError())
+    }
+    func release() {
+        precondition(active > 0)
+        if waiting.isEmpty { active -= 1 }
+        else { waiting.removeFirst().1.resume() }
+    }
+}
+
+/// Coalesce identical GETs only. Every caller has independent cancellation;
+/// the underlying task is cancelled when the last waiter leaves or on sign-out.
+private actor SpotifyRequestCoordinator {
+    private enum Key: Hashable { case read(URLRequest, Int), write(UUID) }
+    private struct Flight {
+        let id: UUID
+        let task: Task<Void, Never>
+        var waiters: [UUID: CheckedContinuation<Data, Error>]
+    }
+    private var valid = true
+    private var flights: [Key: Flight] = [:]
+
+    func perform(_ request: URLRequest, retries: Int,
+                 operation: @escaping @Sendable () async throws -> Data) async throws -> Data {
+        let key: Key = (request.httpMethod ?? "GET") == "GET" ? .read(request, retries) : .write(UUID())
+        let waiter = UUID()
+        return try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            guard valid else { throw CancellationError() }
+            return try await withCheckedThrowingContinuation { continuation in
+                if flights[key] != nil {
+                    flights[key]?.waiters[waiter] = continuation
+                    return
+                }
+                let id = UUID()
+                let task = Task {
+                    let result: Result<Data, Error>
+                    do { result = .success(try await operation()) }
+                    catch { result = .failure(error) }
+                    self.complete(key, id: id, result: result)
+                }
+                flights[key] = Flight(id: id, task: task, waiters: [waiter: continuation])
+            }
+        } onCancel: {
+            Task { await self.cancel(key, waiter: waiter) }
+        }
+    }
+    private func complete(_ key: Key, id: UUID, result: Result<Data, Error>) {
+        guard let flight = flights[key], flight.id == id else { return }
+        flights.removeValue(forKey: key)
+        for waiter in flight.waiters.values { waiter.resume(with: result) }
+    }
+    private func cancel(_ key: Key, waiter: UUID) {
+        guard var flight = flights[key], let continuation = flight.waiters.removeValue(forKey: waiter) else { return }
+        continuation.resume(throwing: CancellationError())
+        if flight.waiters.isEmpty {
+            flights.removeValue(forKey: key)
+            flight.task.cancel()
+        } else { flights[key] = flight }
+    }
+    func invalidate() {
+        valid = false
+        let old = flights.values
+        flights.removeAll()
+        for flight in old {
+            flight.task.cancel()
+            for waiter in flight.waiters.values { waiter.resume(throwing: CancellationError()) }
+        }
     }
 }

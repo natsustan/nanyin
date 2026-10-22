@@ -93,24 +93,9 @@ struct SidebarView: View {
                 }
             }
 
-            if let note = app.connectionNote {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(note)
-                        .font(.caption)
-                        .foregroundStyle(theme.colors.secondaryText)
-                    Spacer(minLength: 4)
-                    if app.canRetryPlaybackConnection {
-                        Button("Retry") {
-                            app.retryPlaybackConnection()
-                        }
-                        .buttonStyle(.link)
-                        .tint(theme.colors.accent)
-                        .font(.caption)
-                    }
-                }
+            PlaybackConnectionNotice()
                 .padding(.horizontal, theme.metrics.sidebarInset)
                 .padding(.bottom, theme.metrics.smallPadding)
-            }
 
             if presentation == .classic2010, app.nowPlaying != nil {
                 classicNowPlayingPanel
@@ -445,6 +430,12 @@ struct SidebarView: View {
     private var playlistListState: some View {
         if app.playlistsLoadFailed {
             listStateText("Couldn't load playlists")
+            Button("Retry") { app.refreshPlaylists() }
+                .buttonStyle(.plain)
+                .font(theme.typography.secondary)
+                .foregroundStyle(theme.colors.accent)
+                .padding(.horizontal, theme.metrics.sidebarInset)
+                .accessibilityLabel("Retry loading playlists")
         } else if !app.hasLoadedPlaylists {
             listStateText("Loading playlists…")
         } else {
@@ -511,6 +502,38 @@ struct SidebarView: View {
                 NSCursor.pointingHand.push()
             } else {
                 NSCursor.pop()
+            }
+        }
+    }
+}
+
+/// Only this small notice ticks; AppModel and track rows have no timer updates.
+struct PlaybackConnectionNotice: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.appTheme) private var theme
+
+    var body: some View {
+        if app.playbackConnectionWait != nil {
+            TimelineView(.periodic(from: .now, by: 1)) { _ in notice }
+        } else {
+            notice
+        }
+    }
+
+    @ViewBuilder private var notice: some View {
+        if let note = app.connectionNote {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(note)
+                    .font(.caption)
+                    .foregroundStyle(theme.colors.secondaryText)
+                Spacer(minLength: 4)
+                if app.canRetryPlaybackConnection {
+                    Button("Retry") { app.retryPlaybackConnection() }
+                        .buttonStyle(.link)
+                        .tint(theme.colors.accent)
+                        .font(.caption)
+                        .disabled((app.playbackConnectionWait?.remaining() ?? 0) > 0)
+                }
             }
         }
     }
