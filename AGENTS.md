@@ -46,6 +46,13 @@ patch until upstream exposes an equivalent typed classification.
 above. On deactivation the local player must stop regardless of PUT success,
 and reconnect must never consume a foreign `transfer_data` blob.
 
+`patches/librespot-audio-progress.patch` (local) adds
+`librespot_audio::active_stream_read_waits()`, a count of streaming readers
+blocked on an undownloaded range. Rust exposes it as
+`nanyin_get_download_waiters`, and `PlaybackStallDetector` uses it to classify a
+stall as `downloader` rather than `decoder`. Without it, stall recovery cannot
+tell a starved download from a stuck decoder.
+
 DO NOT "upgrade" the librespot dependency to crates.io or a git rev until #1741 is merged upstream — you would silently drop the patch and re-enter the echo loop. Check upstream: https://github.com/librespot-org/librespot/pull/1741
 
 `patches/librespot-bounded-http.patch` removes automatic HTTP 429 replay,
