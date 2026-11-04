@@ -98,7 +98,15 @@ playback hold to the thread-safe local store. This removes the old dependence
 on the one-second session watcher for persistence. Storage failure blocks new
 Rust HTTP requests; sign-out does not erase a service cooldown. This is not a
 promise against power loss or termination before a response has been processed.
-The watcher still stops the active session when it detects the hold. The
+The watcher still reports the hold as a session failure. Failure monitors no
+longer stop the position clock; it stops when the player is replaced or shut
+down, so it keeps time over audio that outlives a lost control plane. When
+audio is audibly progressing, Swift
+defers the teardown like any other control-plane loss: the hold keeps blocking
+new HTTP (so the next track cannot load), and the session closes when that
+audio pauses or ends. A user pause that Spirc can no longer deliver finishes
+the deferred teardown immediately. Without progressing audio, the session
+closes at once. This keeps a browsing-read 429 from cutting the current track. The
 explicitly authorized dealer probe reserves the same persisted connection
 budget before token refresh (exit 7 when blocked), so a diagnostic invocation
 cannot bypass a known playback hold.

@@ -461,6 +461,9 @@ fn initialize_player(
         SHUTTING_DOWN.store(false, Ordering::SeqCst);
         DISCONNECT_NOTIFIED.store(false, Ordering::SeqCst);
         CURRENT_PLAY_REQUEST_ID.store(NO_PLAY_REQUEST, Ordering::Relaxed);
+        // The replaced player's events are fenced from here on, so its
+        // Stopped event can no longer stop the clock.
+        stop_position_clock();
         let spirc = SPIRC.lock().unwrap().take();
         let session = SESSION.lock().unwrap().take();
         let player = PLAYER.lock().unwrap().take();
@@ -670,7 +673,6 @@ async fn init_player_async(
                     .is_some_and(|current| Arc::ptr_eq(current, &monitor_spirc))
                 {
                     slot.take();
-                    stop_position_clock();
                     DISCONNECT_NOTIFIED
                         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
                         .is_ok()
@@ -695,6 +697,8 @@ async fn init_player_async(
             if PLAYER_GENERATION.load(Ordering::SeqCst) != generation {
                 return;
             }
+            // A service hold blocks every new HTTP request but not audio that
+            // is already buffered; Swift decides when to close the session.
             if watcher_session.is_invalid()
                 || !librespot_core::http_client::HttpClient::rate_limit_remaining().is_zero()
             {
@@ -712,7 +716,6 @@ async fn init_player_async(
             {
                 None
             } else {
-                stop_position_clock();
                 DISCONNECT_NOTIFIED
                     .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
                     .is_ok()

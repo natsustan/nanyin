@@ -77,3 +77,11 @@ struct PlaybackProgressDisplay {
         seekConfirmationDeadline = nil
     }
 }
+
+/// MPChangePlaybackPositionCommandEvent reports seconds; positions are ms.
+enum NowPlayingSeek {
+    static func positionMs(seconds: Double, durationMs: UInt32) -> UInt32? {
+        guard durationMs > 0, seconds.isFinite else { return nil }
+        return UInt32(min(max(seconds * 1000, 0), Double(durationMs)))
+    }
+}

@@ -20,6 +20,27 @@ struct LocalPlaybackSnapshot: Codable, Equatable {
         return durationMs - positionMs <= thresholdMs ? 0 : positionMs
     }
 
+    /// The shown track as a restore point while this device is not the active
+    /// Connect player. Only track URIs can be restarted with one load.
+    static func parked(
+        accountID: String,
+        uri: String,
+        title: String,
+        artist: String,
+        album: String,
+        albumId: String?,
+        artworkURL: URL?,
+        durationMs: UInt32,
+        positionMs: UInt32
+    ) -> LocalPlaybackSnapshot? {
+        guard !accountID.isEmpty, uri.hasPrefix("spotify:track:") else { return nil }
+        return LocalPlaybackSnapshot(
+            accountID: accountID, uri: uri, title: title, artist: artist,
+            album: album, albumId: albumId, artworkURL: artworkURL,
+            durationMs: durationMs, positionMs: positionMs
+        )
+    }
+
     func withPosition(_ positionMs: UInt32) -> LocalPlaybackSnapshot {
         LocalPlaybackSnapshot(
             accountID: accountID,
