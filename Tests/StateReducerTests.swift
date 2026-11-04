@@ -73,6 +73,8 @@ private enum StateReducerTests {
         testPendingPlayIntentIdentifiesPreviousRequestEvents()
 
         testReconnectDefersWhileAudioIsProgressing()
+        testParkedRestorePointRequiresTrackAndAccount()
+        testNowPlayingSeekConvertsSecondsToMilliseconds()
         testReconnectDoesNotDeferWhenPlaybackNeedsControlPlane()
         testInactiveIdleReconnectWaitsForActivation()
         testReconnectNeededNowDoesNotWaitForActivation()
@@ -1477,6 +1479,42 @@ private enum StateReducerTests {
             previousPlayRequestID: 10,
             createdAt: createdAt
         )
+    }
+
+    // MARK: - Parked restore point / Now Playing seek
+
+    private static func testParkedRestorePointRequiresTrackAndAccount() {
+        func parked(_ account: String, _ uri: String, position: UInt32 = 61_000) -> LocalPlaybackSnapshot? {
+            LocalPlaybackSnapshot.parked(
+                accountID: account, uri: uri, title: "t", artist: "a", album: "b",
+                albumId: nil, artworkURL: nil, durationMs: 200_000, positionMs: position
+            )
+        }
+        let track = "spotify:track:0123456789ABCDEFGHIJKL"
+        // After a takeover, Play must restart the shown track with one load
+        // at the frozen position; the restore path owns that load.
+        expect(parked("alice", track)?.playablePositionMs == 61_000,
+               "a parked track restarts where this device stopped")
+        expect(parked("alice", track, position: 198_000)?.playablePositionMs == 0,
+               "a parked track near its end restarts from the top")
+        expect(parked("", track) == nil,
+               "without a verified account there is no restore point")
+        expect(parked("alice", "spotify:episode:0123456789ABCDEFGHIJKL") == nil,
+               "only track URIs may use the single-track restart load")
+    }
+
+    private static func testNowPlayingSeekConvertsSecondsToMilliseconds() {
+        // Control Center scrubs to 2:00 of a 3:00 track.
+        expect(NowPlayingSeek.positionMs(seconds: 120, durationMs: 180_000) == 120_000,
+               "MediaPlayer seconds must be scaled to milliseconds")
+        expect(NowPlayingSeek.positionMs(seconds: 500, durationMs: 180_000) == 180_000,
+               "scrubs past the end clamp to the track end")
+        expect(NowPlayingSeek.positionMs(seconds: -1, durationMs: 180_000) == 0,
+               "negative positions clamp to the start")
+        expect(NowPlayingSeek.positionMs(seconds: 30, durationMs: 0) == nil,
+               "an unknown duration must not seek")
+        expect(NowPlayingSeek.positionMs(seconds: .nan, durationMs: 180_000) == nil,
+               "a non-finite position must not seek")
     }
 
     // MARK: - PlaybackReconnectPolicy

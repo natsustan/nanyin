@@ -2240,7 +2240,35 @@ final class AppModel {
         activePlaybackGeneration = generation
         playbackConnectionState = .ready
         acceptInitializedVolume()
+        if !isPlaying { parkNowPlayingAsLocalRestore() }
         return true
+    }
+
+    /// While this device is not the active Connect player (a fresh session or
+    /// another device took over), Spirc ignores resume/next/prev (rc=0), and
+    /// after a takeover its player is Stopped. Parking the shown track as a
+    /// local restore point routes Play through the restore path's single
+    /// explicit activate+load and keeps relative skips disabled.
+    private func parkNowPlayingAsLocalRestore() {
+        guard localPlaybackRestore == nil, let nowPlaying,
+              let snapshot = LocalPlaybackSnapshot.parked(
+                  accountID: userId, uri: nowPlaying.uri, title: nowPlaying.title,
+                  artist: nowPlaying.artist, album: nowPlaying.album,
+                  albumId: nowPlaying.albumId, artworkURL: nowPlaying.artworkURL,
+                  durationMs: durationMs, positionMs: Core.positionMs
+              ) else { return }
+        localPlaybackRestore = .idle(snapshot)
+    }
+
+    /// Ends the Rust session and local audio under a new generation. Callers
+    /// set the resulting connection and retry state.
+    private func closePlaybackSession() {
+        _ = beginPlaybackConnection()
+        cancelPendingPlayForUserCommand()
+        _ = Core.shutdown()
+        AudioRenderer.shared.stop()
+        isPlaying = false
+        isBuffering = false
     }
 
     private func restorePlayback(for epoch: Int) {
@@ -3089,11 +3117,13 @@ final class AppModel {
             dlog("audio stall recovery failed — resuming deferred reconnect")
             resumeDeferredReconnectIfNeeded()
         } else {
+            // The session may still look valid, so a retry would otherwise hit
+            // the core's "already initialized" path and keep the wedged
+            // pipeline. Close it now; only an explicit Retry rebuilds, and
+            // recovery never replays the previous load.
             dlog("audio stall recovery failed — stopping automatic recovery")
-            isBuffering = false
-            playbackConnectionState = .unavailable(
-                "Connection lost — audio pipeline stalled"
-            )
+            closePlaybackSession()
+            offerPlaybackRetry("Connection lost — audio pipeline stalled")
         }
     }
 
@@ -3153,6 +3183,7 @@ final class AppModel {
             isPlaying = false
             isBuffering = false
             nowPlayingMgr.clear()
+            parkNowPlayingAsLocalRestore()
             return
         }
         if case let .seeked(positionMs, requestID) = event {
@@ -3383,7 +3414,11 @@ final class AppModel {
         let rateLimited = Core.retryAfterSeconds > 0
         recordPlaybackCooldown()
         cancelPendingPlayForUserCommand()
-        if preserveActiveAudio, !rateLimited,
+        // A service hold (possibly caused by a browsing read) blocks all new
+        // HTTP, but must not cut the track that is already audible. The hold
+        // still closes the session once that audio pauses or ends, and the
+        // persisted cooldown gates any rebuild.
+        if preserveActiveAudio,
            PlaybackReconnectPolicy.shouldDeferRebuild(
                isPlaying: isPlaying,
                isBuffering: isBuffering,
@@ -3408,12 +3443,7 @@ final class AppModel {
         guard admitPlaybackConnection(recovery: true) else {
             let unavailable = playbackConnectionState
             let waiting = playbackConnectionWait
-            _ = beginPlaybackConnection()
-            cancelPendingPlayForUserCommand()
-            _ = Core.shutdown()
-            AudioRenderer.shared.stop()
-            isPlaying = false
-            isBuffering = false
+            closePlaybackSession()
             playbackRetryAvailability = .manual
             playbackConnectionState = unavailable
             playbackConnectionWait = waiting
@@ -3563,6 +3593,15 @@ final class AppModel {
     func togglePlay() {
         guard localPlaybackRestore?.isStarting != true else { return }
         cancelPendingPlayForUserCommand()
+        if isPlaying, deferredReconnectGeneration != nil {
+            // Audio is outliving a lost control plane (not "ready"). Pausing
+            // must still work: through Spirc if it is alive (the Paused event
+            // then finishes the deferred teardown), otherwise directly.
+            if Core.pause() != 0 {
+                resumeDeferredReconnectIfNeeded()
+            }
+            return
+        }
         guard isPlaybackReady else { return }
         if localPlaybackRestore == nil {
             LocalPlaybackStore.clear()
@@ -3634,9 +3673,12 @@ final class AppModel {
     }
 
     func seek(to fraction: Double) {
+        seek(toMs: UInt32(fraction * Double(max(durationMs, 1))))
+    }
+
+    func seek(toMs positionMs: UInt32) {
         guard isPlaybackReady, localPlaybackRestore?.isStarting != true else { return }
         cancelPendingPlayForUserCommand()
-        let positionMs = UInt32(fraction * Double(max(durationMs, 1)))
         if let restore = localPlaybackRestore {
             let updated = restore.snapshot.withPosition(positionMs)
             localPlaybackRestore = .idle(updated)

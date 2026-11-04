@@ -47,8 +47,11 @@ final class NowPlayingManager {
                 return .commandFailed
             }
             return self.handler { app in
-                let fraction = posEvent.positionTime / Double(max(app.durationMs, 1))
-                app.seek(to: min(max(fraction, 0), 1))
+                guard let positionMs = NowPlayingSeek.positionMs(
+                    seconds: posEvent.positionTime,
+                    durationMs: app.durationMs
+                ) else { return }
+                app.seek(toMs: positionMs)
             } == true ? .success : .commandFailed
         }
     }
