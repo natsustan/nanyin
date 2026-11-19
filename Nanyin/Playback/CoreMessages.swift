@@ -1,0 +1,193 @@
+import Foundation
+
+/// Events from the Rust core (`core/src/events.rs`).
+enum CoreEvent: Decodable, Equatable {
+    case connected(username: String, credentials: String?)
+    case connectFailed(reason: FailureReason, message: String)
+    case sessionEnded
+    case deactivated
+    case trackChanged(CoreTrack)
+    case loading(uri: String, positionMs: Int)
+    case playing(uri: String, positionMs: Int)
+    case paused(uri: String, positionMs: Int)
+    case stopped
+    case endOfTrack(uri: String)
+    case unavailable(uri: String)
+    case volume(UInt16)
+    case shuffle(Bool)
+    case `repeat`(context: Bool, track: Bool)
+    case unknown(String)
+
+    enum FailureReason: String, Decodable {
+        case authRejected = "auth_rejected"
+        case accountMismatch = "account_mismatch"
+        case timeout
+        case other
+    }
+
+    private enum Key: String, CodingKey {
+        case type, username, credentials, reason, message, track, uri
+        case positionMs = "position_ms"
+        case volume, on, context
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Key.self)
+        let type = try c.decode(String.self, forKey: .type)
+        func position() throws -> Int { try c.decode(Int.self, forKey: .positionMs) }
+        func uri() throws -> String { try c.decode(String.self, forKey: .uri) }
+        switch type {
+        case "connected":
+            self = .connected(
+                username: try c.decode(String.self, forKey: .username),
+                credentials: try c.decodeIfPresent(String.self, forKey: .credentials))
+        case "connect_failed":
+            self = .connectFailed(
+                reason: (try? c.decode(FailureReason.self, forKey: .reason)) ?? .other,
+                message: try c.decode(String.self, forKey: .message))
+        case "session_ended": self = .sessionEnded
+        case "deactivated": self = .deactivated
+        case "track_changed": self = .trackChanged(try c.decode(CoreTrack.self, forKey: .track))
+        case "loading": self = .loading(uri: try uri(), positionMs: try position())
+        case "playing": self = .playing(uri: try uri(), positionMs: try position())
+        case "paused": self = .paused(uri: try uri(), positionMs: try position())
+        case "stopped": self = .stopped
+        case "end_of_track": self = .endOfTrack(uri: try uri())
+        case "unavailable": self = .unavailable(uri: try uri())
+        case "volume": self = .volume(try c.decode(UInt16.self, forKey: .volume))
+        case "shuffle": self = .shuffle(try c.decode(Bool.self, forKey: .on))
+        case "repeat":
+            self = .repeat(context: try c.decode(Bool.self, forKey: .context), track: try c.decode(Bool.self, forKey: .track))
+        default: self = .unknown(type)
+        }
+    }
+}
+
+/// The track librespot is playing, with the metadata it already has.
+struct CoreTrack: Decodable, Equatable, Sendable {
+    struct Artist: Decodable, Equatable, Sendable {
+        let uri: String
+        let name: String
+    }
+
+    let uri: String
+    let name: String
+    let artists: [Artist]
+    let album: String
+    let coverURL: URL?
+    let durationMs: Int
+    let explicit: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case uri, name, artists, album, explicit
+        case coverURL = "cover_url"
+        case durationMs = "duration_ms"
+    }
+
+    var artistNames: String { artists.map(\.name).joined(separator: ", ") }
+}
+
+/// Commands for the Rust core (`core/src/commands.rs`).
+enum CoreCommand: Encodable, Equatable {
+    case play, pause, playPause, next, previous, disconnect
+    case seek(positionMs: Int)
+    case volume(UInt16)
+    case shuffle(Bool)
+    case `repeat`(context: Bool, track: Bool)
+    case addToQueue(uri: String)
+    case load(Load)
+
+    struct Load: Encodable, Equatable {
+        var contextURI: String?
+        var trackURIs: [String] = []
+        var startURI: String?
+        var startIndex: Int?
+        var positionMs = 0
+        var shuffle: Bool?
+
+        enum CodingKeys: String, CodingKey {
+            case contextURI = "context_uri"
+            case trackURIs = "track_uris"
+            case startURI = "start_uri"
+            case startIndex = "start_index"
+            case positionMs = "position_ms"
+            case shuffle
+        }
+    }
+
+    private enum Key: String, CodingKey {
+        case cmd, volume, on, context, track, uri
+        case positionMs = "position_ms"
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Key.self)
+        switch self {
+        case .play: try c.encode("play", forKey: .cmd)
+        case .pause: try c.encode("pause", forKey: .cmd)
+        case .playPause: try c.encode("play_pause", forKey: .cmd)
+        case .next: try c.encode("next", forKey: .cmd)
+        case .previous: try c.encode("previous", forKey: .cmd)
+        case .disconnect: try c.encode("disconnect", forKey: .cmd)
+        case .seek(let position):
+            try c.encode("seek", forKey: .cmd)
+            try c.encode(max(0, position), forKey: .positionMs)
+        case .volume(let volume):
+            try c.encode("volume", forKey: .cmd)
+            try c.encode(volume, forKey: .volume)
+        case .shuffle(let on):
+            try c.encode("shuffle", forKey: .cmd)
+            try c.encode(on, forKey: .on)
+        case .repeat(let context, let track):
+            try c.encode("repeat", forKey: .cmd)
+            try c.encode(context, forKey: .context)
+            try c.encode(track, forKey: .track)
+        case .addToQueue(let uri):
+            try c.encode("add_to_queue", forKey: .cmd)
+            try c.encode(uri, forKey: .uri)
+        case .load(let load):
+            try c.encode("load", forKey: .cmd)
+            try load.encode(to: encoder)
+        }
+    }
+}
+
+/// What `nanyin_connect` needs (`core/src/engine.rs`).
+struct CoreConfig: Encodable {
+    enum Credentials: Encodable {
+        case accessToken(String)
+        case stored(json: String)
+
+        private enum Key: String, CodingKey { case type, token, json }
+
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: Key.self)
+            switch self {
+            case .accessToken(let token):
+                try c.encode("access_token", forKey: .type)
+                try c.encode(token, forKey: .token)
+            case .stored(let json):
+                try c.encode("stored", forKey: .type)
+                try c.encode(json, forKey: .json)
+            }
+        }
+    }
+
+    let deviceID: String
+    let deviceName: String
+    let initialVolume: UInt16
+    let credentials: Credentials
+    let expectedUsername: String?
+    let audioCacheDir: String?
+    let audioCacheLimit: UInt64?
+
+    enum CodingKeys: String, CodingKey {
+        case deviceID = "device_id"
+        case deviceName = "device_name"
+        case initialVolume = "initial_volume"
+        case credentials
+        case expectedUsername = "expected_username"
+        case audioCacheDir = "audio_cache_dir"
+        case audioCacheLimit = "audio_cache_limit"
+    }
+}

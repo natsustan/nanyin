@@ -1,0 +1,72 @@
+name: Nanyin
+
+options:
+  bundleIdPrefix: com.cosmoss
+  developmentLanguage: en
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+  defaultConfig: Debug
+
+packages:
+  NanyinKit:
+    path: Packages/NanyinKit
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    MACOSX_DEPLOYMENT_TARGET: "26.0"
+    ARCHS: arm64
+  configs:
+    Debug:
+      ONLY_ACTIVE_ARCH: YES
+
+targets:
+  Nanyin:
+    type: application
+    platform: macOS
+    sources:
+      - path: Nanyin
+    dependencies:
+      - package: NanyinKit
+        product: NanyinKit
+      - sdk: CoreAudio.framework
+      - sdk: AudioToolbox.framework
+      - sdk: AudioUnit.framework
+      - sdk: Security.framework
+      - sdk: SystemConfiguration.framework
+    preBuildScripts:
+      - name: Build Rust core
+        script: '"$SRCROOT/script/build_core.sh"'
+        basedOnDependencyAnalysis: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.cosmoss.nanyin
+        PRODUCT_NAME: Nanyin
+        PRODUCT_MODULE_NAME: Nanyin
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        INFOPLIST_FILE: Nanyin/Resources/Info.plist
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "Apple Development"
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+        SWIFT_INCLUDE_PATHS: $(SRCROOT)/core/include
+      configs:
+        Debug:
+          PRODUCT_BUNDLE_IDENTIFIER: com.cosmoss.nanyin.dev
+          PRODUCT_NAME: Nanyin Dev
+          LIBRARY_SEARCH_PATHS: $(SRCROOT)/core/target/debug
+        Release:
+          ENABLE_HARDENED_RUNTIME: YES
+          LIBRARY_SEARCH_PATHS: $(SRCROOT)/core/target/release
+
+schemes:
+  Nanyin:
+    build:
+      targets:
+        Nanyin: all
+    run:
+      config: Debug
+      executable: Nanyin
