@@ -18,23 +18,12 @@ case "$CONFIGURATION" in
 esac
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-source "$ROOT_DIR/script/development_signing.sh"
 DERIVED_DATA_DIR="$ROOT_DIR/build/DerivedData"
 APP_BUNDLE="$DERIVED_DATA_DIR/Build/Products/$CONFIGURATION/$APP_NAME.app"
 APP_BINARY="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 LOG_FILE="$ROOT_DIR/build/nanyin.log"
 
-[[ -d "$ROOT_DIR/Nanyin.xcodeproj" ]] || "$ROOT_DIR/script/generate_project.sh"
-
-xcodebuild \
-    -project "$ROOT_DIR/Nanyin.xcodeproj" \
-    -scheme Nanyin \
-    -configuration "$CONFIGURATION" \
-    -destination "platform=macOS,arch=$(uname -m)" \
-    -derivedDataPath "$DERIVED_DATA_DIR" \
-    -quiet \
-    "${NANYIN_SIGNING_SETTINGS[@]}" \
-    build
+"$ROOT_DIR/script/build.sh"
 
 # Stop every instance of this variant, wherever it was built.
 pkill -x "$APP_NAME" 2>/dev/null || true
