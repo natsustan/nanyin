@@ -89,8 +89,6 @@ struct SpotifyWebAPITests {
     @Test func buildsURLs() {
         #expect(SpotifyWebAPI.url("/me/tracks", query: ["offset": "50", "limit": "50"]).absoluteString
             == "https://api.spotify.com/v1/me/tracks?limit=50&offset=50")
-        #expect(SpotifyWebAPI.url("https://api.spotify.com/v1/me/tracks?offset=50", query: [:]).absoluteString
-            == "https://api.spotify.com/v1/me/tracks?offset=50")
     }
 
     @Test func decodesPlaylistItemsInBothShapes() throws {

@@ -11,10 +11,6 @@ public extension SpotifyWebAPI {
         try await get("/me/playlists", query: ["limit": "50", "offset": "\(offset)"])
     }
 
-    func playlist(_ id: String) async throws -> Playlist {
-        try await get("/playlists/\(id)", query: ["fields": "id,name,uri,description,images,owner,collaborative,snapshot_id"])
-    }
-
     func playlistItems(_ id: String, offset: Int = 0) async throws -> Paging<PlaylistItem> {
         try await get("/playlists/\(id)/items", query: [
             "limit": "50", "offset": "\(offset)", "additional_types": "track,episode",
@@ -40,10 +36,6 @@ public extension SpotifyWebAPI {
         try await get("/me/player/recently-played", query: ["limit": "50"], as: Paging<PlayHistory>.self).items
     }
 
-    func topTracks() async throws -> [Track] {
-        try await get("/me/top/tracks", query: ["limit": "50", "time_range": "short_term"], as: Paging<Track>.self).items
-    }
-
     func album(_ id: String) async throws -> Album {
         try await get("/albums/\(id)")
     }
@@ -61,7 +53,7 @@ public extension SpotifyWebAPI {
         try await get("/artists/\(id)/albums", query: ["include_groups": "album,single", "limit": "10"])
     }
 
-    func search(_ text: String, types: [String] = ["track", "artist", "album", "playlist"]) async throws -> SearchResults {
+    func search(_ text: String, types: [String] = ["track", "artist", "album"]) async throws -> SearchResults {
         try await get("/search", query: ["q": text, "type": types.joined(separator: ","), "limit": "10"])
     }
 

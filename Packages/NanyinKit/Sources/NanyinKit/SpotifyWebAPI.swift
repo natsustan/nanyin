@@ -52,7 +52,9 @@ public actor SpotifyWebAPI {
     private let auth: WebAPIAuth
     private let session: URLSession
     private let cooldownStore: any CooldownStore
-    private let gate: Gate
+    private let maxConcurrent: Int
+    private var inFlight = 0
+    private var waiting: [CheckedContinuation<Void, Never>] = []
     private var cooldownUntil: Date?
 
     public init(
@@ -64,7 +66,7 @@ public actor SpotifyWebAPI {
         self.auth = auth
         self.session = session
         self.cooldownStore = cooldownStore
-        gate = Gate(limit: maxConcurrent)
+        self.maxConcurrent = maxConcurrent
         cooldownUntil = cooldownStore.load()
     }
 
@@ -99,8 +101,9 @@ public actor SpotifyWebAPI {
             request.httpBody = try JSONEncoder().encode(body)
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
-        await gate.enter()
-        defer { Task { await gate.leave() } }
+        if let cooldown { throw WebAPIError.rateLimited(until: cooldown) }
+        await enterSlot()
+        defer { leaveSlot() }
         if let cooldown { throw WebAPIError.rateLimited(until: cooldown) }
 
         var token = try await accessToken()
@@ -124,6 +127,23 @@ public actor SpotifyWebAPI {
         }
     }
 
+    /// At most `maxConcurrent` requests in flight, first come first served.
+    private func enterSlot() async {
+        if inFlight < maxConcurrent {
+            inFlight += 1
+            return
+        }
+        await withCheckedContinuation { waiting.append($0) }
+    }
+
+    private func leaveSlot() {
+        if waiting.isEmpty {
+            inFlight -= 1
+        } else {
+            waiting.removeFirst().resume()
+        }
+    }
+
     private func accessToken() async throws -> String {
         do {
             return try await auth.accessToken()
@@ -143,7 +163,6 @@ public actor SpotifyWebAPI {
     }
 
     static func url(_ path: String, query: [String: String]) -> URL {
-        if path.hasPrefix("https://") { return URL(string: path)! }
         var components = URLComponents(
             url: baseURL.appending(path: path.hasPrefix("/") ? String(path.dropFirst()) : path),
             resolvingAgainstBaseURL: false
@@ -165,32 +184,5 @@ public actor SpotifyWebAPI {
             let error: Inner?
         }
         return (try? JSONDecoder().decode(Body.self, from: data))?.error?.message ?? ""
-    }
-}
-
-/// An async counting semaphore, first come first served.
-actor Gate {
-    private let limit: Int
-    private var inFlight = 0
-    private var waiting: [CheckedContinuation<Void, Never>] = []
-
-    init(limit: Int) {
-        self.limit = limit
-    }
-
-    func enter() async {
-        if inFlight < limit {
-            inFlight += 1
-            return
-        }
-        await withCheckedContinuation { waiting.append($0) }
-    }
-
-    func leave() {
-        if waiting.isEmpty {
-            inFlight -= 1
-        } else {
-            waiting.removeFirst().resume()
-        }
     }
 }

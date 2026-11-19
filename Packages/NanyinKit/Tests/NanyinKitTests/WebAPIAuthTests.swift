@@ -66,6 +66,8 @@ struct WebAPIAuthTests {
         try await auth.signIn(with: token("a1", expiresIn: 10))
         await #expect(throws: OAuthError.grantRevoked) { _ = try await auth.accessToken() }
         #expect(await auth.isSignedIn == false)
+        var revocations = auth.revocations.makeAsyncIterator()
+        #expect(await revocations.next() != nil)
     }
 }
 

@@ -6,7 +6,6 @@ import Foundation
 public struct SpotifyImage: Codable, Sendable, Hashable {
     public let url: URL
     public let width: Int?
-    public let height: Int?
 }
 
 extension [SpotifyImage] {
@@ -20,9 +19,7 @@ extension [SpotifyImage] {
 public struct UserProfile: Codable, Sendable, Hashable {
     public let id: String
     public let display_name: String?
-    public let country: String?
     public let product: String?
-    public let images: [SpotifyImage]?
 
     public var name: String { display_name ?? id }
     public var isPremium: Bool { product == "premium" }
@@ -34,16 +31,16 @@ public struct ArtistRef: Codable, Sendable, Hashable {
     public let uri: String?
 }
 
-public struct AlbumRef: Codable, Sendable, Hashable {
-    public let id: String?
-    public let name: String
-    public let uri: String?
-    public let images: [SpotifyImage]?
-    public let release_date: String?
+extension [ArtistRef] {
+    /// "A, B & C" as a track row lists them.
+    public var names: String { map(\.name).joined(separator: ", ") }
 }
 
-public struct Track: Codable, Sendable, Hashable, Identifiable {
-    public let id: String?
+public struct AlbumRef: Codable, Sendable, Hashable {
+    public let name: String
+}
+
+public struct Track: Codable, Sendable, Hashable {
     public let name: String
     public let uri: String
     public let duration_ms: Int
@@ -52,10 +49,6 @@ public struct Track: Codable, Sendable, Hashable, Identifiable {
     public let popularity: Int?
     public let artists: [ArtistRef]
     public let album: AlbumRef?
-    public let type: String?
-
-    public var artistNames: String { artists.map(\.name).joined(separator: ", ") }
-    public var isEpisode: Bool { type == "episode" }
 }
 
 public struct SavedTrack: Codable, Sendable, Hashable {
@@ -67,7 +60,6 @@ public struct SavedTrack: Codable, Sendable, Hashable {
 /// answers call it `track`.
 public struct PlaylistItem: Codable, Sendable, Hashable {
     public let added_at: String?
-    public let is_local: Bool?
     public let item: Track?
     public let track: Track?
 
@@ -86,8 +78,6 @@ public struct Playlist: Codable, Sendable, Hashable, Identifiable {
     public let description: String?
     public let images: [SpotifyImage]?
     public let owner: PlaylistOwner
-    public let collaborative: Bool?
-    public let snapshot_id: String?
 }
 
 public struct Album: Codable, Sendable, Hashable, Identifiable {
@@ -100,6 +90,8 @@ public struct Album: Codable, Sendable, Hashable, Identifiable {
     public let release_date: String?
     public let total_tracks: Int?
     public let tracks: Paging<AlbumTrack>?
+
+    public var releaseYear: String? { release_date.map { String($0.prefix(4)) } }
 }
 
 /// An album's track listing omits the album itself.
@@ -109,8 +101,6 @@ public struct AlbumTrack: Codable, Sendable, Hashable {
     public let uri: String
     public let duration_ms: Int
     public let explicit: Bool?
-    public let track_number: Int?
-    public let disc_number: Int?
     public let artists: [ArtistRef]
 }
 
@@ -130,7 +120,6 @@ public struct Artist: Codable, Sendable, Hashable, Identifiable {
 public struct Paging<Item: Codable & Sendable & Hashable>: Codable, Sendable, Hashable {
     public let items: [Item]
     public let total: Int?
-    public let offset: Int?
     public let next: String?
 }
 
@@ -155,8 +144,6 @@ public struct SearchResults: Codable, Sendable, Hashable {
     public let tracks: Paging<Track>?
     public let artists: Paging<Artist>?
     public let albums: Paging<AlbumSummary>?
-    /// Search can return null entries among playlists.
-    public let playlists: Paging<Playlist?>?
 }
 
 /// Search and artist pages list albums without their tracks.
@@ -168,4 +155,6 @@ public struct AlbumSummary: Codable, Sendable, Hashable, Identifiable {
     public let images: [SpotifyImage]?
     public let artists: [ArtistRef]
     public let release_date: String?
+
+    public var releaseYear: String? { release_date.map { String($0.prefix(4)) } }
 }

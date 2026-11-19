@@ -19,9 +19,30 @@ public actor WebAPIAuth {
 
     private let store: any SecretStore
     private let refresher: @Sendable (OAuthToken) async throws -> OAuthToken
-    private var token: OAuthToken?
+    private var loaded = false
+    private var stored: OAuthToken?
     private var renewal: Task<OAuthToken, Error>?
     private var epoch = 0
+    private let revokedContinuation: AsyncStream<Void>.Continuation
+
+    /// Yields when Spotify rejects the saved grant and it is discarded, so
+    /// the app can tear down everything that depended on it.
+    public nonisolated let revocations: AsyncStream<Void>
+
+    /// Read from the Keychain on first use, off the main thread.
+    private var token: OAuthToken? {
+        get {
+            if !loaded {
+                loaded = true
+                stored = try? store.readValue(OAuthToken.self, Self.tokenKey)
+            }
+            return stored
+        }
+        set {
+            loaded = true
+            stored = newValue
+        }
+    }
 
     public init(store: any SecretStore, oauth: SpotifyOAuth = SpotifyOAuth()) {
         self.init(store: store, refresher: { try await oauth.refresh($0) })
@@ -30,11 +51,10 @@ public actor WebAPIAuth {
     init(store: any SecretStore, refresher: @escaping @Sendable (OAuthToken) async throws -> OAuthToken) {
         self.store = store
         self.refresher = refresher
-        token = try? store.readValue(OAuthToken.self, Self.tokenKey)
+        (revocations, revokedContinuation) = AsyncStream.makeStream()
     }
 
     public var isSignedIn: Bool { token != nil }
-    public var clientID: String? { token?.clientID }
 
     public func signIn(with token: OAuthToken) throws {
         epoch += 1
@@ -82,6 +102,7 @@ public actor WebAPIAuth {
             return renewed
         } catch OAuthError.grantRevoked where epoch == started {
             signOut()
+            revokedContinuation.yield()
             throw OAuthError.grantRevoked
         }
     }

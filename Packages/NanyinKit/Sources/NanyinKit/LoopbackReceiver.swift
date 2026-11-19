@@ -7,10 +7,19 @@ import Network
 /// to a redirect nobody is listening on. Requests for other paths (a browser
 /// asking for a favicon) are answered 404 and the receiver keeps waiting.
 public final class LoopbackReceiver: @unchecked Sendable {
-    public enum Failure: Error, Equatable {
+    public enum Failure: Error, Equatable, LocalizedError {
         case portInUse(UInt16)
         case cancelled
         case failed(String)
+
+        public var errorDescription: String? {
+            switch self {
+            case .portInUse(let port):
+                "Another app is using port \(port), which Spotify sends you back to. Quit it and try again."
+            case .cancelled: "Sign-in was cancelled."
+            case .failed(let reason): "Could not wait for Spotify's answer (\(reason))."
+            }
+        }
     }
 
     private let listener: NWListener

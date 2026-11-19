@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// One of the two independent Spotify authorizations Nanyin holds.
@@ -138,6 +139,18 @@ public struct SpotifyOAuth: Sendable {
             "client_id": grant.clientID,
             "code_verifier": pkce.verifier,
         ])
+    }
+
+    /// `authorize` in the default browser. A cancelled wait surfaces as
+    /// `CancellationError`, so callers only handle real failures.
+    public func authorizeInBrowser(_ grant: OAuthGrant) async throws -> OAuthToken {
+        do {
+            return try await authorize(grant) { url in
+                await MainActor.run { _ = NSWorkspace.shared.open(url) }
+            }
+        } catch LoopbackReceiver.Failure.cancelled {
+            throw CancellationError()
+        }
     }
 
     /// Renews `token`. Spotify may return a replacement refresh token, after
