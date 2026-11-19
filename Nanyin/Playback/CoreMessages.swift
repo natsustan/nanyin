@@ -11,12 +11,10 @@ enum CoreEvent: Decodable, Equatable {
     case playing(uri: String, positionMs: Int)
     case paused(uri: String, positionMs: Int)
     case stopped
-    case endOfTrack(uri: String)
     case unavailable(uri: String)
     case volume(UInt16)
     case shuffle(Bool)
     case `repeat`(context: Bool, track: Bool)
-    case unknown(String)
 
     enum FailureReason: String, Decodable {
         case authRejected = "auth_rejected"
@@ -52,13 +50,13 @@ enum CoreEvent: Decodable, Equatable {
         case "playing": self = .playing(uri: try uri(), positionMs: try position())
         case "paused": self = .paused(uri: try uri(), positionMs: try position())
         case "stopped": self = .stopped
-        case "end_of_track": self = .endOfTrack(uri: try uri())
         case "unavailable": self = .unavailable(uri: try uri())
         case "volume": self = .volume(try c.decode(UInt16.self, forKey: .volume))
         case "shuffle": self = .shuffle(try c.decode(Bool.self, forKey: .on))
         case "repeat":
             self = .repeat(context: try c.decode(Bool.self, forKey: .context), track: try c.decode(Bool.self, forKey: .track))
-        default: self = .unknown(type)
+        default:
+            throw DecodingError.dataCorruptedError(forKey: .type, in: c, debugDescription: "unknown event \(type)")
         }
     }
 }
@@ -89,7 +87,7 @@ struct CoreTrack: Decodable, Equatable, Sendable {
 
 /// Commands for the Rust core (`core/src/commands.rs`).
 enum CoreCommand: Encodable, Equatable {
-    case play, pause, playPause, next, previous, disconnect
+    case play, pause, playPause, next, previous
     case seek(positionMs: Int)
     case volume(UInt16)
     case shuffle(Bool)
@@ -128,7 +126,6 @@ enum CoreCommand: Encodable, Equatable {
         case .playPause: try c.encode("play_pause", forKey: .cmd)
         case .next: try c.encode("next", forKey: .cmd)
         case .previous: try c.encode("previous", forKey: .cmd)
-        case .disconnect: try c.encode("disconnect", forKey: .cmd)
         case .seek(let position):
             try c.encode("seek", forKey: .cmd)
             try c.encode(max(0, position), forKey: .positionMs)

@@ -38,9 +38,6 @@ pub enum Event {
         position_ms: u32,
     },
     Stopped,
-    EndOfTrack {
-        uri: String,
-    },
     Unavailable {
         uri: String,
     },
@@ -171,9 +168,6 @@ impl Event {
                 position_ms,
             },
             P::Stopped { .. } => Self::Stopped,
-            P::EndOfTrack { track_id, .. } => Self::EndOfTrack {
-                uri: track_id.to_uri(),
-            },
             P::Unavailable { track_id, .. } => Self::Unavailable {
                 uri: track_id.to_uri(),
             },

@@ -1,9 +1,9 @@
 //! C ABI for the Swift app. Commands and events are JSON strings so the
 //! header stays small and Swift decodes with `Codable`.
 //!
-//! At most one engine exists. Each `nanyin_connect` starts a new generation;
-//! events from an older generation are dropped, so a replaced engine can
-//! never speak for the current one.
+//! At most one engine exists. Each `nanyin_connect` starts a new generation
+//! and every event carries the generation it belongs to; Swift drops events
+//! from any generation but the one it started last.
 
 mod commands;
 mod engine;
@@ -18,16 +18,11 @@ use tokio::runtime::Runtime;
 
 use crate::{
     commands::Command,
-    engine::{CONNECT_TIMEOUT, Config, Engine, Failure},
-    events::{Event, FailureReason},
+    engine::{Config, Engine},
+    events::Event,
 };
 
 pub type EventCallback = extern "C" fn(context: *mut c_void, generation: u64, json: *const c_char);
-
-struct Listener {
-    callback: EventCallback,
-    context: Context,
-}
 
 /// Swift's context pointer. Swift keeps it alive for the whole process and
 /// accepts callbacks on any thread.
@@ -37,7 +32,7 @@ unsafe impl Send for Context {}
 
 #[derive(Default)]
 struct State {
-    listener: Option<Listener>,
+    listener: Option<(EventCallback, Context)>,
     generation: u64,
     engine: Option<Engine>,
 }
@@ -52,18 +47,11 @@ fn state() -> MutexGuard<'static, State> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// Delivers `event` if `generation` is still current. The callback runs
-/// without the lock held, so Swift may call back in; it also receives the
-/// generation and drops anything older than the engine it started last.
+/// Delivers `event`, tagged with its generation. The callback runs without
+/// the lock held, so Swift may call back in.
 fn emit(generation: u64, event: &Event) {
-    let (callback, context) = {
-        let state = state();
-        match &state.listener {
-            Some(listener) if state.generation == generation => {
-                (listener.callback, listener.context.0)
-            }
-            _ => return,
-        }
+    let Some((callback, context)) = state().listener else {
+        return;
     };
     let Some(json) = serde_json::to_string(event)
         .ok()
@@ -71,14 +59,15 @@ fn emit(generation: u64, event: &Event) {
     else {
         return;
     };
-    callback(context, generation, json.as_ptr());
+    callback(context.0, generation, json.as_ptr());
 }
 
-fn read_str<'a>(ptr: *const c_char) -> Option<&'a str> {
+fn read_json<T: serde::de::DeserializeOwned>(ptr: *const c_char) -> Option<T> {
     if ptr.is_null() {
         return None;
     }
-    unsafe { CStr::from_ptr(ptr) }.to_str().ok()
+    let text = unsafe { CStr::from_ptr(ptr) }.to_str().ok()?;
+    serde_json::from_str(text).ok()
 }
 
 /// Registers the event callback and logging. Call once, before anything else.
@@ -88,10 +77,7 @@ pub extern "C" fn nanyin_init(callback: EventCallback, context: *mut c_void) {
         env_logger::Env::default().default_filter_or("warn,librespot=info,nanyin_core=info"),
     )
     .try_init();
-    state().listener = Some(Listener {
-        callback,
-        context: Context(context),
-    });
+    state().listener = Some((callback, Context(context)));
 }
 
 /// Starts a new engine from `config_json`, replacing any current one.
@@ -99,8 +85,7 @@ pub extern "C" fn nanyin_init(callback: EventCallback, context: *mut c_void) {
 /// The outcome arrives as a `connected` or `connect_failed` event.
 #[unsafe(no_mangle)]
 pub extern "C" fn nanyin_connect(config_json: *const c_char) -> u64 {
-    let Some(config) = read_str(config_json).and_then(|s| serde_json::from_str::<Config>(s).ok())
-    else {
+    let Some(config) = read_json::<Config>(config_json) else {
         return 0;
     };
     let generation = {
@@ -111,64 +96,26 @@ pub extern "C" fn nanyin_connect(config_json: *const c_char) -> u64 {
         state.generation += 1;
         state.generation
     };
-    RUNTIME.spawn(async move {
-        let started = tokio::time::timeout(
-            CONNECT_TIMEOUT,
-            Engine::start(config, move |event| emit(generation, &event)),
-        )
-        .await
-        .unwrap_or_else(|_| {
-            Err(Failure {
-                reason: FailureReason::Timeout,
-                message: "Spotify did not answer in time".into(),
-            })
-        });
-        let (engine, task) = match started {
-            Ok(started) => started,
-            Err(failure) => {
-                emit(
-                    generation,
-                    &Event::ConnectFailed {
-                        reason: failure.reason,
-                        message: failure.message,
-                    },
-                );
-                return;
-            }
-        };
-        let connected = Event::Connected {
-            username: engine.session.username(),
-            credentials: engine.credentials_json(),
-        };
-        let stale = {
+    RUNTIME.spawn(engine::run(
+        config,
+        move |event| emit(generation, &event),
+        move |engine| {
             let mut state = state();
-            if state.generation == generation {
-                state.engine = Some(engine);
-                None
-            } else {
-                Some(engine)
+            if state.generation != generation {
+                return Some(engine);
             }
-        };
-        if let Some(engine) = stale {
-            engine.shutdown();
-            task.await;
-            return;
-        }
-        emit(generation, &connected);
-        task.await;
-        // Clear the engine only if it is still ours, then report the end.
-        let ended = {
+            state.engine = Some(engine);
+            None
+        },
+        move || {
             let mut state = state();
             let current = state.generation == generation;
             if current {
                 state.engine = None;
             }
             current
-        };
-        if ended {
-            emit(generation, &Event::SessionEnded);
-        }
-    });
+        },
+    ));
     generation
 }
 
@@ -177,9 +124,7 @@ pub extern "C" fn nanyin_connect(config_json: *const c_char) -> u64 {
 /// -3 when Spirc refused it (its task has ended).
 #[unsafe(no_mangle)]
 pub extern "C" fn nanyin_command(command_json: *const c_char) -> i32 {
-    let Some(command) =
-        read_str(command_json).and_then(|s| serde_json::from_str::<Command>(s).ok())
-    else {
+    let Some(command) = read_json::<Command>(command_json) else {
         return -1;
     };
     let state = state();
@@ -195,7 +140,8 @@ pub extern "C" fn nanyin_command(command_json: *const c_char) -> i32 {
     }
 }
 
-/// Shuts the engine down. No further events arrive for its generation.
+/// Shuts the engine down. Its remaining events carry a generation Swift no
+/// longer accepts.
 #[unsafe(no_mangle)]
 pub extern "C" fn nanyin_disconnect() {
     let mut state = state();

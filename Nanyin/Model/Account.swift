@@ -1,4 +1,4 @@
-import AppKit
+import Foundation
 import NanyinKit
 import Observation
 
@@ -60,15 +60,9 @@ final class Account {
                 if await oauth.clientIsKnown(clientID) == false {
                     throw OAuthError.unknownClient
                 }
-                let token = try await oauth.authorize(.webAPI(clientID: clientID)) { url in
-                    await MainActor.run { _ = NSWorkspace.shared.open(url) }
-                }
-                try await auth.signIn(with: token)
+                try await auth.signIn(with: oauth.authorizeInBrowser(.webAPI(clientID: clientID)))
                 await loadProfile()
             } catch is CancellationError {
-            } catch LoopbackReceiver.Failure.cancelled {
-            } catch LoopbackReceiver.Failure.portInUse(let port) {
-                state = .failed("Another app is using port \(port), which Spotify sends you back to. Quit it and try again.")
             } catch {
                 state = .failed(error.localizedDescription)
             }

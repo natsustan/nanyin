@@ -7,21 +7,25 @@ struct Sidebar: View {
     @Environment(AppModel.self) private var app
 
     var body: some View {
+        // Read once here so a navigation redraws only the two rows whose
+        // selection changed.
+        let current = app.navigator.current
+        let go = app.navigator.go
         VStack(spacing: 0) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    SidebarRow(title: "What's New", icon: "house", route: .whatsNew)
-                    SidebarRow(title: "Play Queue", icon: "list.bullet", route: .queue)
-                    SidebarHeading(title: "Library")
-                    SidebarRow(title: "Songs", icon: "star", route: .likedSongs)
-                    SidebarRow(title: "Albums", icon: "square.stack", route: .albums)
-                    SidebarRow(title: "Artists", icon: "music.mic", route: .artists)
+                    ForEach(Self.fixed, id: \.route) { item in
+                        if let heading = item.heading { SidebarHeading(title: heading) }
+                        SidebarRow(title: item.title, icon: item.icon, isSelected: current == item.route) {
+                            go(item.route, false)
+                        }
+                    }
                     SidebarHeading(title: "Playlists")
                     ForEach(app.library.playlists) { playlist in
-                        SidebarRow(
-                            title: playlist.name,
-                            icon: "music.note.list",
-                            route: .playlist(id: playlist.id, name: playlist.name))
+                        let route = Route.playlist(id: playlist.id, name: playlist.name)
+                        SidebarRow(title: playlist.name, icon: "music.note.list", isSelected: current == route) {
+                            go(route, false)
+                        }
                     }
                     if let error = app.library.playlistsError {
                         Text(error)
@@ -33,11 +37,25 @@ struct Sidebar: View {
                 }
                 .padding(.vertical, 6)
             }
-            .scrollIndicators(.automatic)
             NowPlayingCover()
         }
         .background(Theme.sidebar)
     }
+
+    private struct Item {
+        var heading: String?
+        let title: String
+        let icon: String
+        let route: Route
+    }
+
+    private static let fixed = [
+        Item(title: "What's New", icon: "house", route: .whatsNew),
+        Item(title: "Play Queue", icon: "list.bullet", route: .queue),
+        Item(heading: "Library", title: "Songs", icon: "star", route: .likedSongs),
+        Item(title: "Albums", icon: "square.stack", route: .albums),
+        Item(title: "Artists", icon: "music.mic", route: .artists),
+    ]
 }
 
 private struct SidebarHeading: View {
@@ -55,36 +73,32 @@ private struct SidebarHeading: View {
 }
 
 private struct SidebarRow: View {
-    @Environment(AppModel.self) private var app
     let title: String
     let icon: String
-    let route: Route
+    let isSelected: Bool
+    let action: () -> Void
 
     var body: some View {
-        let selected = app.navigator.current == route
-        Button {
-            app.navigator.go(to: route)
-        } label: {
+        Button(action: action) {
             HStack(spacing: 6) {
                 Image(systemName: icon)
                     .font(.system(size: 10))
                     .frame(width: 14)
-                    .foregroundStyle(selected ? .white : Theme.sidebarHeading)
+                    .foregroundStyle(isSelected ? .white : Theme.sidebarHeading)
                 Text(title)
-                    .font(selected ? AquaFont.bold(11) : AquaFont.regular(11))
-                    .foregroundStyle(selected ? .white : Theme.sidebarText)
+                    .font(isSelected ? AquaFont.bold(11) : AquaFont.regular(11))
+                    .foregroundStyle(isSelected ? .white : Theme.sidebarText)
                     .lineLimit(1)
-                    .truncationMode(.tail)
                 Spacer(minLength: 0)
             }
-            .shadow(color: .black.opacity(selected ? 0.5 : 0.3), radius: 0, y: 1)
+            .shadow(color: .black.opacity(isSelected ? 0.5 : 0.3), radius: 0, y: 1)
             .padding(.horizontal, 10)
             .frame(height: 20)
             .background {
-                if selected {
+                if isSelected {
                     Theme.selection
-                        .overlay(alignment: .top) { Rectangle().fill(.white.opacity(0.18)).frame(height: 1) }
-                        .overlay(alignment: .bottom) { Rectangle().fill(.black.opacity(0.4)).frame(height: 1) }
+                        .hairline(.top, .white.opacity(0.18))
+                        .hairline(.bottom, .black.opacity(0.4))
                 }
             }
             .contentShape(Rectangle())
@@ -104,7 +118,7 @@ private struct NowPlayingCover: View {
                     Text(track.name)
                         .font(AquaFont.bold(11))
                         .foregroundStyle(Theme.text)
-                    Text(track.artistNames)
+                    Text(app.player.playingElsewhere ? "Playing on another device" : track.artistNames)
                         .font(AquaFont.regular(10))
                         .foregroundStyle(Theme.secondaryText)
                 }
@@ -113,7 +127,7 @@ private struct NowPlayingCover: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 5)
                 .background(Theme.graphite)
-                .overlay(alignment: .top) { Rectangle().fill(Theme.graphiteEdge).frame(height: 1) }
+                .hairline(.top, Theme.graphiteEdge)
                 AsyncImage(url: track.coverURL) { image in
                     image.resizable().aspectRatio(1, contentMode: .fill)
                 } placeholder: {

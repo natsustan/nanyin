@@ -2,13 +2,22 @@ import Foundation
 import NanyinKit
 import Observation
 
-/// The signed-in account's playlists, and the track lists already opened.
+/// What a route shows, kept while the app runs so going back costs nothing.
+enum PageContent {
+    case tracks(TrackList)
+    case album(AlbumDetail)
+    case artist(ArtistDetail)
+    case search(SearchResultsModel)
+}
+
+/// The signed-in account's playlists, and the content of every page opened.
 @MainActor
 @Observable
 final class Library {
     private(set) var playlists: [Playlist] = []
     private(set) var playlistsError: String?
-    private var lists: [Route: TrackList] = [:]
+    /// Filled by `prepare` before a route is shown; views only read it.
+    @ObservationIgnored private var pages: [Route: PageContent] = [:]
     private let api: SpotifyWebAPI
     private var username: String?
 
@@ -16,51 +25,53 @@ final class Library {
         self.api = api
     }
 
-    func signedIn(as username: String) {
+    func signedIn(as username: String, showing route: Route) {
         self.username = username
+        prepare(route)
         Task { await loadPlaylists() }
     }
 
     func signedOut() {
         username = nil
         playlists = []
-        lists = [:]
+        pages = [:]
     }
 
+    /// Shows each page of playlists as it arrives.
     func loadPlaylists() async {
         playlistsError = nil
         var loaded: [Playlist] = []
+        var offset = 0
         do {
-            var offset = 0
-            while true {
+            repeat {
                 let page = try await api.myPlaylists(offset: offset)
                 loaded += page.items
+                playlists = loaded
                 offset += page.items.count
-                guard page.next != nil, !page.items.isEmpty else { break }
-            }
-            playlists = loaded
+                if page.next == nil || page.items.isEmpty { break }
+            } while true
         } catch {
             playlistsError = error.localizedDescription
-            if playlists.isEmpty { playlists = loaded }
         }
     }
 
-    /// The track list for a route, kept while the app runs so going back is
-    /// free.
-    func trackList(for route: Route) -> TrackList? {
-        if let list = lists[route] { return list }
-        let list: TrackList
+    func content(for route: Route) -> PageContent? {
+        pages[route]
+    }
+
+    /// Creates the content for `route` the first time it is shown.
+    func prepare(_ route: Route) {
+        guard pages[route] == nil, let username else { return }
+        let content: PageContent
         switch route {
-        case .likedSongs:
-            guard let username else { return nil }
-            list = .liked(api: api, username: username)
-        case .playlist(let id, _):
-            list = .playlist(api: api, id: id)
-        default:
-            return nil
+        case .whatsNew: content = .tracks(.recentlyPlayed(api: api))
+        case .likedSongs: content = .tracks(.liked(api: api, username: username))
+        case .playlist(let id, _): content = .tracks(.playlist(api: api, id: id))
+        case .album(let id): content = .album(AlbumDetail(id: id, api: api))
+        case .artist(let id): content = .artist(ArtistDetail(id: id, api: api))
+        case .search(let query): content = .search(SearchResultsModel(query: query, api: api))
+        case .queue, .albums, .artists: return
         }
-        lists[route] = list
-        list.loadMore()
-        return list
+        pages[route] = content
     }
 }

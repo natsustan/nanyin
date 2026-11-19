@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// The "textured rounded" button of Snow Leopard toolbars: a light metal
-/// gradient with a dark rim, pressed darker.
+/// gradient with a dark rim, pressed darker. Always drawn light, wherever
+/// it sits.
 struct TexturedButtonStyle: ButtonStyle {
     var width: CGFloat? = nil
 
@@ -19,7 +20,7 @@ struct TexturedButtonStyle: ButtonStyle {
             configuration.label
                 .font(.system(size: 11, weight: .bold))
                 .foregroundStyle(Theme.hex(0x3A3A3A).opacity(isEnabled ? 1 : 0.35))
-                .shadow(color: .white.opacity(0.6), radius: 0, y: 1)
+                .embossed()
                 .frame(width: width, height: 22)
                 .padding(.horizontal, width == nil ? 8 : 0)
                 .background {
@@ -32,6 +33,7 @@ struct TexturedButtonStyle: ButtonStyle {
                 .overlay(shape.strokeBorder(Theme.hex(0x5E5E5E, 0.85), lineWidth: 1))
                 .background(shape.fill(.white.opacity(0.35)).offset(y: 1))
                 .contentShape(shape)
+                .environment(\.colorScheme, .light)
         }
     }
 }
@@ -127,7 +129,7 @@ struct GraphiteToggleStyle: ButtonStyle {
             .font(.system(size: 12, weight: .semibold))
             .foregroundStyle(isOn ? Theme.green : Theme.hex(0xC8C8C8))
             .opacity(configuration.isPressed ? 0.6 : 1)
-            .shadow(color: .black.opacity(0.6), radius: 0, y: -1)
+            .engraved()
             .frame(width: 24, height: 22)
             .contentShape(Rectangle())
     }
@@ -141,12 +143,12 @@ struct GraphiteHeader<Content: View>: View {
         HStack(spacing: 6) { content }
             .font(AquaFont.bold(11))
             .foregroundStyle(Theme.hex(0xE6E6E6))
-            .shadow(color: .black.opacity(0.6), radius: 0, y: -1)
+            .engraved()
             .padding(.horizontal, 8)
             .frame(height: 22)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Theme.graphite)
-            .overlay(alignment: .top) { Rectangle().fill(Theme.graphiteHighlight).frame(height: 1) }
-            .overlay(alignment: .bottom) { Rectangle().fill(Theme.graphiteEdge).frame(height: 1) }
+            .hairline(.top, Theme.graphiteHighlight)
+            .hairline(.bottom, Theme.graphiteEdge)
     }
 }

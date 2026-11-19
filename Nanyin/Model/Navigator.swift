@@ -20,32 +20,43 @@ final class Navigator {
     private(set) var current: Route = .whatsNew
     private var back: [Route] = []
     private var forward: [Route] = []
+    /// Runs before the new route is shown, so its content can be prepared.
+    @ObservationIgnored var willShow: (Route) -> Void = { _ in }
 
     var canGoBack: Bool { !back.isEmpty }
     var canGoForward: Bool { !forward.isEmpty }
 
-    func go(to route: Route) {
+    /// `replacing` swaps the current entry instead of adding one (a search
+    /// refined while typing).
+    func go(to route: Route, replacing: Bool = false) {
         guard route != current else { return }
-        // Typing a search replaces the search page instead of stacking up
-        // one history entry per keystroke.
-        if case .search = route, case .search = current {
-            current = route
-            return
+        if !replacing {
+            back.append(current)
+            forward.removeAll()
         }
-        back.append(current)
-        forward.removeAll()
-        current = route
+        show(route)
     }
 
     func goBack() {
         guard let previous = back.popLast() else { return }
         forward.append(current)
-        current = previous
+        show(previous)
     }
 
     func goForward() {
         guard let next = forward.popLast() else { return }
         back.append(current)
-        current = next
+        show(next)
+    }
+
+    func reset() {
+        back.removeAll()
+        forward.removeAll()
+        current = .whatsNew
+    }
+
+    private func show(_ route: Route) {
+        willShow(route)
+        current = route
     }
 }

@@ -5,20 +5,12 @@ import SwiftUI
 /// zebra rows down to the bottom of the pane, a green speaker on the playing
 /// row. AppKit's table recycles row views, so thousands of rows stay cheap.
 struct TrackTable: NSViewRepresentable {
-    enum Column: String, CaseIterable {
+    enum Column: String {
         case indicator, track, artist, time, popularity, album, added
 
-        var title: String {
-            switch self {
-            case .indicator: ""
-            case .track: "Track"
-            case .artist: "Artist"
-            case .time: "Time"
-            case .popularity: "Popularity"
-            case .album: "Album"
-            case .added: "Added"
-            }
-        }
+        static let standard: [Column] = [.indicator, .track, .artist, .time, .popularity, .album]
+
+        var title: String { self == .indicator ? "" : rawValue.capitalized }
     }
 
     struct Actions {
@@ -30,7 +22,7 @@ struct TrackTable: NSViewRepresentable {
 
     let rows: [TrackRow]
     let playingURI: String?
-    var columns: [Column] = [.indicator, .track, .artist, .time, .popularity, .album]
+    var columns = Column.standard
     let actions: Actions
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -42,7 +34,7 @@ struct TrackTable: NSViewRepresentable {
         table.rowHeight = 19
         table.intercellSpacing = NSSize(width: 0, height: 0)
         table.gridStyleMask = []
-        table.backgroundColor = Theme.rowEven
+        table.backgroundColor = Theme.row(0)
         table.allowsMultipleSelection = true
         table.allowsColumnReordering = false
         table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
@@ -76,7 +68,7 @@ struct TrackTable: NSViewRepresentable {
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
         scroll.drawsBackground = true
-        scroll.backgroundColor = Theme.rowEven
+        scroll.backgroundColor = Theme.row(0)
         scroll.scrollerStyle = .overlay
         return scroll
     }
@@ -85,20 +77,26 @@ struct TrackTable: NSViewRepresentable {
         let coordinator = context.coordinator
         coordinator.actions = actions
         guard let table = coordinator.table else { return }
-        table.actions = actions
-        if coordinator.rows != rows {
+        let old = coordinator.rows
+        if old != rows {
             coordinator.rows = rows
-            table.reloadData()
-        } else if coordinator.playingURI != playingURI {
-            let changed = coordinator.rows.indices.filter {
-                coordinator.rows[$0].uri == coordinator.playingURI || coordinator.rows[$0].uri == playingURI
-            }
             coordinator.playingURI = playingURI
-            table.reloadData(
-                forRowIndexes: IndexSet(changed),
-                columnIndexes: IndexSet(integersIn: 0 ..< table.numberOfColumns))
+            if rows.count > old.count, rows.starts(with: old) {
+                // A page arrived: add its rows, leave the visible ones be.
+                table.insertRows(at: IndexSet(old.count ..< rows.count), withAnimation: [])
+            } else {
+                table.reloadData()
+            }
+        } else if coordinator.playingURI != playingURI {
+            coordinator.playingURI = playingURI
+            // Only the speaker moves: redraw that column for the rows on screen.
+            if let column = columns.firstIndex(of: .indicator) {
+                let visible = table.rows(in: table.visibleRect)
+                table.reloadData(
+                    forRowIndexes: IndexSet(integersIn: visible.location ..< visible.location + visible.length),
+                    columnIndexes: IndexSet(integer: column))
+            }
         }
-        coordinator.playingURI = playingURI
     }
 
     @MainActor
@@ -131,21 +129,17 @@ struct TrackTable: NSViewRepresentable {
                 let view = reuse(tableView, "popularity") { PopularityCell() }
                 view.popularity = track.popularity
                 return view
-            default:
+            case .track, .artist, .album, .time, .added:
+                let text = switch column {
+                case .track: track.name
+                case .artist: track.artistNames
+                case .album: track.album
+                case .time: track.duration
+                default: track.added
+                }
                 let view = reuse(tableView, "text") { TextCell() }
-                view.set(text(for: column, of: track), secondary: !track.isPlayable, alignRight: column == .time)
+                view.set(text, secondary: !track.isPlayable, alignRight: column == .time)
                 return view
-            }
-        }
-
-        private func text(for column: Column, of track: TrackRow) -> String {
-            switch column {
-            case .track: track.name
-            case .artist: track.artistNames
-            case .album: track.album
-            case .time: Self.duration(track.durationMs)
-            case .added: track.addedAt.flatMap(Self.addedDate) ?? ""
-            case .indicator, .popularity: ""
             }
         }
 
@@ -155,16 +149,6 @@ struct TrackTable: NSViewRepresentable {
             let view = make()
             view.identifier = identifier
             return view
-        }
-
-        static func duration(_ ms: Int) -> String {
-            let seconds = ms / 1000
-            return String(format: "%d:%02d", seconds / 60, seconds % 60)
-        }
-
-        private static let isoParser = ISO8601DateFormatter()
-        static func addedDate(_ value: String) -> String? {
-            isoParser.date(from: value)?.formatted(date: .numeric, time: .omitted)
         }
 
         @objc func doubleClicked(_ sender: NSTableView) {
@@ -226,16 +210,15 @@ struct TrackTable: NSViewRepresentable {
 
 /// Return plays the selection; space plays or pauses, as in iTunes.
 final class TrackTableView: NSTableView {
-    var actions: TrackTable.Actions?
-
     override func keyDown(with event: NSEvent) {
+        guard let coordinator = delegate as? TrackTable.Coordinator else { return super.keyDown(with: event) }
         switch event.keyCode {
         case 36, 76: // return, enter
-            if let coordinator = delegate as? TrackTable.Coordinator, coordinator.rows.indices.contains(selectedRow) {
-                actions?.play(coordinator.rows[selectedRow])
+            if coordinator.rows.indices.contains(selectedRow) {
+                coordinator.actions.play(coordinator.rows[selectedRow])
             }
         case 49: // space
-            actions?.togglePlayPause()
+            coordinator.actions.togglePlayPause()
         default:
             super.keyDown(with: event)
         }
@@ -247,7 +230,7 @@ final class TrackTableView: NSTableView {
         guard height > 0 else { return super.drawBackground(inClipRect: clipRect) }
         var index = max(0, Int(clipRect.minY / height))
         while CGFloat(index) * height < clipRect.maxY {
-            (index.isMultiple(of: 2) ? Theme.rowEven : Theme.rowOdd).setFill()
+            Theme.row(index).setFill()
             NSRect(x: clipRect.minX, y: CGFloat(index) * height, width: clipRect.width, height: height).fill()
             index += 1
         }
@@ -258,18 +241,18 @@ final class ZebraRowView: NSTableRowView {
     static let identifier = NSUserInterfaceItemIdentifier("zebra")
     var index = 0 { didSet { needsDisplay = true } }
 
+    private static let selection = NSGradient(starting: Theme.nsSelectionTop, ending: Theme.nsSelectionBottom)
+    private static let inactiveSelection = NSGradient(starting: Theme.ns(0x5A5A5A), ending: Theme.ns(0x4A4A4A))
+    private static let shine = NSColor.white.withAlphaComponent(0.15)
+
     override func drawBackground(in dirtyRect: NSRect) {
-        (index.isMultiple(of: 2) ? Theme.rowEven : Theme.rowOdd).setFill()
+        Theme.row(index).setFill()
         bounds.fill()
     }
 
     override func drawSelection(in dirtyRect: NSRect) {
-        let active = isEmphasized
-        NSGradient(
-            starting: active ? Theme.nsSelectionTop : Theme.nsHex(0x5A5A5A),
-            ending: active ? Theme.nsSelectionBottom : Theme.nsHex(0x4A4A4A))?
-            .draw(in: bounds, angle: -90)
-        NSColor.white.withAlphaComponent(0.15).setFill()
+        (isEmphasized ? Self.selection : Self.inactiveSelection)?.draw(in: bounds, angle: -90)
+        Self.shine.setFill()
         NSRect(x: 0, y: 0, width: bounds.width, height: 1).fill()
     }
 
@@ -277,6 +260,7 @@ final class ZebraRowView: NSTableRowView {
 }
 
 private final class TextCell: NSTableCellView {
+    private static let unplayable = Theme.nsSecondaryText.withAlphaComponent(0.6)
     private let label = NSTextField(labelWithString: "")
 
     override init(frame: NSRect) {
@@ -299,7 +283,7 @@ private final class TextCell: NSTableCellView {
 
     func set(_ text: String, secondary: Bool, alignRight: Bool) {
         label.stringValue = text
-        label.textColor = secondary ? Theme.nsSecondaryText.withAlphaComponent(0.6) : Theme.nsText
+        label.textColor = secondary ? Self.unplayable : Theme.nsText
         label.alignment = alignRight ? .right : .left
     }
 }
@@ -323,6 +307,8 @@ private final class IndicatorCell: NSView {
 private final class PopularityCell: NSView {
     var popularity: Int? { didSet { needsDisplay = true } }
     private static let bars = 12
+    private static let lit = Theme.ns(0xBDBDBD)
+    private static let unlit = Theme.ns(0x555555)
 
     override func draw(_ dirtyRect: NSRect) {
         guard let popularity else { return }
@@ -330,7 +316,7 @@ private final class PopularityCell: NSView {
         let barWidth: CGFloat = 2, gap: CGFloat = 2, height: CGFloat = 8
         let y = (bounds.height - height) / 2
         for bar in 0 ..< Self.bars {
-            (bar < lit ? Theme.nsHex(0xBDBDBD) : Theme.nsHex(0x555555)).setFill()
+            (bar < lit ? Self.lit : Self.unlit).setFill()
             NSRect(x: 6 + CGFloat(bar) * (barWidth + gap), y: y, width: barWidth, height: height).fill()
         }
     }
@@ -360,36 +346,35 @@ final class GraphiteCornerView: NSView {
 }
 
 final class GraphiteHeaderCell: NSTableHeaderCell {
+    private static let gradient = NSGradient(starting: Theme.nsGraphiteTop, ending: Theme.nsGraphiteBottom)
+    private static let separator = Theme.ns(0x2A2A2A)
+    private static let attributes: [NSAttributedString.Key: Any] = {
+        let shadow = NSShadow()
+        shadow.shadowColor = .black.withAlphaComponent(0.6)
+        shadow.shadowOffset = NSSize(width: 0, height: 1)
+        return [.font: AquaFont.ns(11, bold: true), .foregroundColor: Theme.ns(0xE0E0E0), .shadow: shadow]
+    }()
+
     static func drawBackground(in rect: NSRect) {
-        NSGradient(starting: Theme.nsHex(0x585858), ending: Theme.nsHex(0x383838))?.draw(in: rect, angle: -90)
-        Theme.nsHex(0x1C1C1C).setFill()
+        gradient?.draw(in: rect, angle: -90)
+        Theme.nsGraphiteEdge.setFill()
         NSRect(x: rect.minX, y: rect.maxY - 1, width: rect.width, height: 1).fill()
-        NSColor.white.withAlphaComponent(0.14).setFill()
+        Theme.nsGraphiteHighlight.setFill()
         NSRect(x: rect.minX, y: rect.minY, width: rect.width, height: 1).fill()
     }
 
     override func draw(withFrame cellFrame: NSRect, in controlView: NSView) {
         Self.drawBackground(in: cellFrame)
-        // Column separator.
-        Theme.nsHex(0x2A2A2A).setFill()
+        Self.separator.setFill()
         NSRect(x: cellFrame.maxX - 1, y: cellFrame.minY + 3, width: 1, height: cellFrame.height - 6).fill()
         drawInterior(withFrame: cellFrame, in: controlView)
     }
 
     override func drawInterior(withFrame cellFrame: NSRect, in controlView: NSView) {
-        let shadow = NSShadow()
-        shadow.shadowColor = .black.withAlphaComponent(0.6)
-        shadow.shadowOffset = NSSize(width: 0, height: 1)
-        shadow.shadowBlurRadius = 0
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: AquaFont.ns(11, bold: true),
-            .foregroundColor: Theme.nsHex(0xE0E0E0),
-            .shadow: shadow,
-        ]
-        let text = NSAttributedString(string: stringValue, attributes: attributes)
-        let size = text.size()
+        let text = NSAttributedString(string: stringValue, attributes: Self.attributes)
+        let height = text.size().height
         text.draw(in: NSRect(
-            x: cellFrame.minX + 5, y: cellFrame.midY - size.height / 2,
-            width: cellFrame.width - 10, height: size.height))
+            x: cellFrame.minX + 5, y: cellFrame.midY - height / 2,
+            width: cellFrame.width - 10, height: height))
     }
 }

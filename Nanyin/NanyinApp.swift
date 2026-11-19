@@ -4,6 +4,12 @@ import SwiftUI
 struct NanyinApp: App {
     @State private var app = AppModel()
 
+    init() {
+        // Cover art comes from Spotify's image CDN (not the Web API); keep
+        // enough of it that revisiting a page does not download it again.
+        URLCache.shared = URLCache(memoryCapacity: 64 << 20, diskCapacity: 512 << 20)
+    }
+
     var body: some Scene {
         Window("Nanyin", id: "main") {
             MainWindow()

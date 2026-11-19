@@ -10,7 +10,7 @@ import Observation
 @MainActor
 @Observable
 final class Player {
-    enum Repeat: CaseIterable {
+    enum Repeat {
         case off, context, track
 
         var next: Repeat {
@@ -40,17 +40,22 @@ final class Player {
     private(set) var position = Position(ms: 0, at: .now, advancing: false)
     private(set) var shuffle = false
     private(set) var repeatMode = Repeat.off
-    private(set) var volume: UInt16
+    private(set) var volume = Player.savedVolume
     /// Set when another device took playback over.
     private(set) var playingElsewhere = false
     var lastError: String?
 
     private let session: PlaybackSession
-    private let engine = PlaybackEngine.shared
+    @ObservationIgnored private var volumeDrag: (lastSent: Date, pending: Task<Void, Never>?)?
+
+    private static let volumeKey = "PlaybackVolume"
+    static var savedVolume: UInt16 {
+        let saved = UserDefaults.standard.object(forKey: volumeKey) as? Int
+        return UInt16(clamping: saved ?? Int(Double(UInt16.max) * 0.7))
+    }
 
     init(session: PlaybackSession) {
         self.session = session
-        volume = session.volume
         session.onPlayerEvent = { [weak self] event in self?.handle(event) }
     }
 
@@ -58,18 +63,23 @@ final class Player {
 
     // MARK: Commands
 
-    /// Plays `startURI` within `contextURI` (a playlist, album, artist or the
-    /// Liked Songs collection). Spotify resolves the context server-side.
-    func play(contextURI: String, startURI: String? = nil) {
-        load(.init(contextURI: contextURI, startURI: startURI), uri: startURI)
+    /// Plays `row` within `list`: inside its context (a playlist, album,
+    /// artist or Liked Songs, resolved by Spotify) when it has one, otherwise
+    /// as the list's own short run of tracks.
+    func play(_ row: TrackRow, in list: TrackList) {
+        let load: CoreCommand.Load = if let context = list.contextURI {
+            .init(contextURI: context, startURI: row.uri)
+        } else {
+            .init(trackURIs: list.rows.map(\.uri), startURI: row.uri)
+        }
+        start(load, uri: row.uri)
     }
 
-    /// Plays a short explicit list of tracks (search results, say).
-    func play(trackURIs: [String], startURI: String) {
-        load(.init(trackURIs: trackURIs, startURI: startURI), uri: startURI)
+    func play(contextURI: String) {
+        start(.init(contextURI: contextURI), uri: nil)
     }
 
-    private func load(_ load: CoreCommand.Load, uri: String?) {
+    private func start(_ load: CoreCommand.Load, uri: String?) {
         guard send(.load(load)) else { return }
         requestedURI = uri
         isLoading = true
@@ -98,10 +108,29 @@ final class Player {
         position = Position(ms: ms, at: .now, advancing: isPlaying)
     }
 
-    func setVolume(_ value: UInt16) {
+    /// While a slider drags, the knob follows at once but the core hears at
+    /// most every 150 ms; the final value is always sent and saved.
+    func setVolume(_ value: UInt16, final: Bool) {
         volume = value
-        session.volume = value
-        send(.volume(value))
+        let now = Date.now
+        var drag = volumeDrag ?? (lastSent: .distantPast, pending: nil)
+        drag.pending?.cancel()
+        if final {
+            volumeDrag = nil
+            UserDefaults.standard.set(Int(value), forKey: Self.volumeKey)
+            send(.volume(value))
+        } else if now.timeIntervalSince(drag.lastSent) >= 0.15 {
+            volumeDrag = (lastSent: now, pending: nil)
+            send(.volume(value))
+        } else {
+            drag.pending = Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(150))
+                guard !Task.isCancelled, let self, self.volumeDrag != nil else { return }
+                self.volumeDrag?.lastSent = .now
+                self.send(.volume(self.volume))
+            }
+            volumeDrag = drag
+        }
     }
 
     func toggleShuffle() {
@@ -121,13 +150,8 @@ final class Player {
 
     @discardableResult
     private func send(_ command: CoreCommand) -> Bool {
-        guard session.isReady, engine.send(command) else {
-            lastError = session.isReady
-                ? "Playback stopped responding."
-                : "Set up playback on this Mac first."
-            return false
-        }
-        return true
+        lastError = session.send(command)
+        return lastError == nil
     }
 
     // MARK: Events
@@ -159,8 +183,11 @@ final class Player {
             if requestedURI == uri { requestedURI = nil }
             lastError = "This song is not available."
         case .volume(let value):
-            volume = value
-            session.volume = value
+            // The core echoes what a drag sent; the knob already shows it.
+            if volumeDrag == nil {
+                volume = value
+                UserDefaults.standard.set(Int(value), forKey: Self.volumeKey)
+            }
         case .shuffle(let on):
             shuffle = on
         case .repeat(let context, let track):
@@ -170,7 +197,7 @@ final class Player {
             isLoading = false
             playingElsewhere = true
             position = Position(ms: position.current(), at: .now, advancing: false)
-        default:
+        case .connected, .connectFailed, .sessionEnded:
             break
         }
     }

@@ -4,9 +4,9 @@ import SwiftUI
 /// title on top, history and search below, the account on the right.
 struct MainToolbar: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.appearsActive) private var appearsActive
     @State private var query = ""
     @State private var debounce: Task<Void, Never>?
-    @State private var isFrontmost = true
 
     static let height: CGFloat = 54
 
@@ -16,29 +16,26 @@ struct MainToolbar: View {
             TitleBarDragArea()
             Text("Nanyin")
                 .font(AquaFont.regular(13))
-                .foregroundStyle(Theme.metalText.opacity(isFrontmost ? 1 : 0.5))
-                .shadow(color: .white.opacity(0.6), radius: 0, y: 1)
+                .foregroundStyle(Theme.metalText.opacity(appearsActive ? 1 : 0.5))
+                .embossed()
                 .padding(.top, 3)
                 .allowsHitTesting(false)
-            HStack(spacing: 0) {
-                TrafficLights()
-                Spacer()
-            }
-            .padding(.leading, 8)
-            .padding(.top, 2)
+            TrafficLights()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, 8)
+                .padding(.top, 2)
             HStack(spacing: 10) {
-                HStack(spacing: 0) {
-                    Button { navigator.goBack() } label: { Image(systemName: "chevron.left") }
+                HStack(spacing: -1) {
+                    Button(action: navigator.goBack) { Image(systemName: "chevron.left") }
                         .buttonStyle(TexturedButtonStyle(width: 28))
                         .disabled(!navigator.canGoBack)
                         .keyboardShortcut("[", modifiers: .command)
-                    Button { navigator.goForward() } label: { Image(systemName: "chevron.right") }
+                    Button(action: navigator.goForward) { Image(systemName: "chevron.right") }
                         .buttonStyle(TexturedButtonStyle(width: 28))
                         .disabled(!navigator.canGoForward)
                         .keyboardShortcut("]", modifiers: .command)
-                        .padding(.leading, -1)
                 }
-                AquaSearchField(text: $query, onSubmit: search)
+                AquaSearchField(text: $query) { search(replacing: false) }
                     .frame(width: 220)
                     .onChange(of: query) { scheduleSearch() }
                 Spacer()
@@ -52,15 +49,9 @@ struct MainToolbar: View {
             .padding(.bottom, 1)
         }
         .frame(height: Self.height)
-        .background {
-            LinearGradient(
-                colors: isFrontmost ? [Theme.metalTop, Theme.metalBottom] : [Theme.metalInactiveTop, Theme.metalInactiveBottom],
-                startPoint: .top, endPoint: .bottom)
-        }
-        .overlay(alignment: .top) { Rectangle().fill(.white.opacity(0.7)).frame(height: 1) }
-        .overlay(alignment: .bottom) { Rectangle().fill(Theme.metalEdge).frame(height: 1) }
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in isFrontmost = true }
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { _ in isFrontmost = false }
+        .background(Theme.metal(active: appearsActive))
+        .hairline(.top, .white.opacity(0.7))
+        .hairline(.bottom, Theme.metalEdge)
     }
 
     private var accountMenu: some View {
@@ -79,21 +70,25 @@ struct MainToolbar: View {
         .fixedSize()
     }
 
+    /// Typing searches after a pause, refining the current search page
+    /// instead of adding a history entry per pause.
     private func scheduleSearch() {
         debounce?.cancel()
-        let text = query.trimmingCharacters(in: .whitespaces)
-        guard !text.isEmpty else { return }
         debounce = Task {
             try? await Task.sleep(for: .milliseconds(450))
             guard !Task.isCancelled else { return }
-            app.navigator.go(to: .search(text))
+            search(replacing: true)
         }
     }
 
-    private func search() {
+    private func search(replacing: Bool) {
         debounce?.cancel()
         let text = query.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else { return }
-        app.navigator.go(to: .search(text))
+        if case .search = app.navigator.current {
+            app.navigator.go(to: .search(text), replacing: replacing)
+        } else {
+            app.navigator.go(to: .search(text))
+        }
     }
 }

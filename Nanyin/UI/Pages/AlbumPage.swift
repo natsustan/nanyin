@@ -3,101 +3,56 @@ import SwiftUI
 
 struct AlbumPage: View {
     @Environment(AppModel.self) private var app
-    let id: String
-    @State private var album: Album?
-    @State private var list: TrackList?
-    @State private var error: String?
+    let detail: AlbumDetail
 
     var body: some View {
         VStack(spacing: 0) {
-            if let album {
-                HStack(alignment: .top, spacing: 12) {
+            if let album = detail.album {
+                PageHeader(title: album.name, subtitle: subtitle(album)) {
                     CoverImage(url: album.images?.best(minimum: 200), size: 96)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(album.name).font(AquaFont.bold(18)).foregroundStyle(Theme.text)
-                        HStack(spacing: 4) {
-                            Text("by").foregroundStyle(Theme.secondaryText)
-                            ForEach(album.artists, id: \.self) { artist in
-                                Button(artist.name) {
-                                    if let id = artist.id { app.navigator.go(to: .artist(id: id)) }
-                                }
-                                .buttonStyle(.plain)
-                                .foregroundStyle(Theme.text)
-                            }
-                        }
-                        .font(AquaFont.regular(12))
-                        Text([album.release_date.map { String($0.prefix(4)) }, album.total_tracks.map { "\($0) tracks" }]
-                            .compactMap { $0 }.joined(separator: " · "))
-                            .font(AquaFont.regular(11))
-                            .foregroundStyle(Theme.secondaryText)
-                        Spacer(minLength: 0)
-                        Button("Play") { app.player.play(contextURI: album.uri) }
-                            .buttonStyle(TexturedButtonStyle())
-                            .environment(\.colorScheme, .light)
-                    }
-                    Spacer()
+                } accessory: {
+                    Button("Play") { app.player.play(contextURI: album.uri) }
+                        .buttonStyle(TexturedButtonStyle())
                 }
-                .shadow(color: .black.opacity(0.5), radius: 0, y: -1)
-                .padding(14)
-                .frame(height: 124)
-                .background(LinearGradient(colors: [Theme.hex(0x3A3A3A), Theme.hex(0x2C2C2C)], startPoint: .top, endPoint: .bottom))
-                .overlay(alignment: .bottom) { Rectangle().fill(Theme.divider).frame(height: 1) }
             } else {
-                PageHeader(title: "Album", subtitle: error ?? "Loading…")
+                PageHeader(title: "Album", subtitle: detail.error ?? "Loading…")
             }
-            if let list {
-                TrackListTable(list: list, columns: [.indicator, .track, .artist, .time])
+            if let tracks = detail.tracks {
+                TrackListTable(list: tracks, columns: [.indicator, .track, .artist, .time])
             } else {
                 Theme.content
             }
         }
-        .task(id: id) {
-            do {
-                let loaded = try await app.account.api.album(id)
-                album = loaded
-                list = .album(loaded)
-            } catch {
-                self.error = error.localizedDescription
-            }
-        }
+    }
+
+    private func subtitle(_ album: Album) -> String {
+        [album.artists.names, album.releaseYear, album.total_tracks.map { "\($0) tracks" }]
+            .compactMap { $0 }.joined(separator: " · ")
     }
 }
 
 struct ArtistPage: View {
     @Environment(AppModel.self) private var app
-    let id: String
-    @State private var artist: Artist?
-    @State private var topTracks: TrackList?
-    @State private var albums: [AlbumSummary] = []
-    @State private var error: String?
+    let detail: ArtistDetail
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                CoverImage(url: artist?.images?.best(minimum: 200), size: 72)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(artist?.name ?? "Artist").font(AquaFont.bold(18)).foregroundStyle(Theme.text)
-                    Text(error ?? artist?.genres?.prefix(3).joined(separator: ", ") ?? "")
-                        .font(AquaFont.regular(11))
-                        .foregroundStyle(Theme.secondaryText)
-                    if let artist {
-                        Button("Play") { app.player.play(contextURI: artist.uri) }
-                            .buttonStyle(TexturedButtonStyle())
-                            .environment(\.colorScheme, .light)
-                    }
+            PageHeader(
+                title: detail.artist?.name ?? "Artist",
+                subtitle: detail.error ?? detail.artist?.genres?.prefix(3).joined(separator: ", ") ?? ""
+            ) {
+                CoverImage(url: detail.artist?.images?.best(minimum: 200), size: 72)
+            } accessory: {
+                if let artist = detail.artist {
+                    Button("Play") { app.player.play(contextURI: artist.uri) }
+                        .buttonStyle(TexturedButtonStyle())
                 }
-                Spacer()
             }
-            .shadow(color: .black.opacity(0.5), radius: 0, y: -1)
-            .padding(14)
-            .background(LinearGradient(colors: [Theme.hex(0x3A3A3A), Theme.hex(0x2C2C2C)], startPoint: .top, endPoint: .bottom))
-            if !albums.isEmpty {
+            if !detail.albums.isEmpty {
                 GraphiteHeader { Text("Albums and Singles") }
                 ScrollView(.horizontal) {
                     LazyHStack(alignment: .top, spacing: 12) {
-                        ForEach(albums) { album in
-                            AlbumTile(album: album)
-                        }
+                        ForEach(detail.albums) { AlbumTile(album: $0) }
                     }
                     .padding(10)
                 }
@@ -106,23 +61,10 @@ struct ArtistPage: View {
                 .background(Theme.content)
             }
             GraphiteHeader { Text("Popular") }
-            if let topTracks {
-                TrackListTable(list: topTracks, columns: [.indicator, .track, .time, .popularity, .album])
+            if let tracks = detail.topTracks {
+                TrackListTable(list: tracks, columns: [.indicator, .track, .time, .popularity, .album])
             } else {
                 Theme.content
-            }
-        }
-        .task(id: id) {
-            let api = app.account.api
-            do {
-                async let artist = api.artist(id)
-                async let top = api.artistTopTracks(id)
-                async let albums = api.artistAlbums(id)
-                self.artist = try await artist
-                topTracks = .tracks(try await top, contextURI: "spotify:artist:\(id)")
-                self.albums = (try? await albums.items) ?? []
-            } catch {
-                self.error = error.localizedDescription
             }
         }
     }
@@ -141,7 +83,7 @@ struct AlbumTile: View {
                 Text(album.name)
                     .font(AquaFont.regular(11))
                     .foregroundStyle(Theme.text)
-                Text(album.release_date.map { String($0.prefix(4)) } ?? "")
+                Text(album.releaseYear ?? "")
                     .font(AquaFont.regular(10))
                     .foregroundStyle(Theme.secondaryText)
             }

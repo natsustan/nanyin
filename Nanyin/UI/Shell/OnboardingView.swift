@@ -25,7 +25,6 @@ struct OnboardingView: View {
                 openURL(URL(string: "https://developer.spotify.com/dashboard")!)
             }
             .buttonStyle(TexturedButtonStyle())
-            .environment(\.colorScheme, .light)
             HStack(spacing: 8) {
                 AquaSearchField(text: $account.clientID, prompt: "Client ID", icon: nil, onSubmit: account.signIn)
                     .frame(width: 280)
@@ -34,11 +33,9 @@ struct OnboardingView: View {
                     ProgressView().controlSize(.small)
                     Button("Cancel", action: account.cancelSignIn)
                         .buttonStyle(TexturedButtonStyle())
-                        .environment(\.colorScheme, .light)
                 default:
                     Button("Sign In with Spotify", action: account.signIn)
                         .buttonStyle(TexturedButtonStyle())
-                        .environment(\.colorScheme, .light)
                         .disabled(!OAuthGrant.looksLikeClientID(account.clientID))
                 }
             }

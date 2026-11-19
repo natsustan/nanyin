@@ -35,18 +35,15 @@ struct PlayerBar: View {
         .padding(.horizontal, 12)
         .frame(height: Self.height)
         .background(Theme.graphite)
-        .overlay(alignment: .top) {
-            VStack(spacing: 0) {
-                Rectangle().fill(Theme.graphiteEdge).frame(height: 1)
-                Rectangle().fill(Theme.graphiteHighlight).frame(height: 1)
-            }
-        }
+        .hairline(.top, Theme.graphiteHighlight)
+        .padding(.top, 1)
+        .hairline(.top, Theme.graphiteEdge)
     }
 }
 
 /// Elapsed time, the scrub bar and the track length. The position is
-/// derived from the player's anchor each frame, so nothing app-wide changes
-/// while a song plays.
+/// derived from the player's anchor, so nothing app-wide changes while a
+/// song plays; the view ticks only while the position advances.
 private struct ProgressScrubber: View {
     @Environment(AppModel.self) private var app
     @State private var dragFraction: Double?
@@ -54,10 +51,15 @@ private struct ProgressScrubber: View {
     var body: some View {
         let player = app.player
         let duration = player.track?.durationMs ?? 0
-        TimelineView(.periodic(from: .now, by: 0.5)) { context in
-            let current = min(player.position.current(at: context.date), duration)
+        let position = player.position
+        let schedule = PositionSchedule(position: position)
+        TimelineView(schedule) { context in
+            let current = min(position.current(at: context.date), duration)
             let fraction = dragFraction ?? (duration > 0 ? Double(current) / Double(duration) : 0)
             HStack(spacing: 8) {
+                if player.isLoading {
+                    ProgressView().controlSize(.mini)
+                }
                 TimeLabel(ms: dragFraction.map { Int($0 * Double(duration)) } ?? current)
                 AquaTrack(fraction: fraction, knob: duration > 0) { value, ended in
                     dragFraction = ended ? nil : value
@@ -70,16 +72,40 @@ private struct ProgressScrubber: View {
     }
 }
 
+/// Ticks on whole seconds of the playing position, and not at all while it
+/// stands still.
+private struct PositionSchedule: TimelineSchedule {
+    let position: Player.Position
+
+    func entries(from start: Date, mode: TimelineScheduleMode) -> AnyIterator<Date> {
+        guard position.advancing else {
+            var once = true
+            return AnyIterator { defer { once = false }; return once ? start : nil }
+        }
+        // The next moment the elapsed time crosses a whole second.
+        let offset = Double(1000 - position.current(at: start) % 1000) / 1000
+        var next: Date? = start
+        var boundary = start.addingTimeInterval(offset)
+        return AnyIterator {
+            if let first = next {
+                next = nil
+                return first
+            }
+            defer { boundary = boundary.addingTimeInterval(1) }
+            return boundary
+        }
+    }
+}
+
 private struct TimeLabel: View {
     let ms: Int
 
     var body: some View {
-        let seconds = max(ms, 0) / 1000
-        Text(String(format: "%d:%02d", seconds / 60, seconds % 60))
+        Text(TrackRow.format(ms: ms))
             .font(AquaFont.regular(10))
             .monospacedDigit()
             .foregroundStyle(Theme.hex(0xD6D6D6))
-            .shadow(color: .black.opacity(0.6), radius: 0, y: -1)
+            .engraved()
             .frame(width: 34)
     }
 }
@@ -92,8 +118,8 @@ private struct VolumeSlider: View {
             Image(systemName: "speaker.fill")
                 .font(.system(size: 9))
                 .foregroundStyle(Theme.hex(0xC8C8C8))
-            AquaTrack(fraction: Double(app.player.volume) / Double(UInt16.max), knob: true) { value, _ in
-                app.player.setVolume(UInt16(value * Double(UInt16.max)))
+            AquaTrack(fraction: Double(app.player.volume) / Double(UInt16.max), knob: true) { value, ended in
+                app.player.setVolume(UInt16(value * Double(UInt16.max)), final: ended)
             }
             .frame(height: 14)
         }

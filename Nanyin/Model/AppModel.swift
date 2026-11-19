@@ -18,16 +18,24 @@ final class AppModel {
         session = PlaybackSession(secrets: secrets)
         player = Player(session: session)
         library = Library(api: account.api)
+        navigator.willShow = { [library] route in library.prepare(route) }
         account.onSignedIn = { [weak self] profile in
-            self?.session.start(for: profile.id)
-            self?.library.signedIn(as: profile.id)
+            guard let self else { return }
+            session.start(for: profile.id)
+            library.signedIn(as: profile.id, showing: navigator.current)
         }
         Task { await account.restore() }
+        // Spotify refused the saved grant during some request: sign out
+        // everywhere, as if the user had.
+        Task { [weak self, revocations = account.auth.revocations] in
+            for await _ in revocations { await self?.signOut() }
+        }
     }
 
     func signOut() async {
         session.signOut()
         library.signedOut()
+        navigator.reset()
         await account.signOut()
     }
 }

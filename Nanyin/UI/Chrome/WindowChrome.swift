@@ -11,8 +11,23 @@ extension NSWindow {
 struct WindowConfigurator: NSViewRepresentable {
     func makeNSView(context: Context) -> WindowAttachmentView {
         let view = WindowAttachmentView()
-        view.windowDidChange = { window in
-            guard let window else { return }
+        view.windowDidChange = { [coordinator = context.coordinator] window in
+            coordinator.configure(window)
+        }
+        return view
+    }
+
+    func updateNSView(_ view: WindowAttachmentView, context: Context) {}
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    @MainActor
+    final class Coordinator {
+        private weak var window: NSWindow?
+        private var observer: NSObjectProtocol?
+
+        func configure(_ window: NSWindow?) {
+            guard let window, window !== self.window else { return }
+            self.window = window
             window.titleVisibility = .hidden
             window.titlebarAppearsTransparent = true
             window.styleMask.insert(.fullSizeContentView)
@@ -20,21 +35,19 @@ struct WindowConfigurator: NSViewRepresentable {
             window.appearance = NSAppearance(named: .darkAqua)
             window.setFrameAutosaveName("Main")
             Self.hideSystemButtons(in: window)
+            observer.map(NotificationCenter.default.removeObserver)
             // SwiftUI puts the buttons back when the window leaves full screen.
-            NotificationCenter.default.addObserver(
+            observer = NotificationCenter.default.addObserver(
                 forName: NSWindow.didExitFullScreenNotification, object: window, queue: .main
             ) { [weak window] _ in
                 MainActor.assumeIsolated { window.map(Self.hideSystemButtons) }
             }
         }
-        return view
-    }
 
-    func updateNSView(_ view: WindowAttachmentView, context: Context) {}
-
-    private static func hideSystemButtons(in window: NSWindow) {
-        for kind: NSWindow.ButtonType in [.closeButton, .miniaturizeButton, .zoomButton] {
-            window.standardWindowButton(kind)?.isHidden = true
+        private static func hideSystemButtons(in window: NSWindow) {
+            for kind: NSWindow.ButtonType in [.closeButton, .miniaturizeButton, .zoomButton] {
+                window.standardWindowButton(kind)?.isHidden = true
+            }
         }
     }
 }

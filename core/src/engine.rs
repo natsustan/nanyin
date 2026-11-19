@@ -20,7 +20,7 @@ use crate::events::{Event, FailureReason};
 
 /// How long the access-point handshake and Connect registration may take
 /// before the attempt is abandoned. Never retried here: Swift decides.
-pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
@@ -67,6 +67,24 @@ pub struct Failure {
     pub message: String,
 }
 
+impl Failure {
+    fn other(message: impl Into<String>) -> Self {
+        Self {
+            reason: FailureReason::Other,
+            message: message.into(),
+        }
+    }
+}
+
+impl From<Failure> for Event {
+    fn from(failure: Failure) -> Self {
+        Event::ConnectFailed {
+            reason: failure.reason,
+            message: failure.message,
+        }
+    }
+}
+
 impl From<Error> for Failure {
     fn from(error: Error) -> Self {
         Self {
@@ -87,6 +105,46 @@ fn classify(error: &Error) -> FailureReason {
         FailureReason::Timeout
     } else {
         FailureReason::Other
+    }
+}
+
+/// Runs one engine from connecting to the end of its session.
+///
+/// `install` is offered the connected engine and hands it back when it has
+/// been superseded meanwhile; it is then shut down without reporting
+/// anything. `uninstall` runs when the session ends and
+/// says whether this engine was still the current one.
+pub async fn run(
+    config: Config,
+    emit: impl Fn(Event) + Clone + Send + Sync + 'static,
+    install: impl FnOnce(Engine) -> Option<Engine>,
+    uninstall: impl FnOnce() -> bool,
+) {
+    let started = tokio::time::timeout(CONNECT_TIMEOUT, Engine::start(config, emit.clone()))
+        .await
+        .unwrap_or_else(|_| {
+            Err(Failure {
+                reason: FailureReason::Timeout,
+                message: "Spotify did not answer in time".into(),
+            })
+        });
+    let (engine, task) = match started {
+        Ok(started) => started,
+        Err(failure) => return emit(failure.into()),
+    };
+    let connected = Event::Connected {
+        username: engine.session.username(),
+        credentials: engine.credentials_json(),
+    };
+    if let Some(stale) = install(engine) {
+        stale.shutdown();
+        task.await;
+        return;
+    }
+    emit(connected);
+    task.await;
+    if uninstall() {
+        emit(Event::SessionEnded);
     }
 }
 
@@ -112,19 +170,17 @@ impl Engine {
         .with_memory_credentials();
         let session = Session::new(session_config, Some(cache));
 
-        let mixer = mixer::find(Some("softvol")).ok_or_else(|| Failure {
-            reason: FailureReason::Other,
-            message: "soft volume mixer missing".into(),
-        })?(MixerConfig {
-            // librespot's default log curve puts every useful level in the
-            // slider's top quarter; cubic spreads it out.
-            volume_ctrl: VolumeCtrl::Cubic(VolumeCtrl::DEFAULT_DB_RANGE),
-            ..MixerConfig::default()
-        })?;
-        let backend = audio_backend::find(None).ok_or_else(|| Failure {
-            reason: FailureReason::Other,
-            message: "audio backend missing".into(),
-        })?;
+        let mixer = mixer::find(Some("softvol"))
+            .ok_or_else(|| Failure::other("soft volume mixer missing"))?(
+            MixerConfig {
+                // librespot's default log curve puts every useful level in the
+                // slider's top quarter; cubic spreads it out.
+                volume_ctrl: VolumeCtrl::Cubic(VolumeCtrl::DEFAULT_DB_RANGE),
+                ..MixerConfig::default()
+            },
+        )?;
+        let backend =
+            audio_backend::find(None).ok_or_else(|| Failure::other("audio backend missing"))?;
         let player = Player::new(
             PlayerConfig {
                 bitrate: Bitrate::Bitrate320,

@@ -35,29 +35,29 @@ private struct RouteView: View {
     let route: Route
 
     var body: some View {
-        switch route {
-        case .whatsNew:
-            WhatsNewPage()
-        case .queue:
+        let content = app.library.content(for: route)
+        switch (route, content) {
+        case (.queue, _):
             PagePlaceholder(title: "Play Queue", message: "Songs you add to the queue appear here.")
-        case .likedSongs:
-            if let list = app.library.trackList(for: route) {
-                TrackListPage(title: "Songs", list: list, columns: [.indicator, .track, .artist, .time, .album, .added])
-            }
-        case .albums:
+        case (.albums, _):
             PagePlaceholder(title: "Albums")
-        case .artists:
+        case (.artists, _):
             PagePlaceholder(title: "Artists")
-        case .playlist(_, let name):
-            if let list = app.library.trackList(for: route) {
-                TrackListPage(title: name, list: list).id(route)
-            }
-        case .album(let id):
-            AlbumPage(id: id).id(route)
-        case .artist(let id):
-            ArtistPage(id: id).id(route)
-        case .search(let query):
-            SearchPage(query: query)
+        case (.whatsNew, .tracks(let list)?):
+            TrackListPage(title: "What's New", subtitle: "Recently played", list: list,
+                          columns: [.indicator, .track, .artist, .time, .album])
+        case (.likedSongs, .tracks(let list)?):
+            TrackListPage(title: "Songs", list: list, columns: [.indicator, .track, .artist, .time, .album, .added])
+        case (.playlist(_, let name), .tracks(let list)?):
+            TrackListPage(title: name, list: list)
+        case (_, .album(let detail)?):
+            AlbumPage(detail: detail)
+        case (_, .artist(let detail)?):
+            ArtistPage(detail: detail)
+        case (.search(let query), .search(let results)?):
+            SearchPage(query: query, results: results)
+        default:
+            Theme.content
         }
     }
 }
@@ -109,7 +109,7 @@ private struct PlaybackNotice: View {
                 .padding(.horizontal, 12)
                 .frame(height: 30)
                 .background(LinearGradient(colors: [Theme.hex(0xFFF6C6), Theme.hex(0xEADB8E)], startPoint: .top, endPoint: .bottom))
-                .overlay(alignment: .top) { Rectangle().fill(Theme.hex(0x8A7A2A)).frame(height: 1) }
+                .hairline(.top, Theme.hex(0x8A7A2A))
                 .environment(\.colorScheme, .light)
             }
         }

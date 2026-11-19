@@ -34,8 +34,6 @@ pub enum Command {
     /// explicit list of tracks. Large lists belong in a context: Spotify
     /// resolves it server-side instead of this device uploading every URI.
     Load(Load),
-    /// Give up being the active device, pausing first.
-    Disconnect,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Default)]
@@ -97,7 +95,6 @@ impl Command {
                 spirc.activate()?;
                 spirc.load(load.request())
             }
-            Self::Disconnect => spirc.disconnect(true),
         }
     }
 }
