@@ -4,6 +4,8 @@ use librespot_metadata::audio::{AudioItem, UniqueFields};
 use librespot_playback::player::PlayerEvent;
 use serde::Serialize;
 
+use crate::queue::QueuedTrack;
+
 #[derive(Debug, Serialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
@@ -51,6 +53,11 @@ pub enum Event {
         context: bool,
         track: bool,
     },
+    /// The tracks after the current one, in play order.
+    Queue {
+        context_uri: String,
+        tracks: Vec<QueuedTrack>,
+    },
 }
 
 #[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
@@ -64,7 +71,7 @@ pub enum FailureReason {
     Other,
 }
 
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Debug, Serialize, PartialEq, Clone)]
 pub struct Track {
     pub uri: String,
     pub name: String,
@@ -75,14 +82,14 @@ pub struct Track {
     pub explicit: bool,
 }
 
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Debug, Serialize, PartialEq, Clone)]
 pub struct Artist {
     pub uri: String,
     pub name: String,
 }
 
 impl Track {
-    fn from_item(item: &AudioItem) -> Self {
+    pub fn from_item(item: &AudioItem) -> Self {
         let (artists, album) = match &item.unique_fields {
             UniqueFields::Track { artists, album, .. } => (
                 artists

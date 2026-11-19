@@ -12,7 +12,7 @@ enum DemoContent {
         let rows = tracks.enumerated().map { index, track in
             TrackRow(
                 index: index, uri: "spotify:track:demo\(index)", name: track.0,
-                artists: [decode(#"{"name":"\#(track.1)"}"#)], album: track.2, durationMs: track.3,
+                artists: track.1, album: track.2, durationMs: track.3,
                 popularity: 90 - index * 4, addedAt: "2010-0\(index % 9 + 1)-1\(index % 9)T10:00:00Z")
         }
         let list = TrackList(rows: rows, contextURI: "spotify:user:demo:collection")
@@ -26,7 +26,8 @@ enum DemoContent {
             CoreTrack(
                 uri: rows[4].uri, name: rows[4].name, artists: [.init(uri: "", name: rows[4].artistNames)],
                 album: rows[4].album, coverURL: nil, durationMs: 206_000, explicit: false),
-            positionMs: 112_000)
+            positionMs: 112_000,
+            upNext: TrackList(rows: Array(rows.dropFirst(5))))
     }
 
     private static func decode<T: Decodable>(_ json: String) -> T {

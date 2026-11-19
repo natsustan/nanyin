@@ -37,8 +37,10 @@ private struct RouteView: View {
     var body: some View {
         let content = app.library.content(for: route)
         switch (route, content) {
-        case (.queue, _):
+        case (.queue, _) where app.player.upNext.rows.isEmpty:
             PagePlaceholder(title: "Play Queue", message: "Songs you add to the queue appear here.")
+        case (.queue, _):
+            TrackListPage(title: "Play Queue", list: app.player.upNext, columns: [.indicator, .track, .artist, .time, .album])
         case (.albums, .albums(let albums)?):
             GridPage(title: "Albums", list: albums) { album in
                 Tile(title: album.name, subtitle: album.artists.names, image: album.images?.best(minimum: 200)) {

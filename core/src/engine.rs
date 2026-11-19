@@ -12,11 +12,14 @@ use librespot_playback::{
     audio_backend,
     config::{AudioFormat, Bitrate, PlayerConfig, VolumeCtrl},
     mixer::{self, MixerConfig},
-    player::Player,
+    player::{Player, PlayerEvent},
 };
 use serde::Deserialize;
 
-use crate::events::{Event, FailureReason};
+use crate::{
+    events::{Event, FailureReason},
+    queue::QueueResolver,
+};
 
 /// How long the access-point handshake and Connect registration may take
 /// before the attempt is abandoned. Never retried here: Swift decides.
@@ -193,9 +196,18 @@ impl Engine {
 
         let mut events = player.get_player_event_channel();
         let emit = Arc::new(emit);
+        let queue = QueueResolver::new(session.clone());
         tokio::spawn(async move {
             while let Some(event) = events.recv().await {
-                if let Some(event) = Event::from_player(event) {
+                if let PlayerEvent::SetQueue {
+                    context_uri,
+                    next_tracks,
+                    ..
+                } = event
+                {
+                    let emit = emit.clone();
+                    queue.update(context_uri, next_tracks, move |event| emit(event));
+                } else if let Some(event) = Event::from_player(event) {
                     emit(event);
                 }
             }
@@ -205,6 +217,7 @@ impl Engine {
             name: config.device_name,
             device_type: DeviceType::Computer,
             initial_volume: config.initial_volume,
+            emit_set_queue_events: true,
             ..ConnectConfig::default()
         };
         let (spirc, task) =

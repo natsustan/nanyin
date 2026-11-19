@@ -40,6 +40,8 @@ final class Player {
     private(set) var position = Position(ms: 0, at: .now, advancing: false)
     private(set) var shuffle = false
     private(set) var repeatMode = Repeat.off
+    /// What plays after the current track, as the core last reported it.
+    private(set) var upNext = TrackList(rows: [])
     private(set) var volume = Player.savedVolume
     /// Set when another device took playback over.
     private(set) var playingElsewhere = false
@@ -204,7 +206,12 @@ final class Player {
             shuffle = on
         case .repeat(let context, let track):
             repeatMode = track ? .track : context ? .context : .off
+        case .queue(let context, let tracks):
+            upNext = TrackList(
+                rows: tracks.enumerated().map { TrackRow(index: $0.offset, track: $0.element.track) },
+                contextURI: context.isEmpty ? nil : context)
         case .deactivated:
+            upNext = TrackList(rows: [])
             isPlaying = false
             isLoading = false
             playingElsewhere = true
@@ -217,8 +224,9 @@ final class Player {
 
 #if DEBUG
 extension Player {
-    func showDemo(_ track: CoreTrack, positionMs: Int) {
+    func showDemo(_ track: CoreTrack, positionMs: Int, upNext: TrackList) {
         self.track = track
+        self.upNext = upNext
         isPlaying = true
         position = Position(ms: positionMs, at: .now, advancing: true)
     }

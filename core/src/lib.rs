@@ -8,6 +8,7 @@
 mod commands;
 mod engine;
 mod events;
+mod queue;
 
 use std::{
     ffi::{CStr, CString, c_char, c_void},

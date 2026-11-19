@@ -15,6 +15,7 @@ enum CoreEvent: Decodable, Equatable {
     case volume(UInt16)
     case shuffle(Bool)
     case `repeat`(context: Bool, track: Bool)
+    case queue(contextURI: String, tracks: [CoreQueuedTrack])
 
     enum FailureReason: String, Decodable {
         case authRejected = "auth_rejected"
@@ -26,7 +27,8 @@ enum CoreEvent: Decodable, Equatable {
     private enum Key: String, CodingKey {
         case type, username, credentials, reason, message, track, uri
         case positionMs = "position_ms"
-        case volume, on, context
+        case volume, on, context, tracks
+        case contextURI = "context_uri"
     }
 
     init(from decoder: Decoder) throws {
@@ -55,6 +57,10 @@ enum CoreEvent: Decodable, Equatable {
         case "shuffle": self = .shuffle(try c.decode(Bool.self, forKey: .on))
         case "repeat":
             self = .repeat(context: try c.decode(Bool.self, forKey: .context), track: try c.decode(Bool.self, forKey: .track))
+        case "queue":
+            self = .queue(
+                contextURI: try c.decode(String.self, forKey: .contextURI),
+                tracks: try c.decode([CoreQueuedTrack].self, forKey: .tracks))
         default:
             throw DecodingError.dataCorruptedError(forKey: .type, in: c, debugDescription: "unknown event \(type)")
         }
@@ -83,6 +89,19 @@ struct CoreTrack: Decodable, Equatable, Sendable {
     }
 
     var artistNames: String { artists.map(\.name).joined(separator: ", ") }
+}
+
+/// A track coming up, and whether the listener queued it by hand.
+struct CoreQueuedTrack: Decodable, Equatable, Sendable {
+    let track: CoreTrack
+    let queued: Bool
+
+    private enum Key: CodingKey { case queued }
+
+    init(from decoder: Decoder) throws {
+        track = try CoreTrack(from: decoder)
+        queued = try decoder.container(keyedBy: Key.self).decode(Bool.self, forKey: .queued)
+    }
 }
 
 /// Commands for the Rust core (`core/src/commands.rs`).

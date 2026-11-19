@@ -16,12 +16,12 @@ struct TrackRow: Identifiable, Hashable, Sendable {
     let added: String
     let isPlayable: Bool
 
-    init(index: Int, uri: String, name: String, artists: [ArtistRef], album: String, durationMs: Int,
+    init(index: Int, uri: String, name: String, artists: String, album: String, durationMs: Int,
          popularity: Int? = nil, addedAt: String? = nil, isPlayable: Bool = true) {
         id = index
         self.uri = uri
         self.name = name
-        artistNames = artists.names
+        artistNames = artists
         self.album = album
         duration = Self.format(ms: durationMs)
         self.popularity = popularity
@@ -31,14 +31,19 @@ struct TrackRow: Identifiable, Hashable, Sendable {
 
     init(index: Int, track: Track, addedAt: String? = nil) {
         self.init(
-            index: index, uri: track.uri, name: track.name, artists: track.artists, album: track.album?.name ?? "",
+            index: index, uri: track.uri, name: track.name, artists: track.artists.names, album: track.album?.name ?? "",
             durationMs: track.duration_ms, popularity: track.popularity, addedAt: addedAt,
             isPlayable: track.is_playable ?? true)
     }
 
     init(index: Int, track: AlbumTrack, album: Album) {
-        self.init(index: index, uri: track.uri, name: track.name, artists: track.artists, album: album.name,
+        self.init(index: index, uri: track.uri, name: track.name, artists: track.artists.names, album: album.name,
                   durationMs: track.duration_ms)
+    }
+
+    init(index: Int, track: CoreTrack) {
+        self.init(index: index, uri: track.uri, name: track.name, artists: track.artistNames, album: track.album,
+                  durationMs: track.durationMs)
     }
 
     /// "3:07".
