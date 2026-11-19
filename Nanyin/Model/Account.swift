@@ -92,3 +92,9 @@ final class Account {
         }
     }
 }
+
+#if DEBUG
+extension Account {
+    func showDemo(_ profile: UserProfile) { state = .signedIn(profile) }
+}
+#endif

@@ -13,12 +13,25 @@ final class AppModel {
     let navigator = Navigator()
 
     init() {
-        let secrets = KeychainStore(service: (Bundle.main.bundleIdentifier ?? "com.cosmoss.nanyin") + ".credentials")
+        #if DEBUG
+        let demo = ProcessInfo.processInfo.environment["NANYIN_DEMO"] == "1"
+        #else
+        let demo = false
+        #endif
+        let secrets: any SecretStore = demo
+            ? MemorySecretStore()
+            : KeychainStore(service: (Bundle.main.bundleIdentifier ?? "com.cosmoss.nanyin") + ".credentials")
         account = Account(secrets: secrets)
         session = PlaybackSession(secrets: secrets)
         player = Player(session: session)
         library = Library(api: account.api)
         navigator.willShow = { [library] route in library.prepare(route) }
+        #if DEBUG
+        if demo {
+            DemoContent.install(in: self)
+            return
+        }
+        #endif
         account.onSignedIn = { [weak self] profile in
             guard let self else { return }
             session.start(for: profile.id)

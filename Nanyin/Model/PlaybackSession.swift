@@ -179,3 +179,9 @@ final class PlaybackSession {
         }
     }
 }
+
+#if DEBUG
+extension PlaybackSession {
+    func showDemoReady() { state = .ready }
+}
+#endif

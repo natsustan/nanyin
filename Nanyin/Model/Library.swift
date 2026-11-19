@@ -75,3 +75,12 @@ final class Library {
         pages[route] = content
     }
 }
+
+#if DEBUG
+extension Library {
+    func showDemo(playlists: [Playlist], pages: [Route: PageContent]) {
+        self.playlists = playlists
+        self.pages = pages
+    }
+}
+#endif

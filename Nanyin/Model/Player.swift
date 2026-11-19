@@ -202,3 +202,13 @@ final class Player {
         }
     }
 }
+
+#if DEBUG
+extension Player {
+    func showDemo(_ track: CoreTrack, positionMs: Int) {
+        self.track = track
+        isPlaying = true
+        position = Position(ms: positionMs, at: .now, advancing: true)
+    }
+}
+#endif
