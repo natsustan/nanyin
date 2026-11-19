@@ -1,0 +1,101 @@
+import Foundation
+import Testing
+@testable import NanyinKit
+
+/// Answers requests from a per-test handler, keyed by a header the session
+/// adds, so parallel tests do not see each other's traffic.
+final class StubProtocol: URLProtocol, @unchecked Sendable {
+    typealias Handler = @Sendable (URLRequest) -> (Int, [String: String], Data)
+    nonisolated(unsafe) static var handlers: [String: Handler] = [:]
+    static let lock = NSLock()
+
+    static func session(_ handler: @escaping Handler) -> URLSession {
+        let id = UUID().uuidString
+        lock.withLock { handlers[id] = handler }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [StubProtocol.self]
+        configuration.httpAdditionalHeaders = ["X-Stub": id]
+        return URLSession(configuration: configuration)
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func stopLoading() {}
+
+    override func startLoading() {
+        let id = request.value(forHTTPHeaderField: "X-Stub") ?? ""
+        let handler = Self.lock.withLock { Self.handlers[id] }!
+        let (status, headers, body) = handler(request)
+        let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: headers)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: body)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+}
+
+final class MemoryCooldown: CooldownStore, @unchecked Sendable {
+    var saved: Date?
+    func load() -> Date? { saved }
+    func save(_ until: Date?) { saved = until }
+}
+
+struct SpotifyWebAPITests {
+    private func signedIn(refresher: @escaping @Sendable (OAuthToken) async throws -> OAuthToken = { _ in throw OAuthError.grantRevoked }) async throws -> WebAPIAuth {
+        let auth = WebAPIAuth(store: MemorySecretStore(), refresher: refresher)
+        try await auth.signIn(with: OAuthToken(accessToken: "a1", refreshToken: "r", expiresAt: .now.addingTimeInterval(3600), scope: "", clientID: "c"))
+        return auth
+    }
+
+    @Test func rateLimitHoldsEveryRequestAndPersists() async throws {
+        let calls = Counter()
+        let session = StubProtocol.session { _ in
+            calls.increment()
+            return (429, ["Retry-After": "120"], Data())
+        }
+        let cooldown = MemoryCooldown()
+        let api = SpotifyWebAPI(auth: try await signedIn(), session: session, cooldownStore: cooldown)
+        await #expect(throws: WebAPIError.self) { try await api.send("GET", "/me") }
+        await #expect(throws: WebAPIError.self) { try await api.send("GET", "/me") }
+        #expect(calls.value == 1)
+        let saved = try #require(cooldown.saved)
+        #expect(saved.timeIntervalSinceNow > 100)
+
+        // A new client (a relaunch) still honours the saved hold.
+        let relaunched = SpotifyWebAPI(auth: try await signedIn(), session: session, cooldownStore: cooldown)
+        await #expect(throws: WebAPIError.rateLimited(until: saved)) { try await relaunched.send("GET", "/me") }
+        #expect(calls.value == 1)
+    }
+
+    @Test func unauthorizedRenewsOnceAndRetriesOnce() async throws {
+        let session = StubProtocol.session { request in
+            request.value(forHTTPHeaderField: "Authorization") == "Bearer a2"
+                ? (200, [:], Data(#"{"id":"u1","display_name":"U","product":"premium"}"#.utf8))
+                : (401, [:], Data())
+        }
+        let auth = try await signedIn { _ in
+            OAuthToken(accessToken: "a2", refreshToken: "r", expiresAt: .now.addingTimeInterval(3600), scope: "", clientID: "c")
+        }
+        let api = SpotifyWebAPI(auth: auth, session: session, cooldownStore: MemoryCooldown())
+        let me = try await api.get("/me", as: UserProfile.self)
+        #expect(me.id == "u1" && me.isPremium)
+    }
+
+    @Test func errorsCarrySpotifysMessage() async throws {
+        let session = StubProtocol.session { _ in (403, [:], Data(#"{"error":{"status":403,"message":"Forbidden"}}"#.utf8)) }
+        let api = SpotifyWebAPI(auth: try await signedIn(), session: session, cooldownStore: MemoryCooldown())
+        await #expect(throws: WebAPIError.http(403, "Forbidden")) { try await api.send("GET", "/me") }
+    }
+
+    @Test func buildsURLs() {
+        #expect(SpotifyWebAPI.url("/me/tracks", query: ["offset": "50", "limit": "50"]).absoluteString
+            == "https://api.spotify.com/v1/me/tracks?limit=50&offset=50")
+        #expect(SpotifyWebAPI.url("https://api.spotify.com/v1/me/tracks?offset=50", query: [:]).absoluteString
+            == "https://api.spotify.com/v1/me/tracks?offset=50")
+    }
+
+    @Test func decodesPlaylistItemsInBothShapes() throws {
+        let json = #"{"items":[{"added_at":null,"item":{"id":"a","name":"One","uri":"spotify:track:a","duration_ms":1000,"artists":[{"name":"X"}]}},{"track":{"id":"b","name":"Two","uri":"spotify:track:b","duration_ms":2000,"artists":[]}},{"item":null}],"total":3}"#
+        let page = try JSONDecoder().decode(Paging<PlaylistItem>.self, from: Data(json.utf8))
+        #expect(page.items.compactMap(\.playable?.name) == ["One", "Two"])
+    }
+}
