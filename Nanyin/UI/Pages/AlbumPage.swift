@@ -52,7 +52,11 @@ struct ArtistPage: View {
                 GraphiteHeader { Text("Albums and Singles") }
                 ScrollView(.horizontal) {
                     LazyHStack(alignment: .top, spacing: 12) {
-                        ForEach(detail.albums) { AlbumTile(album: $0) }
+                        ForEach(detail.albums) { album in
+                            Tile(title: album.name, subtitle: album.releaseYear ?? "", image: album.images?.best(minimum: 200), size: 110) {
+                                app.navigator.go(to: .album(id: album.id))
+                            }
+                        }
                     }
                     .padding(10)
                 }
@@ -70,25 +74,27 @@ struct ArtistPage: View {
     }
 }
 
-struct AlbumTile: View {
-    @Environment(AppModel.self) private var app
-    let album: AlbumSummary
+/// A cover with a caption, for grids and shelves.
+struct Tile: View {
+    let title: String
+    let subtitle: String
+    let image: URL?
+    var size: CGFloat = 130
+    let action: () -> Void
 
     var body: some View {
-        Button {
-            app.navigator.go(to: .album(id: album.id))
-        } label: {
+        Button(action: action) {
             VStack(alignment: .leading, spacing: 3) {
-                CoverImage(url: album.images?.best(minimum: 200), size: 110)
-                Text(album.name)
+                CoverImage(url: image, size: size)
+                Text(title)
                     .font(AquaFont.regular(11))
                     .foregroundStyle(Theme.text)
-                Text(album.releaseYear ?? "")
+                Text(subtitle)
                     .font(AquaFont.regular(10))
                     .foregroundStyle(Theme.secondaryText)
             }
             .lineLimit(1)
-            .frame(width: 110, alignment: .leading)
+            .frame(width: size, alignment: .leading)
         }
         .buttonStyle(.plain)
     }

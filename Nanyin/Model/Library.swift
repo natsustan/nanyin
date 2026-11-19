@@ -8,6 +8,8 @@ enum PageContent {
     case album(AlbumDetail)
     case artist(ArtistDetail)
     case search(SearchResultsModel)
+    case albums(ItemList<Album>)
+    case artists(ItemList<Artist>)
 }
 
 /// The signed-in account's playlists, and the content of every page opened.
@@ -70,7 +72,9 @@ final class Library {
         case .album(let id): content = .album(AlbumDetail(id: id, api: api))
         case .artist(let id): content = .artist(ArtistDetail(id: id, api: api))
         case .search(let query): content = .search(SearchResultsModel(query: query, api: api))
-        case .queue, .albums, .artists: return
+        case .albums: content = .albums(.saved(api: api))
+        case .artists: content = .artists(.followed(api: api))
+        case .queue: return
         }
         pages[route] = content
     }

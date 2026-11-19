@@ -39,15 +39,23 @@ private struct RouteView: View {
         switch (route, content) {
         case (.queue, _):
             PagePlaceholder(title: "Play Queue", message: "Songs you add to the queue appear here.")
-        case (.albums, _):
-            PagePlaceholder(title: "Albums")
-        case (.artists, _):
-            PagePlaceholder(title: "Artists")
+        case (.albums, .albums(let albums)?):
+            GridPage(title: "Albums", list: albums) { album in
+                Tile(title: album.name, subtitle: album.artists.names, image: album.images?.best(minimum: 200)) {
+                    app.navigator.go(to: .album(id: album.id))
+                }
+            }
+        case (.artists, .artists(let artists)?):
+            GridPage(title: "Artists", list: artists) { artist in
+                Tile(title: artist.name, subtitle: "", image: artist.images?.best(minimum: 200)) {
+                    app.navigator.go(to: .artist(id: artist.id))
+                }
+            }
         case (.whatsNew, .tracks(let list)?):
             TrackListPage(title: "What's New", subtitle: "Recently played", list: list,
                           columns: [.indicator, .track, .artist, .time, .album])
         case (.likedSongs, .tracks(let list)?):
-            TrackListPage(title: "Songs", list: list, columns: [.indicator, .track, .artist, .time, .album, .added])
+            TrackListPage(title: "Starred", list: list, columns: [.indicator, .track, .artist, .time, .album, .added])
         case (.playlist(_, let name), .tracks(let list)?):
             TrackListPage(title: name, list: list)
         case (_, .album(let detail)?):

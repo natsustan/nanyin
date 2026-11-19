@@ -52,7 +52,7 @@ struct Sidebar: View {
     private static let fixed = [
         Item(title: "What's New", icon: "house", route: .whatsNew),
         Item(title: "Play Queue", icon: "list.bullet", route: .queue),
-        Item(heading: "Library", title: "Songs", icon: "star", route: .likedSongs),
+        Item(heading: "Library", title: "Starred", icon: "star", route: .likedSongs),
         Item(title: "Albums", icon: "square.stack", route: .albums),
         Item(title: "Artists", icon: "music.mic", route: .artists),
     ]
