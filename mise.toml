@@ -1,0 +1,5 @@
+# Toolchain for building Nanyin. `mise install` once per checkout.
+[tools]
+rust = { version = "1.99.1", components = ["rustfmt", "clippy"] }
+xcodegen = "2.46.0"
+xcbeautify = "3.2.1"
