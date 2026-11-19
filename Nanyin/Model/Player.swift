@@ -86,6 +86,18 @@ final class Player {
         playingElsewhere = false
     }
 
+    func resume() {
+        guard track != nil, !isPlaying, send(.play) else { return }
+        isPlaying = true
+        position = Position(ms: position.current(), at: .now, advancing: true)
+    }
+
+    func pause() {
+        guard isPlaying, send(.pause) else { return }
+        isPlaying = false
+        position = Position(ms: position.current(), at: .now, advancing: false)
+    }
+
     func togglePlayPause() {
         guard track != nil, send(.playPause) else { return }
         isPlaying.toggle()

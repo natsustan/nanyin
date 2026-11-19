@@ -11,6 +11,7 @@ final class AppModel {
     let player: Player
     let library: Library
     let navigator = Navigator()
+    private let nowPlaying: NowPlayingBridge
 
     init() {
         #if DEBUG
@@ -25,6 +26,7 @@ final class AppModel {
         session = PlaybackSession(secrets: secrets)
         player = Player(session: session)
         library = Library(api: account.api)
+        nowPlaying = NowPlayingBridge(player: player)
         navigator.willShow = { [library] route in library.prepare(route) }
         #if DEBUG
         if demo {
