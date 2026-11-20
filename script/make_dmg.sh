@@ -18,6 +18,6 @@ cp -R "$APP" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
 
 rm -f "$DMG"
-hdiutil create -quiet -volname Nanyin -srcfolder "$STAGE" -format UDZO "$DMG"
+hdiutil create -quiet -volname Nanyin -srcfolder "$STAGE" -format ULMO "$DMG"
 hdiutil verify -quiet "$DMG"
 echo "$DMG"
