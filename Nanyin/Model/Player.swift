@@ -56,6 +56,8 @@ final class Player {
     /// nothing loaded and ignores Play, so the next Play loads this instead;
     /// it is never replayed on its own.
     @ObservationIgnored private var resumePoint: CoreCommand.Load?
+    /// The track the core is loading; it becomes `track` only once loaded.
+    @ObservationIgnored private var loadingURI: String?
     @ObservationIgnored private var volumeDrag: (lastSent: Date, pending: Task<Void, Never>?)?
 
     private static let volumeKey = "PlaybackVolume"
@@ -188,11 +190,13 @@ final class Player {
         case .trackChanged(let track):
             self.track = track
             if requestedURI == track.uri { requestedURI = nil }
-        case .loading(_, let ms):
+        case .loading(let uri, let ms):
+            loadingURI = uri
             isLoading = true
             position = Position(ms: ms, at: .now, advancing: false)
         case .playing(let uri, let ms):
             resumePoint = nil
+            loadingURI = nil
             isPlaying = true
             isLoading = false
             playingElsewhere = false
@@ -234,13 +238,17 @@ final class Player {
         case .sessionEnded:
             // Our connection dropped; another one is on its way. Keep the
             // track, its context and the position, ready for the next Play.
+            // A drop during a track change leaves the next one loading:
+            // pick up there, from its start.
             if let track {
+                let start = loadingURI ?? track.uri
                 resumePoint = if let context = upNext.contextURI {
-                    .init(contextURI: context, startURI: track.uri, shuffle: shuffle)
+                    .init(contextURI: context, startURI: start, shuffle: shuffle)
                 } else {
-                    .init(trackURIs: [track.uri] + upNext.rows.map(\.uri), startURI: track.uri)
+                    .init(trackURIs: [start] + upNext.rows.map(\.uri).filter { $0 != start }, startURI: start)
                 }
             }
+            loadingURI = nil
             isPlaying = false
             isLoading = false
             requestedURI = nil
