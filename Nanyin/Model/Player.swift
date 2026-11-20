@@ -52,9 +52,9 @@ final class Player {
     private(set) var playingElsewhere = false
 
     private let session: PlaybackSession
-    /// What was playing when the session dropped. The new session has
-    /// nothing loaded and ignores Play, so the next Play loads this instead;
-    /// it is never replayed on its own.
+    /// What was playing when the session dropped, when the core could not
+    /// keep it. The new session has nothing loaded and ignores Play, so the
+    /// next Play loads this instead; it is never replayed on its own.
     @ObservationIgnored private var resumePoint: CoreCommand.Load?
     /// The track the core is loading; it becomes `track` only once loaded.
     @ObservationIgnored private var loadingURI: String?
@@ -235,7 +235,11 @@ final class Player {
             isLoading = false
             playingElsewhere = true
             position = position.continued(advancing: false)
-        case .sessionEnded:
+        case .sessionEnded(resuming: true):
+            // Our connection dropped and the core kept the song playing;
+            // the next session takes it over. Nothing changes here.
+            break
+        case .sessionEnded(resuming: false):
             // Our connection dropped; another one is on its way. Keep the
             // track, its context and the position, ready for the next Play.
             // A drop during a track change leaves the next one loading:

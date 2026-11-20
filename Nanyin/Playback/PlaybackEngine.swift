@@ -99,7 +99,7 @@ final class PlaybackEngine {
         }
         do {
             let event = try decoder.decode(CoreEvent.self, from: data)
-            if event == .sessionEnded { failPending() }
+            if case .sessionEnded = event { failPending() }
             onEvent(event)
         } catch {
             NSLog("Nanyin: undecodable core event %@", json)

@@ -12,7 +12,8 @@ import Observation
 ///   ever refreshed in the background;
 /// - only an explicit login refusal discards the credential, and a new
 ///   approval always waits for the user to click;
-/// - reconnects are bounded (`ReconnectPolicy`) and never replay playback.
+/// - reconnects are bounded (`ReconnectPolicy`); one picks up only the song
+///   the dropped session left playing, which plays on meanwhile, once.
 @MainActor
 @Observable
 final class PlaybackSession {
@@ -39,6 +40,8 @@ final class PlaybackSession {
     private var policy = ReconnectPolicy()
     private var expectedUsername: String?
     private var retryTask: Task<Void, Never>?
+    /// The core kept a dropped session's song playing for the next one.
+    private var carrying = false
     private var authorizeTask: Task<Void, Never>?
     /// The Keychain copy of librespot's credential, read once.
     @ObservationIgnored private lazy var credentials: String? =
@@ -87,6 +90,7 @@ final class PlaybackSession {
     func signOut() {
         authorizeTask?.cancel()
         retryTask?.cancel()
+        carrying = false
         engine.disconnect()
         saveCredentials(nil)
         expectedUsername = nil
@@ -99,7 +103,9 @@ final class PlaybackSession {
         case .ready:
             return engine.send(command) ? nil : "Playback stopped responding."
         case .connecting, .waiting:
-            return "Reconnecting to Spotify. Try again in a moment."
+            // The song a dropped session left still takes play, pause, seek
+            // and volume; the rest waits for the new session.
+            return engine.send(command) ? nil : "Reconnecting to Spotify. Try again in a moment."
         default:
             return "Set up playback on this Mac first."
         }
@@ -186,23 +192,28 @@ final class PlaybackSession {
     private func handle(_ event: CoreEvent) {
         switch event {
         case .connected(_, let credentials):
+            carrying = false
             if let credentials { saveCredentials(credentials) }
             policy.connected()
             state = .ready
         case .connectFailed(let reason, let message):
             switch reason {
             case .authRejected:
+                stopCarried()
                 saveCredentials(nil)
                 state = .needsAuthorization("Spotify no longer accepts this Mac's playback sign-in.")
             case .accountMismatch:
+                stopCarried()
                 saveCredentials(nil)
                 state = .needsAuthorization("Playback was approved for a different Spotify account. Approve it with the account you signed in with.")
             case .timeout, .other:
                 scheduleRetry(reason: message)
             }
-        case .sessionEnded:
-            onPlayerEvent(.sessionEnded)
+        case .sessionEnded(let resuming):
+            carrying = resuming
+            onPlayerEvent(event)
             if !(policy.sessionDropped() && connectStored()) {
+                stopCarried()
                 state = .failed("The connection to Spotify keeps dropping.")
             }
         default:
@@ -210,8 +221,18 @@ final class PlaybackSession {
         }
     }
 
+    /// No session will take the kept song over: stop it. A failed attempt
+    /// that will be retried leaves it playing.
+    private func stopCarried() {
+        guard carrying else { return }
+        carrying = false
+        engine.disconnect()
+        onPlayerEvent(.sessionEnded(resuming: false))
+    }
+
     private func scheduleRetry(reason: String) {
         guard credentials != nil else {
+            stopCarried()
             state = .needsAuthorization(reason)
             return
         }

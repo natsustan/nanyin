@@ -3,7 +3,9 @@
 //!
 //! At most one engine exists. Each `nanyin_connect` starts a new generation
 //! and every event carries the generation it belongs to; Swift drops events
-//! from any generation but the one it started last.
+//! from any generation but the one it started last. Player events carry the
+//! newest generation instead: the player outlives a dropped session, and
+//! what it does between sessions belongs to the one reconnecting.
 
 mod commands;
 mod engine;
@@ -15,14 +17,14 @@ mod requests;
 
 use std::{
     ffi::{CStr, CString, c_char, c_void},
-    sync::{LazyLock, Mutex, MutexGuard},
+    sync::{Arc, LazyLock, Mutex, MutexGuard},
 };
 
 use tokio::runtime::Runtime;
 
 use crate::{
     commands::Command,
-    engine::{Config, Engine},
+    engine::{Carried, Config, Emit, Engine},
     events::Event,
     requests::Request,
 };
@@ -40,10 +42,12 @@ struct State {
     listener: Option<(EventCallback, Context)>,
     generation: u64,
     engine: Option<Engine>,
+    /// A dropped session's playback, waiting for the next connect.
+    carried: Option<Carried>,
 }
 
 static STATE: LazyLock<Mutex<State>> = LazyLock::new(Mutex::default);
-static RUNTIME: LazyLock<Runtime> =
+pub(crate) static RUNTIME: LazyLock<Runtime> =
     LazyLock::new(|| Runtime::new().expect("unable to start the tokio runtime"));
 
 fn state() -> MutexGuard<'static, State> {
@@ -99,38 +103,62 @@ pub extern "C" fn nanyin_connect(config_json: *const c_char) -> u64 {
     let Some(config) = read_json::<Config>(config_json) else {
         return 0;
     };
-    let generation = {
+    let (generation, carried) = {
         let mut state = state();
         if let Some(old) = state.engine.take() {
             old.shutdown();
         }
         state.generation += 1;
-        state.generation
+        // A clone: until the new session takes it over, the song still
+        // answers commands from here, and plays on if connecting fails.
+        (state.generation, state.carried.clone())
     };
+    let player_emit: Emit = Arc::new(|event| {
+        let generation = state().generation;
+        emit(generation, &event);
+    });
     RUNTIME.spawn(engine::run(
         config,
         move |event| emit(generation, &event),
+        player_emit,
+        carried,
         move |engine| {
             let mut state = state();
             if state.generation != generation {
                 return Some(engine);
+            }
+            if let Some(carried) = state.carried.take()
+                && !engine.took_over(&carried)
+            {
+                carried.retire();
             }
             state.engine = Some(engine);
             None
         },
         move || {
             let mut state = state();
-            let current = state.generation == generation;
-            if current {
-                state.engine = None;
+            if state.generation == generation {
+                state.engine.take()
+            } else {
+                None
             }
-            current
+        },
+        move |carried| {
+            let mut state = state();
+            if state.generation != generation {
+                return Some(carried);
+            }
+            if let Some(older) = state.carried.replace(carried) {
+                older.retire();
+            }
+            None
         },
     ));
     generation
 }
 
-/// Applies a JSON command to the current engine.
+/// Applies a JSON command to the current engine. Between sessions, play,
+/// pause, seek and volume go to the song the dropped session left playing.
 /// Returns 0 on success, -1 for an unreadable command, -2 with no engine,
 /// -3 when Spirc refused it (its task has ended).
 #[unsafe(no_mangle)]
@@ -140,7 +168,12 @@ pub extern "C" fn nanyin_command(command_json: *const c_char) -> i32 {
     };
     let state = state();
     let Some(engine) = &state.engine else {
-        return -2;
+        let carried = state.carried.as_ref();
+        return if carried.is_some_and(|carried| carried.command(&command)) {
+            0
+        } else {
+            -2
+        };
     };
     match command.apply(&engine.spirc) {
         Ok(()) => 0,
@@ -176,13 +209,17 @@ pub extern "C" fn nanyin_request(request_json: *const c_char) -> i32 {
     0
 }
 
-/// Shuts the engine down. Its remaining events carry a generation Swift no
-/// longer accepts.
+/// Shuts the engine down and stops any song a dropped session left
+/// playing. Their remaining events carry a generation Swift no longer
+/// accepts.
 #[unsafe(no_mangle)]
 pub extern "C" fn nanyin_disconnect() {
     let mut state = state();
     state.generation += 1;
     if let Some(engine) = state.engine.take() {
         engine.shutdown();
+    }
+    if let Some(carried) = state.carried.take() {
+        carried.retire();
     }
 }

@@ -4,7 +4,9 @@ import Foundation
 enum CoreEvent: Decodable, Equatable {
     case connected(username: String, credentials: String?)
     case connectFailed(reason: FailureReason, message: String)
-    case sessionEnded
+    /// The session dropped. `resuming`: the song plays on and the next
+    /// session picks it up, with its queue.
+    case sessionEnded(resuming: Bool)
     case deactivated
     case trackChanged(CoreTrack)
     case loading(uri: String, positionMs: Int)
@@ -25,7 +27,7 @@ enum CoreEvent: Decodable, Equatable {
     }
 
     private enum Key: String, CodingKey {
-        case type, username, credentials, reason, message, track, uri
+        case type, username, credentials, reason, message, track, uri, resuming
         case positionMs = "position_ms"
         case volume, on, context, tracks
         case contextURI = "context_uri"
@@ -45,7 +47,7 @@ enum CoreEvent: Decodable, Equatable {
             self = .connectFailed(
                 reason: (try? c.decode(FailureReason.self, forKey: .reason)) ?? .other,
                 message: try c.decode(String.self, forKey: .message))
-        case "session_ended": self = .sessionEnded
+        case "session_ended": self = .sessionEnded(resuming: (try? c.decode(Bool.self, forKey: .resuming)) ?? false)
         case "deactivated": self = .deactivated
         case "track_changed": self = .trackChanged(try c.decode(CoreTrack.self, forKey: .track))
         case "loading": self = .loading(uri: try uri(), positionMs: try position())

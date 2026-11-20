@@ -19,8 +19,11 @@ pub enum Event {
         reason: FailureReason,
         message: String,
     },
-    /// The Spirc task ended on its own: the session is gone.
-    SessionEnded,
+    /// The Spirc task ended on its own: the session is gone. `resuming`:
+    /// the song plays on and the next session picks it up, with its queue.
+    SessionEnded {
+        resuming: bool,
+    },
     /// Another device took over playback.
     Deactivated,
     TrackChanged {
