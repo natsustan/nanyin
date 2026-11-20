@@ -32,31 +32,18 @@ final class AlbumDetail {
 @Observable
 final class ArtistDetail {
     private(set) var artist: Artist?
-    private(set) var topTracks: TrackList?
-    private(set) var albums: [AlbumSummary] = []
     private(set) var error: String?
-    private(set) var topTracksError: String?
+    private(set) var albums: [AlbumSummary] = []
+    private(set) var albumsError: String?
+    let topTracks: TrackList
 
     init(id: String, api: SpotifyWebAPI, session: PlaybackSession) {
+        topTracks = .topTracks(session: session, artistID: id)
         Task {
             do { artist = try await api.artist(id) } catch { self.error = error.localizedDescription }
         }
         Task {
-            do {
-                albums = try await api.artistAlbums(id).items
-            } catch {
-                // Shown in the header unless the artist read already failed.
-                self.error = self.error ?? error.localizedDescription
-            }
-        }
-        Task {
-            do {
-                let tracks = try await session.readTopTracks(artistID: id)
-                let rows = tracks.enumerated().map { TrackRow(index: $0.offset, track: $0.element) }
-                topTracks = TrackList(rows: rows, contextURI: "spotify:artist:\(id)")
-            } catch {
-                topTracksError = error.localizedDescription
-            }
+            do { albums = try await api.artistAlbums(id).items } catch { albumsError = error.localizedDescription }
         }
     }
 }

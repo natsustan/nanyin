@@ -48,7 +48,11 @@ struct ArtistPage: View {
                         .buttonStyle(TexturedButtonStyle())
                 }
             }
-            if !detail.albums.isEmpty {
+            if let message = detail.albumsError {
+                GraphiteHeader { Text("Albums and Singles") }
+                PlaceholderText(message: message)
+                    .frame(height: 60)
+            } else if !detail.albums.isEmpty {
                 GraphiteHeader { Text("Albums and Singles") }
                 ScrollView(.horizontal) {
                     LazyHStack(alignment: .top, spacing: 12) {
@@ -61,16 +65,18 @@ struct ArtistPage: View {
                 .background(Theme.content)
             }
             GraphiteHeader { Text("Popular") }
-            if let tracks = detail.topTracks, !tracks.rows.isEmpty {
-                TrackListTable(list: tracks, columns: [.indicator, .star, .track, .time, .album])
-            } else {
-                Text(detail.topTracksError ?? (detail.topTracks == nil ? "Loading…" : "No popular songs."))
-                    .font(AquaFont.regular(11))
-                    .foregroundStyle(Theme.secondaryText)
-                    .padding(12)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .background(Theme.content)
-            }
+            popular
+        }
+    }
+
+    @ViewBuilder private var popular: some View {
+        let pages = detail.topTracks.pages
+        if pages.items.isEmpty {
+            PlaceholderText(
+                message: pages.error ?? (pages.isLoading ? "Loading…" : "No popular songs."),
+                retry: pages.error == nil ? nil : { pages.retry() })
+        } else {
+            TrackListTable(list: detail.topTracks, columns: [.indicator, .star, .track, .time, .popularity, .album])
         }
     }
 }

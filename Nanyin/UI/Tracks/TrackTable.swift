@@ -90,6 +90,9 @@ struct TrackTable: NSViewRepresentable {
         coordinator.playingURI = playingURI
         coordinator.starsVersion = starsVersion
         if old != rows {
+            // Rows read through the session carry no popularity.
+            table.tableColumn(withIdentifier: NSUserInterfaceItemIdentifier(Column.popularity.rawValue))?
+                .isHidden = !rows.contains { $0.popularity != nil }
             if rows.count > old.count, rows.starts(with: old) {
                 // A page arrived: add its rows, leave the visible ones be.
                 table.insertRows(at: IndexSet(old.count ..< rows.count), withAnimation: [])

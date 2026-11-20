@@ -1,8 +1,9 @@
 //! Catalogue reads over the streaming session, for what the app's Web API
 //! grant cannot read: since late 2024, Development Mode apps get no access
-//! to playlists the listener does not own, nor to an artist's top tracks. The session speaks the protocol
-//! Spotify's own clients use, as spotifast does. Also resolves the play
-//! queue's tracks, so both go through one batched, cached lookup.
+//! to playlists the listener does not own, nor to an artist's top tracks.
+//! The session speaks the protocol Spotify's own clients use, as spotifast
+//! does. Also resolves the play queue's tracks, so all go through one
+//! batched, cached lookup.
 
 use std::{
     collections::{HashMap, VecDeque},

@@ -115,6 +115,8 @@ final class PlaybackSession {
 
     struct ReadError: LocalizedError {
         let errorDescription: String?
+
+        static let notConnected = ReadError(errorDescription: "Connect playback on this Mac to read this from Spotify.")
     }
 
     /// Reads waiting for a connection in progress to finish.
@@ -139,7 +141,7 @@ final class PlaybackSession {
         switch state {
         case .ready: return
         case .connecting, .authorizing, .waiting: try await withCheckedThrowingContinuation { readyWaiters.append($0) }
-        default: throw ReadError(errorDescription: "Connect playback on this Mac to read this from Spotify.")
+        default: throw ReadError.notConnected
         }
     }
 
@@ -148,7 +150,7 @@ final class PlaybackSession {
         switch state {
         case .ready: result = .success(())
         case .connecting, .authorizing, .waiting: return
-        default: result = .failure(ReadError(errorDescription: "Connect playback on this Mac to read this from Spotify."))
+        default: result = .failure(ReadError.notConnected)
         }
         let waiters = readyWaiters
         readyWaiters = []

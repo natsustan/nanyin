@@ -100,21 +100,25 @@ final class TrafficLightsView: NSView {
         observers.forEach(NotificationCenter.default.removeObserver)
         observers.removeAll()
         guard let window else { return }
-        let names: [Notification.Name] = [
+        // Key and main changes recolour the buttons.
+        let recolour: [Notification.Name] = [
             NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification,
             NSWindow.didBecomeMainNotification, NSWindow.didResignMainNotification,
+        ]
+        // These can move the window out from under a still mouse (Option-click
+        // zoom resizes it); a live resize waits for its end.
+        let moved: [Notification.Name] = [
             NSWindow.didDeminiaturizeNotification,
             NSWindow.didEnterFullScreenNotification, NSWindow.didExitFullScreenNotification,
-            // Option-click zoom resizes the window under a still mouse.
-            NSWindow.didResizeNotification,
+            NSWindow.didResizeNotification, NSWindow.didEndLiveResizeNotification,
         ]
-        for name in names {
+        for name in recolour + moved {
+            let redraws = recolour.contains(name)
             observers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) {
                 [weak self] _ in
                 MainActor.assumeIsolated {
-                    guard let self else { return }
-                    self.buttons.forEach { $0.needsDisplay = true }
-                    // The window may have moved out from under the mouse.
+                    guard let self, self.window?.inLiveResize != true else { return }
+                    if redraws { self.buttons.forEach { $0.needsDisplay = true } }
                     self.group.update()
                 }
             })

@@ -142,11 +142,27 @@ struct PagePlaceholder: View {
     var body: some View {
         VStack(spacing: 0) {
             PageHeader(title: title)
+            PlaceholderText(message: message)
+        }
+    }
+}
+
+/// A grey line in place of content that is not there, with a way to try
+/// again when it failed.
+struct PlaceholderText: View {
+    let message: String
+    var retry: (() -> Void)?
+
+    var body: some View {
+        VStack(spacing: 8) {
             Text(message)
                 .font(AquaFont.regular(12))
                 .foregroundStyle(Theme.secondaryText)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Theme.content)
+            if let retry {
+                Button("Try Again", action: retry).buttonStyle(TexturedButtonStyle())
+            }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.content)
     }
 }
