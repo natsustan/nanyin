@@ -44,6 +44,8 @@ struct AquaSearchField: View {
     var prompt = "Search"
     var icon: String? = "magnifyingglass"
     var onSubmit: () -> Void = {}
+    /// Changing it puts the cursor in the field.
+    var focusRequest = 0
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -81,6 +83,7 @@ struct AquaSearchField: View {
                 .clipShape(shape)
         }
         .overlay(shape.strokeBorder(focused ? Theme.hex(0x5E8FD6) : Theme.hex(0x6E6E6E), lineWidth: 1))
+        .onChange(of: focusRequest) { focused = true }
         .background {
             if focused {
                 shape.stroke(Theme.hex(0x7EAAE8, 0.7), lineWidth: 5).blur(radius: 1.5)

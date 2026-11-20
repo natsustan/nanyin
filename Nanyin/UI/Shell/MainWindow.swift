@@ -10,8 +10,8 @@ struct MainWindow: View {
             case .signedIn:
                 HStack(spacing: 0) {
                     Sidebar()
-                        .frame(width: 200)
-                    Rectangle().fill(Theme.divider).frame(width: 1)
+                        .frame(width: sidebarWidth)
+                    SidebarDivider(width: $sidebarWidth)
                     RouteView(route: app.navigator.current)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .background(Theme.content)
@@ -27,6 +27,56 @@ struct MainWindow: View {
         .ignoresSafeArea()
         .frame(minWidth: 780, minHeight: 480)
         .preferredColorScheme(.dark)
+        .onAppear { spaceKey.install { app.player.togglePlayPause() } }
+    }
+
+    @AppStorage("SidebarWidth") private var sidebarWidth = 200.0
+    @State private var spaceKey = SpaceKeyMonitor()
+}
+
+/// The 1-pt line between the sidebar and the page, draggable to resize the
+/// sidebar as the 2010 client's was.
+private struct SidebarDivider: View {
+    @Binding var width: Double
+    @State private var start: Double?
+
+    var body: some View {
+        Rectangle()
+            .fill(Theme.divider)
+            .frame(width: 1)
+            .overlay {
+                Color.clear
+                    .frame(width: 7)
+                    .contentShape(Rectangle())
+                    .onHover { inside in
+                        if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+                    }
+                    .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                        .onChanged { drag in
+                            let origin = start ?? width
+                            start = origin
+                            width = min(max(origin + drag.translation.width, 150), 360)
+                        }
+                        .onEnded { _ in start = nil })
+            }
+    }
+}
+
+/// Space plays and pauses unless the cursor is in a text field.
+@MainActor
+private final class SpaceKeyMonitor {
+    private var monitor: Any?
+
+    func install(_ action: @escaping @MainActor () -> Void) {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard event.keyCode == 49,
+                  event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting(.capsLock).isEmpty,
+                  !(event.window?.firstResponder is NSText)
+            else { return event }
+            MainActor.assumeIsolated(action)
+            return nil
+        }
     }
 }
 

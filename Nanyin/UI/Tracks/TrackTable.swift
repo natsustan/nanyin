@@ -232,7 +232,7 @@ struct TrackTable: NSViewRepresentable {
     }
 }
 
-/// Return plays the selection; space plays or pauses, as in iTunes.
+/// Return plays the selection, as in iTunes.
 final class TrackTableView: NSTableView {
     override func keyDown(with event: NSEvent) {
         guard let coordinator = delegate as? TrackTable.Coordinator else { return super.keyDown(with: event) }
@@ -241,8 +241,6 @@ final class TrackTableView: NSTableView {
             if coordinator.rows.indices.contains(selectedRow) {
                 coordinator.actions.play(coordinator.rows[selectedRow])
             }
-        case 49: // space
-            coordinator.actions.togglePlayPause()
         default:
             super.keyDown(with: event)
         }

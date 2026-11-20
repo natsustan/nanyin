@@ -18,9 +18,14 @@ struct NanyinApp: App {
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1100, height: 700)
         .commands {
+            CommandGroup(after: .textEditing) {
+                Button("Search") { app.navigator.focusSearch() }
+                    .keyboardShortcut("l", modifiers: .command)
+            }
             CommandMenu("Playback") {
+                // Space plays and pauses too, outside text fields
+                // (MainWindow); as a menu shortcut it would eat typed spaces.
                 Button(app.player.isPlaying ? "Pause" : "Play") { app.player.togglePlayPause() }
-                    .keyboardShortcut(.space, modifiers: [])
                 Button("Next") { app.player.next() }
                     .keyboardShortcut(.rightArrow, modifiers: .command)
                 Button("Previous") { app.player.previous() }

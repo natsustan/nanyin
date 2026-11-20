@@ -35,7 +35,7 @@ struct MainToolbar: View {
                         .disabled(!navigator.canGoForward)
                         .keyboardShortcut("]", modifiers: .command)
                 }
-                AquaSearchField(text: $query) { search(replacing: false) }
+                AquaSearchField(text: $query, onSubmit: { search(replacing: false) }, focusRequest: navigator.searchFocusRequests)
                     .frame(width: 220)
                     .onChange(of: query) { scheduleSearch() }
                 Spacer()

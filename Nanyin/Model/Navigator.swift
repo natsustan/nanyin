@@ -23,6 +23,11 @@ final class Navigator {
     /// Runs before the new route is shown, so its content can be prepared.
     @ObservationIgnored var willShow: (Route) -> Void = { _ in }
 
+    /// Bumped to put the cursor in the search field.
+    private(set) var searchFocusRequests = 0
+
+    func focusSearch() { searchFocusRequests += 1 }
+
     var canGoBack: Bool { !back.isEmpty }
     var canGoForward: Bool { !forward.isEmpty }
 
