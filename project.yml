@@ -12,6 +12,9 @@ options:
 packages:
   NanyinKit:
     path: Packages/NanyinKit
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: 2.10.1
 
 settings:
   base:
@@ -32,6 +35,7 @@ targets:
     dependencies:
       - package: NanyinKit
         product: NanyinKit
+      - package: Sparkle
       - sdk: CoreAudio.framework
       - sdk: AudioToolbox.framework
       - sdk: AudioUnit.framework
@@ -46,8 +50,8 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.cosmoss.nanyin
         PRODUCT_NAME: Nanyin
         PRODUCT_MODULE_NAME: Nanyin
-        MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "1"
+        MARKETING_VERSION: "0.2.0"
+        CURRENT_PROJECT_VERSION: $(MARKETING_VERSION)
         INFOPLIST_FILE: Nanyin/Resources/Info.plist
         CODE_SIGN_STYLE: Manual
         CODE_SIGN_IDENTITY: "Apple Development"
@@ -61,6 +65,8 @@ targets:
           LIBRARY_SEARCH_PATHS: $(SRCROOT)/core/target/debug
         Release:
           ENABLE_HARDENED_RUNTIME: YES
+          # A plain xcodebuild build adds get-task-allow, which notarization refuses.
+          CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
           LIBRARY_SEARCH_PATHS: $(SRCROOT)/core/target/release
 
 schemes:

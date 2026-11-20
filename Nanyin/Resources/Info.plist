@@ -26,6 +26,12 @@
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>Unofficial Spotify client. Not affiliated with Spotify.</string>
+	<key>SUFeedURL</key>
+	<string>https://github.com/natsustan/nanyin/releases/latest/download/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>8gV/YIqDkVoTxKSLZtTCk4uGP/gbUe7PqNBH9vd89sY=</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>NSAppTransportSecurity</key>

@@ -2,7 +2,7 @@
 # Builds Nanyin without launching it. NANYIN_CONFIGURATION picks Debug/Release.
 set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-source "$ROOT_DIR/script/development_signing.sh"
+source "$ROOT_DIR/script/signing.sh"
 [[ -d "$ROOT_DIR/Nanyin.xcodeproj" ]] || "$ROOT_DIR/script/generate_project.sh"
 xcodebuild \
     -project "$ROOT_DIR/Nanyin.xcodeproj" \

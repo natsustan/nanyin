@@ -22,7 +22,7 @@ Everything comes from mise (`mise install`): rust, xcodegen, xcbeautify.
 script/generate_project.sh   # after adding/removing files or editing project.yml
 script/build.sh              # build only (Debug = "Nanyin Dev", com.cosmoss.nanyin.dev)
 script/build_and_run.sh      # build, stop every running copy, launch; log in build/nanyin.log
-script/make_dmg.sh           # Release build packaged as build/Nanyin-<version>.dmg (not notarized)
+script/make_release.sh       # Release (Developer ID) as dist/Nanyin-<version>.dmg; --notarize also notarizes and writes Sparkle's appcast
 swift test --package-path Packages/NanyinKit
 (cd core && mise exec -- cargo test && mise exec -- cargo clippy --all-targets)
 ```
@@ -32,6 +32,17 @@ The core logs to stderr and to `~/Library/Logs/<app name>/core.log`
 `RUST_LOG` overrides the default filter.
 
 Never edit `Nanyin.xcodeproj` by hand; it is generated and git-ignored.
+
+## Releases
+
+Bump `MARKETING_VERSION` in `project.yml` (the build number follows it;
+Sparkle compares it), run `script/make_release.sh --notarize`, then upload
+the DMG, `appcast.xml`, the update zip and any `.delta` it lists to the
+GitHub release `v<version>`. Publishing is the user's call. The app checks
+`releases/latest/download/appcast.xml`; Debug builds never check. Notarizing
+uses the notarytool profile `notarization`; Sparkle's EdDSA key lives in the
+login Keychain under account `nanyin` (public half in `Info.plist`). Keep
+`dist/updates/` between releases: deltas are made from the archives there.
 
 ## librespot fork
 

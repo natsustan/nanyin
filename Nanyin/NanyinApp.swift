@@ -1,8 +1,19 @@
+import Sparkle
 import SwiftUI
+
+/// Sparkle checks the release feed (`SUFeedURL`). Debug builds ("Nanyin Dev")
+/// never check: the feed carries the release app, which would replace them.
+#if DEBUG
+private let checksForUpdates = false
+#else
+private let checksForUpdates = true
+#endif
 
 @main
 struct NanyinApp: App {
     @State private var app = AppModel()
+    private let updater = SPUStandardUpdaterController(
+        startingUpdater: checksForUpdates, updaterDelegate: nil, userDriverDelegate: nil)
 
     init() {
         // Cover art comes from Spotify's image CDN (not the Web API); keep
@@ -18,6 +29,11 @@ struct NanyinApp: App {
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1100, height: 700)
         .commands {
+            CommandGroup(after: .appInfo) {
+                if checksForUpdates {
+                    Button("Check for Updates…") { updater.checkForUpdates(nil) }
+                }
+            }
             CommandGroup(after: .textEditing) {
                 Button("Search") { app.navigator.focusSearch() }
                     .keyboardShortcut("l", modifiers: .command)
