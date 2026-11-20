@@ -27,6 +27,10 @@ swift test --package-path Packages/NanyinKit
 (cd core && mise exec -- cargo test && mise exec -- cargo clippy --all-targets)
 ```
 
+The core logs to stderr and to `~/Library/Logs/<app name>/core.log`
+(5 MB, then rotated to `core.log.1`); panics land there with a backtrace.
+`RUST_LOG` overrides the default filter.
+
 Never edit `Nanyin.xcodeproj` by hand; it is generated and git-ignored.
 
 ## Spotify account safety (do not regress)

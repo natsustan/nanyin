@@ -8,6 +8,7 @@
 mod commands;
 mod engine;
 mod events;
+mod logging;
 mod queue;
 mod reads;
 mod requests;
@@ -66,21 +67,27 @@ fn emit(generation: u64, event: &Event) {
     callback(context.0, generation, json.as_ptr());
 }
 
-fn read_json<T: serde::de::DeserializeOwned>(ptr: *const c_char) -> Option<T> {
+/// The UTF-8 text at `ptr`, a C string from Swift, or `None` for null.
+fn read_str<'a>(ptr: *const c_char) -> Option<&'a str> {
     if ptr.is_null() {
         return None;
     }
-    let text = unsafe { CStr::from_ptr(ptr) }.to_str().ok()?;
-    serde_json::from_str(text).ok()
+    unsafe { CStr::from_ptr(ptr) }.to_str().ok()
 }
 
-/// Registers the event callback and logging. Call once, before anything else.
+fn read_json<T: serde::de::DeserializeOwned>(ptr: *const c_char) -> Option<T> {
+    serde_json::from_str(read_str(ptr)?).ok()
+}
+
+/// Registers the event callback and starts logging, to stderr and, when
+/// `log_path` is not null, to that file. Call once, before anything else.
 #[unsafe(no_mangle)]
-pub extern "C" fn nanyin_init(callback: EventCallback, context: *mut c_void) {
-    let _ = env_logger::Builder::from_env(
-        env_logger::Env::default().default_filter_or("warn,librespot=info,nanyin_core=info"),
-    )
-    .try_init();
+pub extern "C" fn nanyin_init(
+    callback: EventCallback,
+    context: *mut c_void,
+    log_path: *const c_char,
+) {
+    logging::init(read_str(log_path).map(std::path::PathBuf::from));
     state().listener = Some((callback, Context(context)));
 }
 

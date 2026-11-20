@@ -29,7 +29,13 @@ final class PlaybackEngine {
     }
 
     private init() {
-        nanyin_init(receiveCoreEvent, nil)
+        Self.logURL.path.withCString { nanyin_init(receiveCoreEvent, nil, $0) }
+    }
+
+    /// `~/Library/Logs/<app name>/core.log`, rotated by the core at 5 MB.
+    static var logURL: URL {
+        let name = Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "Nanyin"
+        return URL.libraryDirectory.appending(path: "Logs").appending(path: name).appending(path: "core.log")
     }
 
     func connect(_ config: CoreConfig) {
