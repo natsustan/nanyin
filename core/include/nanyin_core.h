@@ -7,4 +7,5 @@ typedef void (*nanyin_event_callback)(void *context, uint64_t generation, const 
 void nanyin_init(nanyin_event_callback callback, void *context);
 uint64_t nanyin_connect(const char *config_json);
 int32_t nanyin_command(const char *command_json);
+int32_t nanyin_request(const char *request_json);
 void nanyin_disconnect(void);

@@ -57,13 +57,17 @@ public extension SpotifyWebAPI {
         try await get("/search", query: ["q": text, "type": types.joined(separator: ","), "limit": "10"])
     }
 
-    /// Saves tracks, albums, artists or playlists by URI (2026 unified library).
-    /// Appends `uris` (at most 100) to a playlist the listener may edit.
+    /// Appends `uris` to a playlist the listener may edit, in order, at most
+    /// 100 per request as the endpoint allows.
     func addToPlaylist(_ id: String, uris: [String]) async throws {
         struct Body: Encodable, Sendable { let uris: [String] }
-        try await send("POST", "/playlists/\(id)/items", body: Body(uris: uris))
+        for start in stride(from: 0, to: uris.count, by: 100) {
+            let batch = Array(uris[start ..< min(start + 100, uris.count)])
+            try await send("POST", "/playlists/\(id)/items", body: Body(uris: batch))
+        }
     }
 
+    /// Saves tracks, albums, artists or playlists by URI (2026 unified library).
     func save(_ uris: [String]) async throws {
         try await send("PUT", "/me/library", query: ["uris": uris.joined(separator: ",")])
     }

@@ -16,15 +16,11 @@ struct TrackTable: NSViewRepresentable {
 
     struct Actions {
         var play: (TrackRow) -> Void
-        var addToQueue: (TrackRow) -> Void
-        var togglePlayPause: () -> Void
         var rowAppeared: (Int) -> Void = { _ in }
         var isStarred: (TrackRow) -> Bool? = { _ in nil }
         var toggleStar: (TrackRow) -> Void = { _ in }
-        var show: (Route) -> Void = { _ in }
-        /// Playlists the rows can be added to, by id and name.
-        var playlists: () -> [(id: String, name: String)] = { [] }
-        var addToPlaylist: ([TrackRow], String) -> Void = { _, _ in }
+        /// The context menu for the selected rows.
+        var menu: ([TrackRow]) -> [TrackMenuItem] = { _ in [] }
     }
 
     let rows: [TrackRow]
@@ -119,7 +115,7 @@ struct TrackTable: NSViewRepresentable {
         var rows: [TrackRow] = []
         var playingURI: String?
         var starsVersion = 0
-        var actions = Actions(play: { _ in }, addToQueue: { _ in }, togglePlayPause: {})
+        var actions = Actions(play: { _ in })
         weak var table: TrackTableView?
 
         func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
@@ -196,76 +192,47 @@ struct TrackTable: NSViewRepresentable {
         func menuNeedsUpdate(_ menu: NSMenu) {
             menu.removeAllItems()
             guard let table, rows.indices.contains(table.clickedRow) else { return }
-            let row = table.clickedRow
-            if !table.selectedRowIndexes.contains(row) {
-                table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            if !table.selectedRowIndexes.contains(table.clickedRow) {
+                table.selectRowIndexes(IndexSet(integer: table.clickedRow), byExtendingSelection: false)
             }
-            menu.addItem(item("Play", #selector(playClicked)))
-            menu.addItem(item("Add to Play Queue", #selector(queueClicked)))
-            let playlists = actions.playlists()
-            if !playlists.isEmpty {
-                let submenu = NSMenu()
-                for playlist in playlists {
-                    let entry = item(playlist.name, #selector(addToPlaylist(_:)))
-                    entry.representedObject = playlist.id
-                    submenu.addItem(entry)
-                }
-                let parent = NSMenuItem(title: "Add to Playlist", action: nil, keyEquivalent: "")
-                parent.submenu = submenu
-                menu.addItem(parent)
+            let selected = table.selectedRowIndexes.compactMap { rows.indices.contains($0) ? rows[$0] : nil }
+            for item in actions.menu(selected) { menu.addItem(Self.menuItem(item)) }
+        }
+
+        private static func menuItem(_ item: TrackMenuItem) -> NSMenuItem {
+            if item.title.isEmpty { return .separator() }
+            let entry = MenuAction(title: item.title, action: item.action)
+            if !item.children.isEmpty {
+                entry.submenu = NSMenu()
+                for child in item.children { entry.submenu?.addItem(menuItem(child)) }
             }
-            menu.addItem(.separator())
-            if rows[row].albumID != nil { menu.addItem(item("Show Album", #selector(showAlbum))) }
-            if rows[row].artistID != nil { menu.addItem(item("Show Artist", #selector(showArtist))) }
-            menu.addItem(item("Copy Spotify Link", #selector(copyLink)))
-        }
-
-        private func item(_ title: String, _ action: Selector) -> NSMenuItem {
-            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
-            item.target = self
-            return item
-        }
-
-        private var targetRows: [TrackRow] {
-            guard let table else { return [] }
-            return table.selectedRowIndexes.compactMap { rows.indices.contains($0) ? rows[$0] : nil }
-        }
-
-        @objc private func playClicked() {
-            targetRows.first.map(actions.play)
-        }
-
-        @objc private func queueClicked() {
-            targetRows.forEach(actions.addToQueue)
-        }
-
-        @objc private func addToPlaylist(_ sender: NSMenuItem) {
-            guard let id = sender.representedObject as? String else { return }
-            actions.addToPlaylist(targetRows, id)
-        }
-
-        @objc private func showAlbum() {
-            if let id = clickedRow?.albumID { actions.show(.album(id: id)) }
-        }
-
-        @objc private func showArtist() {
-            if let id = clickedRow?.artistID { actions.show(.artist(id: id)) }
-        }
-
-        private var clickedRow: TrackRow? {
-            guard let row = table?.clickedRow, rows.indices.contains(row) else { return nil }
-            return rows[row]
-        }
-
-        @objc private func copyLink() {
-            let links = targetRows.map { row -> String in
-                let parts = row.uri.split(separator: ":")
-                return parts.count == 3 ? "https://open.spotify.com/\(parts[1])/\(parts[2])" : row.uri
-            }
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(links.joined(separator: "\n"), forType: .string)
+            return entry
         }
     }
+}
+
+/// One entry of a track's context menu, built by whoever owns the table.
+struct TrackMenuItem {
+    let title: String
+    var children: [TrackMenuItem] = []
+    var action: (() -> Void)?
+
+    static var separator: TrackMenuItem { TrackMenuItem(title: "") }
+}
+
+/// A menu item that runs a closure.
+private final class MenuAction: NSMenuItem {
+    private let run: (() -> Void)?
+
+    init(title: String, action: (() -> Void)?) {
+        run = action
+        super.init(title: title, action: action == nil ? nil : #selector(runAction), keyEquivalent: "")
+        target = self
+    }
+
+    required init(coder: NSCoder) { fatalError("not used") }
+
+    @objc private func runAction() { run?() }
 }
 
 /// Return plays the selection, as in iTunes.

@@ -50,7 +50,6 @@ final class Player {
     private(set) var volume = Player.savedVolume
     /// Set when another device took playback over.
     private(set) var playingElsewhere = false
-    var lastError: String?
 
     private let session: PlaybackSession
     @ObservationIgnored private var volumeDrag: (lastSent: Date, pending: Task<Void, Never>?)?
@@ -61,7 +60,10 @@ final class Player {
         return UInt16(clamping: saved ?? Int(Double(UInt16.max) * 0.7))
     }
 
-    init(session: PlaybackSession) {
+    private let notices: Notices
+
+    init(session: PlaybackSession, notices: Notices) {
+        self.notices = notices
         self.session = session
         session.onPlayerEvent = { [weak self] event in self?.handle(event) }
     }
@@ -161,8 +163,9 @@ final class Player {
 
     @discardableResult
     private func send(_ command: CoreCommand) -> Bool {
-        lastError = session.send(command)
-        return lastError == nil
+        guard let error = session.send(command) else { return true }
+        notices.report(error)
+        return false
     }
 
     // MARK: Events
@@ -192,7 +195,7 @@ final class Player {
             position = position.continued(advancing: false)
         case .unavailable(let uri):
             if requestedURI == uri { requestedURI = nil }
-            lastError = "This song is not available."
+            notices.report("This song is not available.")
         case .volume(let value):
             // The core echoes what a drag sent; the knob already shows it.
             if volumeDrag == nil {
@@ -213,7 +216,7 @@ final class Player {
             isLoading = false
             playingElsewhere = true
             position = position.continued(advancing: false)
-        case .connected, .connectFailed, .sessionEnded, .playlistPage, .readFailed:
+        case .connected, .connectFailed, .sessionEnded:
             break
         }
     }

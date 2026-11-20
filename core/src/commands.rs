@@ -6,8 +6,6 @@ use librespot_connect::{
 use librespot_core::{Error, SpotifyUri};
 use serde::Deserialize;
 
-use crate::{engine::Engine, events::Event};
-
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
 pub enum Command {
@@ -36,13 +34,6 @@ pub enum Command {
     /// explicit list of tracks. Large lists belong in a context: Spotify
     /// resolves it server-side instead of this device uploading every URI.
     Load(Load),
-    /// Reads a page of a playlist through the session; the answer arrives
-    /// as a `playlist_page` or `read_failed` event with the same `request`.
-    ReadPlaylist {
-        request: u64,
-        id: String,
-        offset: usize,
-    },
 }
 
 #[derive(Debug, Deserialize, PartialEq, Default)]
@@ -83,8 +74,7 @@ impl Load {
 }
 
 impl Command {
-    pub fn apply(self, engine: &Engine) -> Result<(), Error> {
-        let spirc: &Spirc = &engine.spirc;
+    pub fn apply(self, spirc: &Spirc) -> Result<(), Error> {
         match self {
             Self::Play => spirc.play(),
             Self::Pause => spirc.pause(),
@@ -104,23 +94,6 @@ impl Command {
                 // one; activating while already active is a no-op.
                 spirc.activate()?;
                 spirc.load(load.request())
-            }
-            Self::ReadPlaylist {
-                request,
-                id,
-                offset,
-            } => {
-                let (reads, emit) = (engine.reads.clone(), engine.emit.clone());
-                engine.runtime.spawn(async move {
-                    emit(match reads.playlist(&id, offset).await {
-                        Ok(page) => Event::PlaylistPage { request, page },
-                        Err(error) => Event::ReadFailed {
-                            request,
-                            message: error.to_string(),
-                        },
-                    });
-                });
-                Ok(())
             }
         }
     }
@@ -145,17 +118,6 @@ mod tests {
                 start_uri: Some("spotify:track:x".into()),
                 ..Load::default()
             })
-        );
-        let cmd: Command =
-            serde_json::from_str(r#"{"cmd":"read_playlist","request":7,"id":"abc","offset":50}"#)
-                .unwrap();
-        assert_eq!(
-            cmd,
-            Command::ReadPlaylist {
-                request: 7,
-                id: "abc".into(),
-                offset: 50
-            }
         );
     }
 }

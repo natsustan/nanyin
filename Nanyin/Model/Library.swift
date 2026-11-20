@@ -18,19 +18,19 @@ enum PageContent {
 final class Library {
     private(set) var playlists: [Playlist] = []
     private(set) var playlistsError: String?
-    /// A change that failed, for the notice strip until dismissed.
-    var notice: String?
     /// Filled by `prepare` before a route is shown; views only read it.
     @ObservationIgnored private var pages: [Route: PageContent] = [:]
     private let api: SpotifyWebAPI
     private let stars: Stars
     private let session: PlaybackSession
+    private let notices: Notices
     private var username: String?
 
-    init(api: SpotifyWebAPI, stars: Stars, session: PlaybackSession) {
+    init(api: SpotifyWebAPI, stars: Stars, session: PlaybackSession, notices: Notices) {
         self.api = api
         self.stars = stars
         self.session = session
+        self.notices = notices
     }
 
     func signedIn(as username: String, showing route: Route) {
@@ -65,19 +65,23 @@ final class Library {
 
     /// Playlists the listener may add tracks to: their own and collaborative ones.
     var editablePlaylists: [Playlist] {
-        playlists.filter { $0.owner.id == username || $0.collaborative == true }
+        playlists.filter { isOwn($0) || $0.collaborative == true }
+    }
+
+    private func isOwn(_ playlist: Playlist) -> Bool {
+        playlist.owner.id == username
     }
 
     func add(_ uris: [String], to playlist: Playlist) {
         Task {
             do {
-                for start in stride(from: 0, to: uris.count, by: 100) {
-                    try await api.addToPlaylist(playlist.id, uris: Array(uris[start ..< min(start + 100, uris.count)]))
-                }
+                try await api.addToPlaylist(playlist.id, uris: uris)
                 // Shown afresh next time it is opened.
-                pages[.playlist(id: playlist.id, name: playlist.name)] = nil
+                pages = pages.filter { route, _ in
+                    if case .playlist(playlist.id, _) = route { false } else { true }
+                }
             } catch {
-                notice = "Could not add to “\(playlist.name)”: \(error.localizedDescription)"
+                notices.report("Could not add to “\(playlist.name)”: \(error.localizedDescription)")
             }
         }
     }
@@ -96,7 +100,7 @@ final class Library {
         case .playlist(let id, _):
             // Development Mode grants read only the listener's own playlists;
             // the session reads any, so it takes every one not known as own.
-            let owned = playlists.contains { $0.id == id && $0.owner.id == username }
+            let owned = playlists.contains { $0.id == id && isOwn($0) }
             content = .tracks(owned ? .playlist(api: api, id: id) : .sessionPlaylist(session: session, id: id))
         case .album(let id): content = .album(AlbumDetail(id: id, api: api))
         case .artist(let id): content = .artist(ArtistDetail(id: id, api: api))

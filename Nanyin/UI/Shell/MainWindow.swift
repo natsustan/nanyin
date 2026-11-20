@@ -11,7 +11,7 @@ struct MainWindow: View {
                 HStack(spacing: 0) {
                     Sidebar()
                         .frame(width: sidebarWidth)
-                    SidebarDivider(width: $sidebarWidth)
+                    SidebarDivider(width: $sidebarWidth) { savedSidebarWidth = sidebarWidth }
                     RouteView(route: app.navigator.current)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .background(Theme.content)
@@ -30,7 +30,9 @@ struct MainWindow: View {
         .onAppear { spaceKey.install { app.player.togglePlayPause() } }
     }
 
-    @AppStorage("SidebarWidth") private var sidebarWidth = 200.0
+    /// Live while dragging; saved when the drag ends.
+    @State private var sidebarWidth = UserDefaults.standard.object(forKey: "SidebarWidth") as? Double ?? 200
+    @AppStorage("SidebarWidth") private var savedSidebarWidth = 200.0
     @State private var spaceKey = SpaceKeyMonitor()
 }
 
@@ -38,6 +40,7 @@ struct MainWindow: View {
 /// sidebar as the 2010 client's was.
 private struct SidebarDivider: View {
     @Binding var width: Double
+    let onEnd: () -> Void
     @State private var start: Double?
 
     var body: some View {
@@ -55,7 +58,10 @@ private struct SidebarDivider: View {
                             start = origin
                             width = min(max(origin + drag.translation.width, 150), 360)
                         }
-                        .onEnded { _ in start = nil })
+                        .onEnded { _ in
+                            start = nil
+                            onEnd()
+                        })
             }
     }
 }
@@ -69,9 +75,9 @@ private final class SpaceKeyMonitor {
     func install(_ action: @escaping @MainActor () -> Void) {
         guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard event.keyCode == 49, !event.isARepeat else { return event }
             let responder = event.window?.firstResponder
-            guard event.keyCode == 49, !event.isARepeat,
-                  event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting(.capsLock).isEmpty,
+            guard event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting(.capsLock).isEmpty,
                   let window = event.window, window === NSApp.mainWindow, window.attachedSheet == nil,
                   !(responder is NSText), !(responder is NSControl) || responder is NSTableView
             else { return event }
@@ -146,12 +152,9 @@ private struct PlaybackNotice: View {
             action = ("Try Again", session.retry)
         }
         // A failed action outranks the standing state until dismissed.
-        if let transient = app.player.lastError ?? app.library.notice {
-            message = transient
-            action = ("Dismiss", {
-                app.player.lastError = nil
-                app.library.notice = nil
-            })
+        if let report = app.notices.message {
+            message = report
+            action = ("Dismiss", app.notices.dismiss)
         }
         return Group {
             if let message {

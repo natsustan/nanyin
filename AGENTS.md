@@ -60,7 +60,9 @@ account safe; most come from spotifast's experience (`research-repos/spotifast/d
 10. **Page sizes ≤ 50, search ≤ 10 per type** (Development Mode limits).
 11. **Playlists the listener does not own are read through the session**
     (`core/src/reads.rs`): Development Mode apps get 403 for them. One
-    playlist fetch, then one batched metadata request per 50 rows.
+    playlist fetch, then one batched metadata request per 50 rows; the play
+    queue resolves through the same cached lookup. Swift asks with
+    `PlaybackEngine.request` (`nanyin_request`, answered by a `reply` event).
 
 ## Conventions
 

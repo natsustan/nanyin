@@ -1,7 +1,8 @@
 //! Catalogue reads over the streaming session, for what the app's Web API
 //! grant cannot read: since late 2024, Development Mode apps get no access
 //! to playlists the listener does not own. The session speaks the protocol
-//! Spotify's own clients use, as spotifast does.
+//! Spotify's own clients use, as spotifast does. Also resolves the play
+//! queue's tracks, so both go through one batched, cached lookup.
 
 use std::{
     collections::{HashMap, VecDeque},
@@ -25,10 +26,11 @@ const PAGE: usize = 50;
 /// Lists kept between pages of one read; past this the least recently
 /// read is let go.
 const KEPT: usize = 8;
+/// Tracks remembered; past this the memory starts over.
+const REMEMBERED: usize = 2000;
 
 #[derive(Debug, Serialize, PartialEq)]
 pub struct PlaylistPage {
-    pub name: String,
     /// The songs in the whole list; episodes and local files are not shown.
     pub total: usize,
     pub rows: Vec<PlaylistRow>,
@@ -38,23 +40,21 @@ pub struct PlaylistPage {
 
 #[derive(Debug, Serialize, PartialEq)]
 pub struct PlaylistRow {
-    /// Position in the whole list; rows Spotify no longer has are left out.
+    /// Position among the list's songs; a song Spotify no longer has is
+    /// left out.
     pub index: usize,
     pub added_at_ms: Option<i64>,
     pub track: Track,
 }
 
-/// A playlist's rows as fetched once, paged through without fetching again.
-struct List {
-    name: String,
-    rows: Vec<(SpotifyUri, Option<i64>)>,
-    songs: usize,
-}
+/// A playlist's songs as fetched once, paged through without fetching again.
+type List = Vec<(SpotifyUri, Option<i64>)>;
 
 pub struct Reads {
     session: Session,
     /// Most recently read last.
     lists: Mutex<VecDeque<(String, Arc<List>)>>,
+    known: Mutex<HashMap<String, Track>>,
 }
 
 impl Reads {
@@ -62,35 +62,68 @@ impl Reads {
         Self {
             session,
             lists: Mutex::default(),
+            known: Mutex::default(),
         }
     }
 
-    /// One page of a playlist. The first page fetches the list afresh.
+    /// One page of a playlist's songs. The first page fetches the list afresh.
     pub async fn playlist(&self, id: &str, offset: usize) -> Result<PlaylistPage, Error> {
         let list = match self.kept(id).filter(|_| offset > 0) {
             Some(list) => list,
             None => self.fetch(id).await?,
         };
-        let end = (offset + PAGE).min(list.rows.len());
-        let page = list.rows.get(offset..end).unwrap_or_default();
-        let tracks = self.tracks(page.iter().map(|(uri, _)| uri)).await?;
+        let end = (offset + PAGE).min(list.len());
+        let page = list.get(offset..end).unwrap_or_default();
+        let uris: Vec<SpotifyUri> = page.iter().map(|(uri, _)| uri.clone()).collect();
+        let tracks = self.tracks(&uris).await?;
         let rows = page
             .iter()
+            .zip(tracks)
             .enumerate()
-            .filter_map(|(i, (uri, added))| {
+            .filter_map(|(i, ((_, added), track))| {
                 Some(PlaylistRow {
                     index: offset + i,
                     added_at_ms: *added,
-                    track: tracks.get(&uri.to_uri())?.clone(),
+                    track: track?,
                 })
             })
             .collect();
         Ok(PlaylistPage {
-            name: list.name.clone(),
-            total: list.songs,
+            total: list.len(),
             rows,
-            next: (end < list.rows.len()).then_some(end),
+            next: (end < list.len()).then_some(end),
         })
+    }
+
+    /// The tracks at `uris`, in order; none where Spotify has no song.
+    /// Known tracks are not asked for again; the rest go in one request.
+    pub async fn tracks(&self, uris: &[SpotifyUri]) -> Result<Vec<Option<Track>>, Error> {
+        let keys: Vec<String> = uris.iter().map(SpotifyUri::to_uri).collect();
+        let missing: Vec<&String> = {
+            let known = self
+                .known
+                .lock()
+                .map_err(|_| Error::aborted("track cache"))?;
+            keys.iter()
+                .filter(|key| !known.contains_key(*key))
+                .collect()
+        };
+        if !missing.is_empty() {
+            let found = self.look_up(&missing).await?;
+            let mut known = self
+                .known
+                .lock()
+                .map_err(|_| Error::aborted("track cache"))?;
+            if known.len() + found.len() > REMEMBERED {
+                known.clear();
+            }
+            known.extend(found);
+        }
+        let known = self
+            .known
+            .lock()
+            .map_err(|_| Error::aborted("track cache"))?;
+        Ok(keys.iter().map(|key| known.get(key).cloned()).collect())
     }
 
     fn kept(&self, id: &str) -> Option<Arc<List>> {
@@ -108,23 +141,18 @@ impl Reads {
             user: None,
         };
         let playlist = Playlist::get(&self.session, &uri).await?;
-        let rows: Vec<_> = playlist
-            .contents
-            .items
-            .iter()
-            .map(|item| {
-                let added = item.attributes.timestamp.as_timestamp_ms();
-                (item.id.clone(), (added > 0).then_some(added))
-            })
-            .collect();
-        let list = Arc::new(List {
-            name: playlist.attributes.name.clone(),
-            songs: rows
+        let list: Arc<List> = Arc::new(
+            playlist
+                .contents
+                .items
                 .iter()
-                .filter(|(uri, _)| matches!(uri, SpotifyUri::Track { .. }))
-                .count(),
-            rows,
-        });
+                .filter(|item| matches!(item.id, SpotifyUri::Track { .. }))
+                .map(|item| {
+                    let added = item.attributes.timestamp.as_timestamp_ms();
+                    (item.id.clone(), (added > 0).then_some(added))
+                })
+                .collect(),
+        );
         if let Ok(mut lists) = self.lists.lock() {
             lists.retain(|(kept, _)| kept != id);
             if lists.len() >= KEPT {
@@ -135,16 +163,12 @@ impl Reads {
         Ok(list)
     }
 
-    /// The tracks among `uris`, by URI, in one batched request. Episodes,
-    /// local files and songs Spotify no longer has are absent.
-    async fn tracks(
-        &self,
-        uris: impl Iterator<Item = &SpotifyUri>,
-    ) -> Result<HashMap<String, Track>, Error> {
+    /// Track metadata for `uris` in one batched request, by URI.
+    async fn look_up(&self, uris: &[&String]) -> Result<HashMap<String, Track>, Error> {
         let mut request = BatchedEntityRequest::new();
-        for uri in uris.filter(|uri| matches!(uri, SpotifyUri::Track { .. })) {
+        for uri in uris.iter().filter(|uri| uri.starts_with("spotify:track:")) {
             request.entity_request.push(EntityRequest {
-                entity_uri: uri.to_uri(),
+                entity_uri: (*uri).clone(),
                 query: vec![ExtensionQuery {
                     extension_kind: EnumOrUnknown::new(ExtensionKind::TRACK_V4),
                     ..Default::default()
@@ -155,6 +179,10 @@ impl Reads {
         if request.entity_request.is_empty() {
             return Ok(HashMap::new());
         }
+        let images = self
+            .session
+            .get_user_attribute("image-url")
+            .unwrap_or_else(|| "https://i.scdn.co/image/{file_id}".into());
         let response = self
             .session
             .spclient()
@@ -173,7 +201,7 @@ impl Reads {
                     continue;
                 };
                 if let Ok(track) = SessionTrack::parse(&message, &uri) {
-                    tracks.insert(data.entity_uri, Track::from_metadata(&track));
+                    tracks.insert(data.entity_uri, Track::from_metadata(&track, &images));
                 }
             }
         }

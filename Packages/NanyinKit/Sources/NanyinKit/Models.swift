@@ -37,8 +37,8 @@ extension [ArtistRef] {
 }
 
 public struct AlbumRef: Codable, Sendable, Hashable {
-    public let id: String?
     public let name: String
+    public let uri: String?
 }
 
 public struct Track: Codable, Sendable, Hashable {

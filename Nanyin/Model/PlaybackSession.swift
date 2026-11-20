@@ -26,7 +26,9 @@ final class PlaybackSession {
         case failed(String)
     }
 
-    private(set) var state: State = .notSetUp
+    private(set) var state: State = .notSetUp {
+        didSet { if !readyWaiters.isEmpty { resumeReadyWaiters() } }
+    }
     var isReady: Bool { state == .ready }
     /// Player events (everything but the session's own).
     var onPlayerEvent: (CoreEvent) -> Void = { _ in }
@@ -86,7 +88,6 @@ final class PlaybackSession {
         authorizeTask?.cancel()
         retryTask?.cancel()
         engine.disconnect()
-        failReads()
         saveCredentials(nil)
         expectedUsername = nil
         state = .notSetUp
@@ -104,56 +105,35 @@ final class PlaybackSession {
         let errorDescription: String?
     }
 
-    /// Reads waiting for the core's answer, by request number.
-    @ObservationIgnored private var reads: [UInt64: CheckedContinuation<SessionPlaylistPage, any Error>] = [:]
-    @ObservationIgnored private var lastRequest: UInt64 = 0
+    /// Reads waiting for a connection in progress to finish.
+    @ObservationIgnored private var readyWaiters: [CheckedContinuation<Void, any Error>] = []
 
     /// A page of a playlist, read through the session rather than the Web API.
     func readPlaylist(id: String, offset: Int) async throws -> SessionPlaylistPage {
         try await untilReady()
-        lastRequest += 1
-        let request = lastRequest
-        // An answer lost on the way must not leave the page loading forever.
-        Task {
-            try? await Task.sleep(for: Self.readTimeout)
-            finishRead(request, .failure(ReadError(errorDescription: "Spotify did not answer in time.")))
-        }
-        return try await withCheckedThrowingContinuation { continuation in
-            reads[request] = continuation
-            if !engine.send(.readPlaylist(request: request, id: id, offset: offset)) {
-                finishRead(request, .failure(ReadError(errorDescription: "Playback stopped responding.")))
-            }
-        }
+        return try await engine.request(.playlist(id: id, offset: offset))
     }
-
-    private static let readTimeout = Duration.seconds(45)
 
     /// Waits out a connection in progress (just after launch, or a
     /// reconnect); fails at once if none is coming.
     private func untilReady() async throws {
-        let deadline = ContinuousClock.now + Self.readTimeout
-        while !isReady {
-            switch state {
-            case .connecting, .authorizing, .waiting:
-                guard ContinuousClock.now < deadline else {
-                    throw ReadError(errorDescription: "Playback is still connecting. Try again in a moment.")
-                }
-                try await Task.sleep(for: .milliseconds(250))
-            default:
-                throw ReadError(errorDescription: "Connect playback on this Mac to open this playlist.")
-            }
+        switch state {
+        case .ready: return
+        case .connecting, .authorizing, .waiting: try await withCheckedThrowingContinuation { readyWaiters.append($0) }
+        default: throw ReadError(errorDescription: "Connect playback on this Mac to open this playlist.")
         }
     }
 
-    private func finishRead(_ request: UInt64, _ result: Result<SessionPlaylistPage, any Error>) {
-        reads.removeValue(forKey: request)?.resume(with: result)
-    }
-
-    /// The session they were sent to is gone: no answer will come.
-    private func failReads() {
-        for request in reads.keys {
-            finishRead(request, .failure(ReadError(errorDescription: "The connection to Spotify was reset.")))
+    private func resumeReadyWaiters() {
+        let result: Result<Void, any Error>
+        switch state {
+        case .ready: result = .success(())
+        case .connecting, .authorizing, .waiting: return
+        default: result = .failure(ReadError(errorDescription: "Connect playback on this Mac to open this playlist."))
         }
+        let waiters = readyWaiters
+        readyWaiters = []
+        for waiter in waiters { waiter.resume(with: result) }
     }
 
     // MARK: Connecting
@@ -167,7 +147,6 @@ final class PlaybackSession {
 
     private func connect(_ credentials: CoreConfig.Credentials) {
         retryTask?.cancel()
-        failReads()
         state = .connecting
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
         engine.connect(CoreConfig(
@@ -215,12 +194,7 @@ final class PlaybackSession {
             case .timeout, .other:
                 scheduleRetry(reason: message)
             }
-        case .playlistPage(let request, let page):
-            finishRead(request, .success(page))
-        case .readFailed(let request, let message):
-            finishRead(request, .failure(ReadError(errorDescription: message)))
         case .sessionEnded:
-            failReads()
             onPlayerEvent(.stopped)
             if !(policy.sessionDropped() && connectStored()) {
                 state = .failed("The connection to Spotify keeps dropping.")

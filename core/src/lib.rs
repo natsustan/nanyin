@@ -10,6 +10,7 @@ mod engine;
 mod events;
 mod queue;
 mod reads;
+mod requests;
 
 use std::{
     ffi::{CStr, CString, c_char, c_void},
@@ -22,6 +23,7 @@ use crate::{
     commands::Command,
     engine::{Config, Engine},
     events::Event,
+    requests::Request,
 };
 
 pub type EventCallback = extern "C" fn(context: *mut c_void, generation: u64, json: *const c_char);
@@ -133,13 +135,38 @@ pub extern "C" fn nanyin_command(command_json: *const c_char) -> i32 {
     let Some(engine) = &state.engine else {
         return -2;
     };
-    match command.apply(engine) {
+    match command.apply(&engine.spirc) {
         Ok(()) => 0,
         Err(error) => {
             log::warn!("command refused: {error}");
             -3
         }
     }
+}
+
+/// Starts answering a JSON request; the answer arrives as a `reply` event
+/// carrying the request's number. Returns 0 when started, -1 for an
+/// unreadable request, -2 with no engine.
+#[unsafe(no_mangle)]
+pub extern "C" fn nanyin_request(request_json: *const c_char) -> i32 {
+    let Some(Request { request, ask }) = read_json::<Request>(request_json) else {
+        return -1;
+    };
+    let Some((reads, emit)) = state()
+        .engine
+        .as_ref()
+        .map(|engine| (engine.reads.clone(), engine.emit.clone()))
+    else {
+        return -2;
+    };
+    RUNTIME.spawn(async move {
+        let (ok, error) = match ask.answer(&reads).await {
+            Ok(value) => (Some(value), None),
+            Err(message) => (None, Some(message)),
+        };
+        emit(Event::Reply { request, ok, error });
+    });
+    0
 }
 
 /// Shuts the engine down. Its remaining events carry a generation Swift no

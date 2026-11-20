@@ -12,6 +12,7 @@ final class AppModel {
     let library: Library
     let stars: Stars
     let navigator = Navigator()
+    let notices = Notices()
     private let nowPlaying: NowPlayingBridge
 
     init() {
@@ -25,9 +26,9 @@ final class AppModel {
             : KeychainStore(service: (Bundle.main.bundleIdentifier ?? "com.cosmoss.nanyin") + ".credentials")
         account = Account(secrets: secrets)
         session = PlaybackSession(secrets: secrets)
-        player = Player(session: session)
+        player = Player(session: session, notices: notices)
         stars = Stars(api: account.api)
-        library = Library(api: account.api, stars: stars, session: session)
+        library = Library(api: account.api, stars: stars, session: session, notices: notices)
         nowPlaying = NowPlayingBridge(player: player)
         navigator.willShow = { [library] route in library.prepare(route) }
         #if DEBUG

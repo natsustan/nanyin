@@ -42,8 +42,9 @@ final class Pager<Item: Sendable, Cursor: Sendable> {
                 total = page.total
                 next = page.next
                 isLoading = false
-                // A page can come back empty yet not be the last (a playlist
-                // stretch of episodes); no row will appear to ask for more.
+                // A page can come back empty yet not be the last (a Web API
+                // playlist page of removed songs); no row will appear to ask
+                // for more.
                 if page.items.isEmpty { loadMore() }
             } catch {
                 self.error = error.localizedDescription

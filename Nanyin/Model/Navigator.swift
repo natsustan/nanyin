@@ -14,6 +14,30 @@ enum Route: Hashable {
     case search(String)
 }
 
+extension Route {
+    /// The page a `spotify:album:…` or `spotify:artist:…` URI opens.
+    init?(uri: String) {
+        guard let (kind, id) = Self.parse(uri) else { return nil }
+        switch kind {
+        case "album": self = .album(id: id)
+        case "artist": self = .artist(id: id)
+        default: return nil
+        }
+    }
+
+    /// The open.spotify.com address of a `spotify:kind:id` URI.
+    static func webLink(for uri: String) -> String {
+        guard let (kind, id) = parse(uri) else { return uri }
+        return "https://open.spotify.com/\(kind)/\(id)"
+    }
+
+    private static func parse(_ uri: String) -> (kind: String, id: String)? {
+        let parts = uri.split(separator: ":")
+        guard parts.count == 3, parts[0] == "spotify" else { return nil }
+        return (String(parts[1]), String(parts[2]))
+    }
+}
+
 @MainActor
 @Observable
 final class Navigator {

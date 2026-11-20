@@ -68,7 +68,6 @@ pub struct Engine {
     pub session: Session,
     pub reads: Arc<Reads>,
     pub emit: Emit,
-    pub runtime: tokio::runtime::Handle,
 }
 
 pub struct Failure {
@@ -202,21 +201,23 @@ impl Engine {
 
         let mut events = player.get_player_event_channel();
         let emit: Emit = Arc::new(emit);
-        let queue = QueueResolver::new(session.clone());
-        let forward = emit.clone();
-        tokio::spawn(async move {
-            let emit = forward;
-            while let Some(event) = events.recv().await {
-                if let PlayerEvent::SetQueue {
-                    context_uri,
-                    next_tracks,
-                    ..
-                } = event
-                {
-                    let emit = emit.clone();
-                    queue.update(context_uri, next_tracks, move |event| emit(event));
-                } else if let Some(event) = Event::from_player(event) {
-                    emit(event);
+        let reads = Arc::new(Reads::new(session.clone()));
+        let queue = QueueResolver::new(reads.clone());
+        tokio::spawn({
+            let emit = emit.clone();
+            async move {
+                while let Some(event) = events.recv().await {
+                    if let PlayerEvent::SetQueue {
+                        context_uri,
+                        next_tracks,
+                        ..
+                    } = event
+                    {
+                        let emit = emit.clone();
+                        queue.update(context_uri, next_tracks, move |event| emit(event));
+                    } else if let Some(event) = Event::from_player(event) {
+                        emit(event);
+                    }
                 }
             }
         });
@@ -247,10 +248,9 @@ impl Engine {
         Ok((
             Self {
                 spirc,
-                reads: Arc::new(Reads::new(session.clone())),
                 session,
+                reads,
                 emit,
-                runtime: tokio::runtime::Handle::current(),
             },
             task,
         ))

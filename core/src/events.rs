@@ -3,8 +3,7 @@
 use librespot_metadata::audio::{AudioItem, UniqueFields};
 use librespot_playback::player::PlayerEvent;
 use serde::Serialize;
-
-use crate::reads::PlaylistPage;
+use serde_json::Value;
 
 #[derive(Debug, Serialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -58,15 +57,13 @@ pub enum Event {
         context_uri: String,
         tracks: Vec<Track>,
     },
-    /// The answer to a `read_playlist` command.
-    PlaylistPage {
+    /// The answer to request `request`: `ok` or `error`.
+    Reply {
         request: u64,
-        page: PlaylistPage,
-    },
-    /// A read that could not be answered.
-    ReadFailed {
-        request: u64,
-        message: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        ok: Option<Value>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
     },
 }
 
@@ -142,11 +139,10 @@ impl Track {
             explicit: item.is_explicit,
         }
     }
-}
 
-impl Track {
-    /// A track read from Spotify's metadata, outside playback.
-    pub fn from_metadata(track: &librespot_metadata::Track) -> Self {
+    /// A track read from Spotify's metadata, outside playback. `images` is
+    /// the session's image address template, with `{file_id}` to fill.
+    pub fn from_metadata(track: &librespot_metadata::Track, images: &str) -> Self {
         Self {
             uri: track.id.to_uri(),
             name: track.name.clone(),
@@ -165,7 +161,7 @@ impl Track {
                 .covers
                 .iter()
                 .max_by_key(|cover| cover.width)
-                .map(|cover| format!("https://i.scdn.co/image/{}", cover.id)),
+                .map(|cover| images.replace("{file_id}", &cover.id.to_base16())),
             duration_ms: u32::try_from(track.duration).unwrap_or_default(),
             explicit: track.is_explicit,
         }

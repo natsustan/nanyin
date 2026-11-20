@@ -54,18 +54,37 @@ struct TrackListTable: View {
             columns: columns,
             actions: .init(
                 play: { player.play($0, in: list) },
-                addToQueue: { player.addToQueue($0.uri) },
-                togglePlayPause: player.togglePlayPause,
                 rowAppeared: list.pages.appeared,
                 isStarred: { stars.isStarred($0.uri) },
                 toggleStar: { stars.toggle($0.uri) },
-                show: { app.navigator.go(to: $0) },
-                playlists: { app.library.editablePlaylists.map { ($0.id, $0.name) } },
-                addToPlaylist: { rows, id in
-                    if let playlist = app.library.playlists.first(where: { $0.id == id }) {
-                        app.library.add(rows.map(\.uri), to: playlist)
-                    }
-                }))
+                menu: menu))
+    }
+
+    private func menu(for rows: [TrackRow]) -> [TrackMenuItem] {
+        guard let first = rows.first else { return [] }
+        let (player, library, navigator) = (app.player, app.library, app.navigator)
+        var items = [
+            TrackMenuItem(title: "Play") { player.play(first, in: list) },
+            TrackMenuItem(title: "Add to Play Queue") { rows.forEach { player.addToQueue($0.uri) } },
+        ]
+        let playlists = library.editablePlaylists
+        if !playlists.isEmpty {
+            items.append(TrackMenuItem(title: "Add to Playlist", children: playlists.map { playlist in
+                TrackMenuItem(title: playlist.name) { library.add(rows.map(\.uri), to: playlist) }
+            }))
+        }
+        items.append(.separator)
+        if let route = first.albumURI.flatMap(Route.init(uri:)) {
+            items.append(TrackMenuItem(title: "Show Album") { navigator.go(to: route) })
+        }
+        if let route = first.artistURI.flatMap(Route.init(uri:)) {
+            items.append(TrackMenuItem(title: "Show Artist") { navigator.go(to: route) })
+        }
+        items.append(TrackMenuItem(title: "Copy Spotify Link") {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(rows.map { Route.webLink(for: $0.uri) }.joined(separator: "\n"), forType: .string)
+        })
+        return items
     }
 }
 
