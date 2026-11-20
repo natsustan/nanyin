@@ -13,7 +13,7 @@ enum DemoContent {
             TrackRow(
                 index: index, uri: "spotify:track:demo\(index)", name: track.0,
                 artists: track.1, album: track.2, durationMs: track.3,
-                popularity: 90 - index * 4, addedAt: "2010-0\(index % 9 + 1)-1\(index % 9)T10:00:00Z")
+                popularity: 90 - index * 4, added: Date(timeIntervalSince1970: 1_270_000_000 + Double(index) * 86_400 * 9))
         }
         app.stars.learn(rows.map(\.uri), starred: false)
         app.stars.learn(rows.filter { $0.id % 3 == 0 }.map(\.uri), starred: true)

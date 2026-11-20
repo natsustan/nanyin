@@ -213,7 +213,7 @@ final class Player {
             isLoading = false
             playingElsewhere = true
             position = position.continued(advancing: false)
-        case .connected, .connectFailed, .sessionEnded:
+        case .connected, .connectFailed, .sessionEnded, .playlistPage, .readFailed:
             break
         }
     }

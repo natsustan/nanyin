@@ -17,7 +17,7 @@ struct TrackRow: Identifiable, Hashable, Sendable {
     let isPlayable: Bool
 
     init(index: Int, uri: String, name: String, artists: String, album: String, durationMs: Int,
-         popularity: Int? = nil, addedAt: String? = nil, isPlayable: Bool = true) {
+         popularity: Int? = nil, added: Date? = nil, isPlayable: Bool = true) {
         id = index
         self.uri = uri
         self.name = name
@@ -25,14 +25,15 @@ struct TrackRow: Identifiable, Hashable, Sendable {
         self.album = album
         duration = Self.format(ms: durationMs)
         self.popularity = popularity
-        added = addedAt.flatMap { Self.isoParser.date(from: $0) }?.formatted(date: .numeric, time: .omitted) ?? ""
+        self.added = added?.formatted(date: .numeric, time: .omitted) ?? ""
         self.isPlayable = isPlayable
     }
 
     init(index: Int, track: Track, addedAt: String? = nil) {
         self.init(
             index: index, uri: track.uri, name: track.name, artists: track.artists.names, album: track.album?.name ?? "",
-            durationMs: track.duration_ms, popularity: track.popularity, addedAt: addedAt,
+            durationMs: track.duration_ms, popularity: track.popularity,
+            added: addedAt.flatMap { Self.isoParser.date(from: $0) },
             isPlayable: track.is_playable ?? true)
     }
 
@@ -41,9 +42,9 @@ struct TrackRow: Identifiable, Hashable, Sendable {
                   durationMs: track.duration_ms)
     }
 
-    init(index: Int, track: CoreTrack) {
+    init(index: Int, track: CoreTrack, added: Date? = nil) {
         self.init(index: index, uri: track.uri, name: track.name, artists: track.artistNames, album: track.album,
-                  durationMs: track.durationMs)
+                  durationMs: track.durationMs, added: added)
     }
 
     /// "3:07".
@@ -97,6 +98,19 @@ extension TrackList {
                 item.element.playable.map { TrackRow(index: offset + item.offset, track: $0, addedAt: item.element.added_at) }
             }
             return (rows, page.total, page.next == nil ? nil : offset + page.items.count)
+        }
+    }
+
+    /// A playlist the Web API grant may not read (one the listener does not
+    /// own), read through the playback session instead.
+    static func sessionPlaylist(session: PlaybackSession, id: String) -> TrackList {
+        TrackList(contextURI: "spotify:playlist:\(id)") { offset in
+            let page = try await session.readPlaylist(id: id, offset: offset)
+            let rows = page.rows.map { row in
+                TrackRow(index: row.index, track: row.track,
+                         added: row.addedAtMs.map { Date(timeIntervalSince1970: Double($0) / 1000) })
+            }
+            return (rows, page.total, page.next)
         }
     }
 

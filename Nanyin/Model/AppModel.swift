@@ -27,7 +27,7 @@ final class AppModel {
         session = PlaybackSession(secrets: secrets)
         player = Player(session: session)
         stars = Stars(api: account.api)
-        library = Library(api: account.api, stars: stars)
+        library = Library(api: account.api, stars: stars, session: session)
         nowPlaying = NowPlayingBridge(player: player)
         navigator.willShow = { [library] route in library.prepare(route) }
         #if DEBUG

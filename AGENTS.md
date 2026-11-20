@@ -58,6 +58,9 @@ account safe; most come from spotifast's experience (`research-repos/spotifast/d
    account needs explicit permission in the current task; stop at the first
    sign of session trouble.
 10. **Page sizes ≤ 50, search ≤ 10 per type** (Development Mode limits).
+11. **Playlists the listener does not own are read through the session**
+    (`core/src/reads.rs`): Development Mode apps get 403 for them. One
+    playlist fetch, then one batched metadata request per 50 rows.
 
 ## Conventions
 

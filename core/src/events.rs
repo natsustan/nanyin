@@ -4,6 +4,8 @@ use librespot_metadata::audio::{AudioItem, UniqueFields};
 use librespot_playback::player::PlayerEvent;
 use serde::Serialize;
 
+use crate::reads::PlaylistPage;
+
 #[derive(Debug, Serialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
@@ -55,6 +57,16 @@ pub enum Event {
     Queue {
         context_uri: String,
         tracks: Vec<Track>,
+    },
+    /// The answer to a `read_playlist` command.
+    PlaylistPage {
+        request: u64,
+        page: PlaylistPage,
+    },
+    /// A read that could not be answered.
+    ReadFailed {
+        request: u64,
+        message: String,
     },
 }
 
@@ -125,6 +137,33 @@ impl Track {
             cover_url,
             duration_ms: item.duration_ms,
             explicit: item.is_explicit,
+        }
+    }
+}
+
+impl Track {
+    /// A track read from Spotify's metadata, outside playback.
+    pub fn from_metadata(track: &librespot_metadata::Track) -> Self {
+        Self {
+            uri: track.id.to_uri(),
+            name: track.name.clone(),
+            artists: track
+                .artists
+                .iter()
+                .map(|artist| Artist {
+                    uri: artist.id.to_uri(),
+                    name: artist.name.clone(),
+                })
+                .collect(),
+            album: track.album.name.clone(),
+            cover_url: track
+                .album
+                .covers
+                .iter()
+                .max_by_key(|cover| cover.width)
+                .map(|cover| format!("https://i.scdn.co/image/{}", cover.id)),
+            duration_ms: u32::try_from(track.duration).unwrap_or_default(),
+            explicit: track.is_explicit,
         }
     }
 }

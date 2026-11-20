@@ -19,7 +19,10 @@ use serde::Deserialize;
 use crate::{
     events::{Event, FailureReason},
     queue::QueueResolver,
+    reads::Reads,
 };
+
+pub type Emit = Arc<dyn Fn(Event) + Send + Sync>;
 
 /// How long the access-point handshake and Connect registration may take
 /// before the attempt is abandoned. Never retried here: Swift decides.
@@ -63,6 +66,9 @@ impl CredentialsInput {
 pub struct Engine {
     pub spirc: Spirc,
     pub session: Session,
+    pub reads: Arc<Reads>,
+    pub emit: Emit,
+    pub runtime: tokio::runtime::Handle,
 }
 
 pub struct Failure {
@@ -195,9 +201,11 @@ impl Engine {
         );
 
         let mut events = player.get_player_event_channel();
-        let emit = Arc::new(emit);
+        let emit: Emit = Arc::new(emit);
         let queue = QueueResolver::new(session.clone());
+        let forward = emit.clone();
         tokio::spawn(async move {
+            let emit = forward;
             while let Some(event) = events.recv().await {
                 if let PlayerEvent::SetQueue {
                     context_uri,
@@ -236,7 +244,16 @@ impl Engine {
                 ),
             });
         }
-        Ok((Self { spirc, session }, task))
+        Ok((
+            Self {
+                spirc,
+                reads: Arc::new(Reads::new(session.clone())),
+                session,
+                emit,
+                runtime: tokio::runtime::Handle::current(),
+            },
+            task,
+        ))
     }
 
     /// The reusable credential to persist, as JSON.

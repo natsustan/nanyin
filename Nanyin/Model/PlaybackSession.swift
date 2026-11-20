@@ -86,6 +86,7 @@ final class PlaybackSession {
         authorizeTask?.cancel()
         retryTask?.cancel()
         engine.disconnect()
+        failReads()
         saveCredentials(nil)
         expectedUsername = nil
         state = .notSetUp
@@ -95,6 +96,40 @@ final class PlaybackSession {
     func send(_ command: CoreCommand) -> String? {
         guard isReady else { return "Set up playback on this Mac first." }
         return engine.send(command) ? nil : "Playback stopped responding."
+    }
+
+    // MARK: Reads
+
+    struct ReadError: LocalizedError {
+        let errorDescription: String?
+    }
+
+    /// Reads waiting for the core's answer, by request number.
+    @ObservationIgnored private var reads: [UInt64: CheckedContinuation<SessionPlaylistPage, any Error>] = [:]
+    @ObservationIgnored private var lastRequest: UInt64 = 0
+
+    /// A page of a playlist, read through the session rather than the Web API.
+    func readPlaylist(id: String, offset: Int) async throws -> SessionPlaylistPage {
+        guard isReady else { throw ReadError(errorDescription: "Connect playback on this Mac to open this playlist.") }
+        lastRequest += 1
+        let request = lastRequest
+        return try await withCheckedThrowingContinuation { continuation in
+            reads[request] = continuation
+            if !engine.send(.readPlaylist(request: request, id: id, offset: offset)) {
+                finishRead(request, .failure(ReadError(errorDescription: "Playback stopped responding.")))
+            }
+        }
+    }
+
+    private func finishRead(_ request: UInt64, _ result: Result<SessionPlaylistPage, any Error>) {
+        reads.removeValue(forKey: request)?.resume(with: result)
+    }
+
+    /// The session they were sent to is gone: no answer will come.
+    private func failReads() {
+        for request in reads.keys {
+            finishRead(request, .failure(ReadError(errorDescription: "The connection to Spotify was reset.")))
+        }
     }
 
     // MARK: Connecting
@@ -108,6 +143,7 @@ final class PlaybackSession {
 
     private func connect(_ credentials: CoreConfig.Credentials) {
         retryTask?.cancel()
+        failReads()
         state = .connecting
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
         engine.connect(CoreConfig(
@@ -155,7 +191,12 @@ final class PlaybackSession {
             case .timeout, .other:
                 scheduleRetry(reason: message)
             }
+        case .playlistPage(let request, let page):
+            finishRead(request, .success(page))
+        case .readFailed(let request, let message):
+            finishRead(request, .failure(ReadError(errorDescription: message)))
         case .sessionEnded:
+            failReads()
             onPlayerEvent(.stopped)
             if !(policy.sessionDropped() && connectStored()) {
                 state = .failed("The connection to Spotify keeps dropping.")

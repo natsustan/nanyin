@@ -16,6 +16,8 @@ enum CoreEvent: Decodable, Equatable {
     case shuffle(Bool)
     case `repeat`(context: Bool, track: Bool)
     case queue(contextURI: String, tracks: [CoreTrack])
+    case playlistPage(request: UInt64, SessionPlaylistPage)
+    case readFailed(request: UInt64, message: String)
 
     enum FailureReason: String, Decodable {
         case authRejected = "auth_rejected"
@@ -27,7 +29,7 @@ enum CoreEvent: Decodable, Equatable {
     private enum Key: String, CodingKey {
         case type, username, credentials, reason, message, track, uri
         case positionMs = "position_ms"
-        case volume, on, context, tracks
+        case volume, on, context, tracks, request, page
         case contextURI = "context_uri"
     }
 
@@ -61,6 +63,14 @@ enum CoreEvent: Decodable, Equatable {
             self = .queue(
                 contextURI: try c.decode(String.self, forKey: .contextURI),
                 tracks: try c.decode([CoreTrack].self, forKey: .tracks))
+        case "playlist_page":
+            self = .playlistPage(
+                request: try c.decode(UInt64.self, forKey: .request),
+                try c.decode(SessionPlaylistPage.self, forKey: .page))
+        case "read_failed":
+            self = .readFailed(
+                request: try c.decode(UInt64.self, forKey: .request),
+                message: try c.decode(String.self, forKey: .message))
         default:
             throw DecodingError.dataCorruptedError(forKey: .type, in: c, debugDescription: "unknown event \(type)")
         }
@@ -91,6 +101,25 @@ struct CoreTrack: Decodable, Equatable, Sendable {
     var artistNames: String { artists.map(\.name).joined(separator: ", ") }
 }
 
+/// A page of a playlist read through the playback session.
+struct SessionPlaylistPage: Decodable, Equatable, Sendable {
+    struct Row: Decodable, Equatable, Sendable {
+        let index: Int
+        let addedAtMs: Int64?
+        let track: CoreTrack
+
+        enum CodingKeys: String, CodingKey {
+            case index, track
+            case addedAtMs = "added_at_ms"
+        }
+    }
+
+    let name: String
+    let total: Int
+    let rows: [Row]
+    let next: Int?
+}
+
 /// Commands for the Rust core (`core/src/commands.rs`).
 enum CoreCommand: Encodable, Equatable {
     case play, pause, playPause, next, previous
@@ -100,6 +129,7 @@ enum CoreCommand: Encodable, Equatable {
     case `repeat`(context: Bool, track: Bool)
     case addToQueue(uri: String)
     case load(Load)
+    case readPlaylist(request: UInt64, id: String, offset: Int)
 
     struct Load: Encodable, Equatable {
         var contextURI: String?
@@ -120,7 +150,7 @@ enum CoreCommand: Encodable, Equatable {
     }
 
     private enum Key: String, CodingKey {
-        case cmd, volume, on, context, track, uri
+        case cmd, volume, on, context, track, uri, request, id, offset
         case positionMs = "position_ms"
     }
 
@@ -151,6 +181,11 @@ enum CoreCommand: Encodable, Equatable {
         case .load(let load):
             try c.encode("load", forKey: .cmd)
             try load.encode(to: encoder)
+        case .readPlaylist(let request, let id, let offset):
+            try c.encode("read_playlist", forKey: .cmd)
+            try c.encode(request, forKey: .request)
+            try c.encode(id, forKey: .id)
+            try c.encode(offset, forKey: .offset)
         }
     }
 }

@@ -9,6 +9,7 @@ mod commands;
 mod engine;
 mod events;
 mod queue;
+mod reads;
 
 use std::{
     ffi::{CStr, CString, c_char, c_void},
@@ -132,7 +133,7 @@ pub extern "C" fn nanyin_command(command_json: *const c_char) -> i32 {
     let Some(engine) = &state.engine else {
         return -2;
     };
-    match command.apply(&engine.spirc) {
+    match command.apply(engine) {
         Ok(()) => 0,
         Err(error) => {
             log::warn!("command refused: {error}");

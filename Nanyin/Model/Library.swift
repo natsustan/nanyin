@@ -22,11 +22,13 @@ final class Library {
     @ObservationIgnored private var pages: [Route: PageContent] = [:]
     private let api: SpotifyWebAPI
     private let stars: Stars
+    private let session: PlaybackSession
     private var username: String?
 
-    init(api: SpotifyWebAPI, stars: Stars) {
+    init(api: SpotifyWebAPI, stars: Stars, session: PlaybackSession) {
         self.api = api
         self.stars = stars
+        self.session = session
     }
 
     func signedIn(as username: String, showing route: Route) {
@@ -70,7 +72,10 @@ final class Library {
         switch route {
         case .whatsNew: content = .tracks(.recentlyPlayed(api: api))
         case .likedSongs: content = .tracks(.liked(api: api, username: username, stars: stars))
-        case .playlist(let id, _): content = .tracks(.playlist(api: api, id: id))
+        case .playlist(let id, _):
+            // Development Mode grants read only the listener's own playlists.
+            let owned = playlists.first { $0.id == id }.map { $0.owner.id == username } ?? true
+            content = .tracks(owned ? .playlist(api: api, id: id) : .sessionPlaylist(session: session, id: id))
         case .album(let id): content = .album(AlbumDetail(id: id, api: api))
         case .artist(let id): content = .artist(ArtistDetail(id: id, api: api))
         case .search(let query): content = .search(SearchResultsModel(query: query, api: api))
