@@ -13,6 +13,8 @@ final class AppModel {
     let stars: Stars
     let navigator = Navigator()
     let notices = Notices()
+    /// The credits sheet on the main window, while open.
+    var credits: TrackCredits?
     private let nowPlaying: NowPlayingBridge
 
     init() {
@@ -50,7 +52,12 @@ final class AppModel {
         }
     }
 
+    func showCredits(trackID: String, title: String, artists: String) {
+        credits = TrackCredits(trackID: trackID, title: title, artists: artists, session: session)
+    }
+
     func signOut() async {
+        credits = nil
         session.signOut()
         library.signedOut()
         stars.reset()

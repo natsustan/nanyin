@@ -90,7 +90,7 @@ pub struct Track {
     pub name: String,
     pub artists: Vec<Artist>,
     pub album: String,
-    /// Known when read from metadata; playback's audio item does not carry it.
+    /// None for episodes and local files.
     pub album_uri: Option<String>,
     pub cover_url: Option<String>,
     pub duration_ms: u32,
@@ -105,8 +105,13 @@ pub struct Artist {
 
 impl Track {
     pub fn from_item(item: &AudioItem) -> Self {
-        let (artists, album) = match &item.unique_fields {
-            UniqueFields::Track { artists, album, .. } => (
+        let (artists, album, album_uri) = match &item.unique_fields {
+            UniqueFields::Track {
+                artists,
+                album,
+                album_id,
+                ..
+            } => (
                 artists
                     .0
                     .iter()
@@ -116,8 +121,9 @@ impl Track {
                     })
                     .collect(),
                 album.clone(),
+                Some(album_id.to_uri()),
             ),
-            UniqueFields::Episode { show_name, .. } => (Vec::new(), show_name.clone()),
+            UniqueFields::Episode { show_name, .. } => (Vec::new(), show_name.clone(), None),
             UniqueFields::Local { artists, album, .. } => (
                 artists
                     .iter()
@@ -127,6 +133,7 @@ impl Track {
                     })
                     .collect(),
                 album.clone().unwrap_or_default(),
+                None,
             ),
         };
         let cover_url = item
@@ -139,7 +146,7 @@ impl Track {
             name: item.name.clone(),
             artists,
             album,
-            album_uri: None,
+            album_uri,
             cover_url,
             duration_ms: item.duration_ms,
             explicit: item.is_explicit,

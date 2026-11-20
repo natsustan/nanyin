@@ -93,8 +93,10 @@ account safe; most come from spotifast's experience (`research-repos/spotifast/d
     playlist fetch, then one batched metadata request per 50 rows; the play
     queue resolves through the same cached lookup. An artist's top tracks
     (also 403 on the Web API) come the same way: one artist fetch, one
-    batched lookup of the first 10. Swift asks with
-    `PlaybackEngine.request` (`nanyin_request`, answered by a `reply` event).
+    batched lookup of the first 10. A song's credits (the Web API has
+    none) are one spclient request, made only from "Show Credits". Swift
+    asks with `PlaybackEngine.request` (`nanyin_request`, answered by a
+    `reply` event).
 
 ## Conventions
 

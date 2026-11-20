@@ -18,20 +18,22 @@ crate-type = ["staticlib", "rlib"]
 # - PlaybackSnapshot::track_uri and ::playing_on, a restore position that
 #   advances until Spirc applies it;
 # - Spirc::restore_playback_reporting, and no restore over another device
-#   that was playing when this one registered.
+#   that was playing when this one registered;
+# - the album id kept on a track's AudioItem (UniqueFields::Track::album_id).
 # Every crate comes from the same rev, so one copy of each exists. Drop
 # each change once upstream has it.
 [dependencies]
-librespot-core = { git = "https://github.com/natsustan/librespot", rev = "fa9eff732980e144db134f96553f25bc0c76cde6" }
-librespot-connect = { git = "https://github.com/natsustan/librespot", rev = "fa9eff732980e144db134f96553f25bc0c76cde6" }
-librespot-playback = { git = "https://github.com/natsustan/librespot", rev = "fa9eff732980e144db134f96553f25bc0c76cde6" }
-librespot-metadata = { git = "https://github.com/natsustan/librespot", rev = "fa9eff732980e144db134f96553f25bc0c76cde6" }
+librespot-core = { git = "https://github.com/natsustan/librespot", rev = "6b4fb2512707a650e61b455baa157482cfbbe65a" }
+librespot-connect = { git = "https://github.com/natsustan/librespot", rev = "6b4fb2512707a650e61b455baa157482cfbbe65a" }
+librespot-playback = { git = "https://github.com/natsustan/librespot", rev = "6b4fb2512707a650e61b455baa157482cfbbe65a" }
+librespot-metadata = { git = "https://github.com/natsustan/librespot", rev = "6b4fb2512707a650e61b455baa157482cfbbe65a" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+http = "1"
 log = "0.4"
 env_logger = "0.11"
-librespot-protocol = { git = "https://github.com/natsustan/librespot", rev = "fa9eff732980e144db134f96553f25bc0c76cde6", version = "0.8.0" }
+librespot-protocol = { git = "https://github.com/natsustan/librespot", rev = "6b4fb2512707a650e61b455baa157482cfbbe65a", version = "0.8.0" }
 protobuf = "3"
 
 [profile.release]

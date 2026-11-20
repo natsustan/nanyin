@@ -57,12 +57,13 @@ struct TrackListTable: View {
                 rowAppeared: list.pages.appeared,
                 isStarred: { stars.isStarred($0.uri) },
                 toggleStar: { stars.toggle($0.uri) },
-                menu: menu))
+                menu: menu,
+                open: { app.navigator.go(to: $0) }))
     }
 
     private func menu(for rows: [TrackRow]) -> [TrackMenuItem] {
         guard let first = rows.first else { return [] }
-        let (player, library, navigator) = (app.player, app.library, app.navigator)
+        let (player, library) = (app.player, app.library)
         var items = [
             TrackMenuItem(title: "Play") { player.play(first, in: list) },
             TrackMenuItem(title: "Add to Play Queue") { rows.forEach { player.addToQueue($0.uri) } },
@@ -74,17 +75,73 @@ struct TrackListTable: View {
             }))
         }
         items.append(.separator)
-        if let route = first.albumURI.flatMap(Route.init(uri:)) {
-            items.append(TrackMenuItem(title: "Show Album") { navigator.go(to: route) })
-        }
-        if let route = first.artistURI.flatMap(Route.init(uri:)) {
-            items.append(TrackMenuItem(title: "Show Artist") { navigator.go(to: route) })
-        }
+        items += app.songMenu(uri: first.uri, name: first.name, album: first.albumRoute, artists: first.artists)
         items.append(TrackMenuItem(title: "Copy Spotify Link") {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(rows.map { Route.webLink(for: $0.uri) }.joined(separator: "\n"), forType: .string)
         })
         return items
+    }
+}
+
+extension AppModel {
+    /// "Show Album", "Show Artist" (a submenu when there are several) and
+    /// "Show Credits" for a song, as far as Spotify gives their pages.
+    func songMenu(uri: String, name: String, album: Route?, artists: [TrackRow.Artist]) -> [TrackMenuItem] {
+        let navigator = navigator
+        var items: [TrackMenuItem] = []
+        if let album {
+            items.append(TrackMenuItem(title: "Show Album") { navigator.go(to: album) })
+        }
+        let pages = artists.compactMap { artist in
+            artist.route.map { route in TrackMenuItem(title: artist.name) { navigator.go(to: route) } }
+        }
+        if pages.count == 1 {
+            items.append(TrackMenuItem(title: "Show Artist", action: pages[0].action))
+        } else if !pages.isEmpty {
+            items.append(TrackMenuItem(title: "Show Artist", children: pages))
+        }
+        if let id = Route.trackID(uri) {
+            let names = artists.map(\.name).joined(separator: ", ")
+            items.append(TrackMenuItem(title: "Show Credits") { [weak self] in
+                self?.showCredits(trackID: id, title: name, artists: names)
+            })
+        }
+        return items
+    }
+}
+
+/// Text in parts separated by commas, the ones with a route links to their
+/// page: "A, B" for a song's artists. Links share the text's colour; the
+/// font comes from the environment. An optional bold label leads.
+struct LinkText: View {
+    @Environment(AppModel.self) private var app
+    var label: String?
+    let parts: [(text: String, route: Route?)]
+    let color: Color
+
+    var body: some View {
+        var text = AttributedString()
+        if let label {
+            text = AttributedString("\(label): ")
+            text.font = AquaFont.bold(11)
+        }
+        for (index, part) in parts.enumerated() {
+            if index > 0 { text += AttributedString(", ") }
+            var run = AttributedString(part.text)
+            if part.route != nil { run.link = URL(string: "nanyin-route://\(index)") }
+            text += run
+        }
+        return Text(text)
+            .foregroundStyle(color)
+            .tint(color)
+            .environment(\.openURL, OpenURLAction { url in
+                if let index = url.host().flatMap(Int.init), parts.indices.contains(index),
+                   let route = parts[index].route {
+                    app.navigator.go(to: route)
+                }
+                return .handled
+            })
     }
 }
 

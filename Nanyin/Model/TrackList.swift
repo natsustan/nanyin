@@ -5,29 +5,37 @@ import Observation
 /// One row of a track table, from whichever Web API object listed it.
 /// Display strings are computed once here, not per cell as rows scroll.
 struct TrackRow: Identifiable, Hashable, Sendable {
+    /// A credited artist, and their page when Spotify gives one.
+    struct Artist: Hashable, Sendable {
+        let name: String
+        let route: Route?
+
+        init(name: String, uri: String?) {
+            self.name = name
+            route = uri.flatMap(Route.init(uri:))
+        }
+    }
+
     /// Unique within the list: the same track may appear twice in a playlist.
     let id: Int
     let uri: String
     let name: String
-    let artistNames: String
+    let artists: [Artist]
     let album: String
     let duration: String
     let popularity: Int?
     let added: String
     let isPlayable: Bool
-    /// For "Show Album" and "Show Artist" (the first credited artist).
-    let albumURI: String?
-    let artistURI: String?
+    /// For the album link and "Show Album".
+    let albumRoute: Route?
 
-    init(index: Int, uri: String, name: String, artists: String, album: String, durationMs: Int,
-         popularity: Int? = nil, added: Date? = nil, isPlayable: Bool = true,
-         albumURI: String? = nil, artistURI: String? = nil) {
+    init(index: Int, uri: String, name: String, artists: [Artist], album: String, durationMs: Int,
+         popularity: Int? = nil, added: Date? = nil, isPlayable: Bool = true, albumURI: String? = nil) {
         id = index
-        self.albumURI = albumURI
-        self.artistURI = artistURI
+        albumRoute = albumURI.flatMap(Route.init(uri:))
         self.uri = uri
         self.name = name
-        artistNames = artists
+        self.artists = artists
         self.album = album
         duration = Self.format(ms: durationMs)
         self.popularity = popularity
@@ -37,22 +45,24 @@ struct TrackRow: Identifiable, Hashable, Sendable {
 
     init(index: Int, track: Track, addedAt: String? = nil) {
         self.init(
-            index: index, uri: track.uri, name: track.name, artists: track.artists.names, album: track.album?.name ?? "",
-            durationMs: track.duration_ms, popularity: track.popularity,
+            index: index, uri: track.uri, name: track.name, artists: track.artists.map(Artist.init),
+            album: track.album?.name ?? "", durationMs: track.duration_ms, popularity: track.popularity,
             added: addedAt.flatMap { Self.isoParser.date(from: $0) },
-            isPlayable: track.is_playable ?? true, albumURI: track.album?.uri, artistURI: track.artists.first?.uri)
+            isPlayable: track.is_playable ?? true, albumURI: track.album?.uri)
     }
 
     init(index: Int, track: AlbumTrack, album: Album) {
-        self.init(index: index, uri: track.uri, name: track.name, artists: track.artists.names, album: album.name,
-                  durationMs: track.duration_ms, albumURI: album.uri, artistURI: track.artists.first?.uri)
+        self.init(index: index, uri: track.uri, name: track.name, artists: track.artists.map(Artist.init),
+                  album: album.name, durationMs: track.duration_ms, albumURI: album.uri)
     }
 
     init(index: Int, track: CoreTrack, added: Date? = nil) {
-        self.init(index: index, uri: track.uri, name: track.name, artists: track.artistNames, album: track.album,
-                  durationMs: track.durationMs, added: added,
-                  albumURI: track.albumURI, artistURI: track.artists.first?.uri)
+        self.init(index: index, uri: track.uri, name: track.name,
+                  artists: track.artists.map(Artist.init), album: track.album,
+                  durationMs: track.durationMs, added: added, albumURI: track.albumURI)
     }
+
+    var artistNames: String { artists.map(\.name).joined(separator: ", ") }
 
     /// "3:07".
     static func format(ms: Int) -> String {
@@ -60,6 +70,16 @@ struct TrackRow: Identifiable, Hashable, Sendable {
     }
 
     private nonisolated(unsafe) static let isoParser = ISO8601DateFormatter()
+}
+
+extension TrackRow.Artist {
+    init(_ ref: ArtistRef) {
+        self.init(name: ref.name, uri: ref.uri)
+    }
+
+    init(_ artist: CoreTrack.Artist) {
+        self.init(name: artist.name, uri: artist.uri)
+    }
 }
 
 /// The rows of one page (a playlist, Liked Songs, an album) and the context

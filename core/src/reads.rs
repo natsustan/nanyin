@@ -3,13 +3,15 @@
 //! to playlists the listener does not own, nor to an artist's top tracks.
 //! The session speaks the protocol Spotify's own clients use, as spotifast
 //! does. Also resolves the play queue's tracks, so all go through one
-//! batched, cached lookup.
+//! batched, cached lookup. A song's credits come the same way, as the
+//! desktop client reads them.
 
 use std::{
     collections::{HashMap, VecDeque},
     sync::{Arc, Mutex},
 };
 
+use http::Method;
 use librespot_core::{Error, Session, SpotifyUri, spotify_id::SpotifyId};
 use librespot_metadata::{
     Artist, Metadata, Playlist, Track as SessionTrack, artist::CountryTopTracks,
@@ -20,7 +22,7 @@ use librespot_protocol::{
     metadata::Track as TrackMessage,
 };
 use protobuf::{EnumOrUnknown, Message};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::events::Track;
 
@@ -50,6 +52,37 @@ pub struct PlaylistRow {
     pub index: usize,
     pub added_at_ms: Option<i64>,
     pub track: Track,
+}
+
+/// A song's credits as Spotify's own clients show them: roles (performers,
+/// writers, producers), each with the people credited, and the labels or
+/// distributors that supplied them. Read from the desktop client's
+/// `track-credits-view`; anything missing reads as empty.
+#[derive(Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
+pub struct Credits {
+    #[serde(rename(deserialize = "roleCredits"))]
+    pub roles: Vec<Role>,
+    #[serde(rename(deserialize = "sourceNames"))]
+    pub sources: Vec<String>,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
+pub struct Role {
+    #[serde(rename(deserialize = "roleTitle"))]
+    pub title: String,
+    pub artists: Vec<Credit>,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
+pub struct Credit {
+    pub name: String,
+    /// Empty for someone with no artist page.
+    pub uri: String,
+    /// "Composer", "Lyricist", "Lead Vocal"…
+    pub subroles: Vec<String>,
 }
 
 /// A playlist's songs as fetched once, paged through without fetching again.
@@ -110,6 +143,21 @@ impl Reads {
         let artist = Artist::get(&self.session, &uri).await?;
         let uris = top_track_uris(&artist.top_tracks, &self.session.country());
         Ok(self.tracks(&uris).await?.into_iter().flatten().collect())
+    }
+
+    /// A song's credits: one request, made when the listener asks.
+    pub async fn credits(&self, id: &str) -> Result<Credits, Error> {
+        let id = SpotifyId::from_base62(id)?;
+        let endpoint = format!(
+            "/track-credits-view/v0/experimental/{}/credits",
+            id.to_base62()
+        );
+        let body = self
+            .session
+            .spclient()
+            .request_as_json(&Method::GET, &endpoint, None, None)
+            .await?;
+        Ok(serde_json::from_slice(&body)?)
     }
 
     /// The tracks at `uris`, in order; none where Spotify has no song.
@@ -257,6 +305,29 @@ mod tests {
                     .collect(),
             ),
         }
+    }
+
+    #[test]
+    fn decodes_credits() {
+        let credits: Credits = serde_json::from_str(
+            r#"{"trackUri":"spotify:track:x","trackTitle":"Song","roleCredits":[
+                {"roleTitle":"Performers","artists":[{"uri":"spotify:artist:a","name":"A",
+                  "imageUri":"","subroles":["main artist"],"weight":0.9}]},
+                {"roleTitle":"Writers","artists":[{"name":"W","subroles":["Composer","Lyricist"]}]}],
+              "extendedCredits":[],"sourceNames":["Label"]}"#,
+        )
+        .unwrap();
+        assert_eq!(credits.roles.len(), 2);
+        assert_eq!(credits.roles[0].artists[0].uri, "spotify:artist:a");
+        assert_eq!(credits.roles[1].artists[0].uri, "");
+        assert_eq!(
+            credits.roles[1].artists[0].subroles,
+            ["Composer", "Lyricist"]
+        );
+        assert_eq!(credits.sources, ["Label"]);
+        let json = serde_json::to_value(&credits).unwrap();
+        assert_eq!(json["roles"][0]["title"], "Performers");
+        assert_eq!(json["sources"][0], "Label");
     }
 
     #[test]

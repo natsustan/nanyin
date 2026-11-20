@@ -107,31 +107,85 @@ private struct SidebarRow: View {
     }
 }
 
-/// The playing track's title and its cover, filling the sidebar's width.
+/// The playing track's title and its cover, filling the sidebar's width,
+/// or folded down to a thumbnail beside the title. The title opens the
+/// album, each artist their page.
 private struct NowPlayingCover: View {
     @Environment(AppModel.self) private var app
+    @AppStorage("NowPlayingArtworkLarge") private var large = true
+    @State private var hovering = false
 
     var body: some View {
         if let track = app.player.track {
             VStack(spacing: 0) {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(track.name)
-                        .font(AquaFont.bold(11))
-                        .foregroundStyle(Theme.text)
-                    Text(app.player.playingElsewhere ? "Playing on another device" : track.artistNames)
-                        .font(AquaFont.regular(10))
-                        .foregroundStyle(Theme.secondaryText)
+                HStack(spacing: 7) {
+                    if !large {
+                        Button { large = true } label: {
+                            CoverImage(url: track.coverURL, size: 32)
+                                .overlay { if hovering { ArtworkToggle(symbol: "arrow.up.left.and.arrow.down.right") } }
+                        }
+                        .buttonStyle(.plain)
+                        .help("Show Large Artwork")
+                    }
+                    VStack(alignment: .leading, spacing: 1) {
+                        LinkText(parts: [(track.name, track.albumURI.flatMap(Route.init(uri:)))], color: Theme.text)
+                            .font(AquaFont.bold(11))
+                        if app.player.playingElsewhere {
+                            Text("Playing on another device")
+                                .font(AquaFont.regular(10))
+                                .foregroundStyle(Theme.secondaryText)
+                        } else {
+                            LinkText(parts: track.artists.map { ($0.name, Route(uri: $0.uri)) }, color: Theme.secondaryText)
+                                .font(AquaFont.regular(10))
+                        }
+                    }
+                    .lineLimit(1)
+                    Spacer(minLength: 0)
                 }
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 5)
                 .background(Theme.graphite)
                 .hairline(.top, Theme.graphiteEdge)
-                Artwork(url: track.coverURL, placeholder: Theme.content)
-                    .aspectRatio(1, contentMode: .fit)
-                    .clipped()
+                if large {
+                    Artwork(url: track.coverURL, placeholder: Theme.content)
+                        .aspectRatio(1, contentMode: .fit)
+                        .clipped()
+                        .overlay(alignment: .topTrailing) {
+                            if hovering {
+                                Button { large = false } label: {
+                                    ArtworkToggle(symbol: "arrow.down.right.and.arrow.up.left")
+                                }
+                                .buttonStyle(.plain)
+                                .help("Hide Large Artwork")
+                                .padding(6)
+                            }
+                        }
+                }
             }
+            .onHover { hovering = $0 }
+            .contextMenu { menu(track) }
         }
+    }
+
+    @ViewBuilder private func menu(_ track: CoreTrack) -> some View {
+        TrackMenuContent(items: app.songMenu(
+            uri: track.uri, name: track.name, album: track.albumURI.flatMap(Route.init(uri:)),
+            artists: track.artists.map(TrackRow.Artist.init)))
+        Divider()
+        Button(large ? "Hide Large Artwork" : "Show Large Artwork") { large.toggle() }
+    }
+}
+
+/// The small dark button over the artwork that folds it up or out.
+private struct ArtworkToggle: View {
+    let symbol: String
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: 8, weight: .bold))
+            .foregroundStyle(Theme.artworkButtonGlyph)
+            .frame(width: 16, height: 16)
+            .background(Theme.artworkButton, in: RoundedRectangle(cornerRadius: 3))
+            .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Theme.artworkButtonEdge, lineWidth: 0.5))
     }
 }

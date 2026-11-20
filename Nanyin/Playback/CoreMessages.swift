@@ -117,12 +117,34 @@ struct SessionPlaylistPage: Decodable, Equatable, Sendable {
     let next: Int?
 }
 
+/// A song's credits, read through the session (`core/src/reads.rs`).
+struct CoreCredits: Decodable, Equatable, Sendable {
+    struct Role: Decodable, Equatable, Sendable {
+        let title: String
+        let artists: [Credit]
+    }
+
+    struct Credit: Decodable, Equatable, Sendable {
+        let name: String
+        /// Empty for someone with no artist page.
+        let uri: String
+        /// "Composer", "Lyricist", "Lead Vocal"…
+        let subroles: [String]
+    }
+
+    let roles: [Role]
+    /// The labels or distributors that supplied the credits.
+    let sources: [String]
+}
+
 /// Questions for the Rust core (`core/src/requests.rs`), each answered once.
 enum CoreAsk: Encodable, Sendable {
     /// Answered with a `SessionPlaylistPage`.
     case playlist(id: String, offset: Int)
     /// Answered with `[CoreTrack]`.
     case topTracks(artistID: String)
+    /// Answered with `CoreCredits`.
+    case credits(trackID: String)
 
     private enum Key: String, CodingKey { case ask, id, offset }
 
@@ -136,6 +158,9 @@ enum CoreAsk: Encodable, Sendable {
         case .topTracks(let artistID):
             try c.encode("top_tracks", forKey: .ask)
             try c.encode(artistID, forKey: .id)
+        case .credits(let trackID):
+            try c.encode("credits", forKey: .ask)
+            try c.encode(trackID, forKey: .id)
         }
     }
 }

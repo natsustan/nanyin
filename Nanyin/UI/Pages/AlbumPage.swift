@@ -18,7 +18,7 @@ struct AlbumPage: View {
                 PageHeader(title: "Album", subtitle: detail.error ?? "Loading…")
             }
             if let tracks = detail.tracks {
-                TrackListTable(list: tracks, columns: [.indicator, .star, .track, .artist, .time])
+                TrackListTable(list: tracks, columns: [.star, .track, .artist, .time])
             } else {
                 Theme.content
             }
@@ -76,7 +76,7 @@ struct ArtistPage: View {
                 message: pages.error ?? (pages.isLoading ? "Loading…" : "No popular songs."),
                 retry: pages.error == nil ? nil : { pages.retry() })
         } else {
-            TrackListTable(list: detail.topTracks, columns: [.indicator, .star, .track, .time, .popularity, .album])
+            TrackListTable(list: detail.topTracks, columns: [.star, .track, .time, .popularity, .album])
         }
     }
 }

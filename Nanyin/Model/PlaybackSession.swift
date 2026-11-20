@@ -135,6 +135,13 @@ final class PlaybackSession {
         return try await engine.request(.topTracks(artistID: artistID))
     }
 
+    /// A song's credits, read through the session as Spotify's own clients
+    /// read them (the Web API has none). Only ever asked for by the listener.
+    func readCredits(trackID: String) async throws -> CoreCredits {
+        try await untilReady()
+        return try await engine.request(.credits(trackID: trackID))
+    }
+
     /// Waits out a connection in progress (just after launch, or a
     /// reconnect); fails at once if none is coming.
     private func untilReady() async throws {
