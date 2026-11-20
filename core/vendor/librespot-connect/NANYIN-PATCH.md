@@ -13,10 +13,15 @@ Code changes:
    `PlaybackSnapshot`.
 2. `PlaybackSnapshot::track_uri`, so the core can tell whether the track the
    kept player holds is the snapshot's current one.
+3. `PlaybackSnapshot::playing_on`: a position that keeps advancing until
+   the restore is applied, capped at the track's end. A new Spirc handles
+   commands only after its dealer connects, a second or two after
+   `restore_playback` is called; a fixed position took the song back by
+   that much.
 
 Why: on an unexpected disconnect the core keeps the `Player` playing what it
 has already fetched, hands it to the next session with `Player::set_session`
 and restores the snapshot there, as spotifast does.
 
 When moving librespot to a new rev: re-copy `connect/` from that rev,
-reapply #1765 (or drop it once merged) and the accessor.
+reapply #1765 (or drop it once merged) and changes 2 and 3.

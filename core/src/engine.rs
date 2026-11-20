@@ -370,8 +370,14 @@ impl Carried {
         }
         let song = deck.lock_now().song();
         let snapshot = match song {
+            // Still advancing: Spirc applies the restore only once its
+            // dealer is up, and the position must have moved on by then.
             Some(song) if Some(&song.uri) == snapshot.track_uri().as_ref() => {
-                Arc::new(snapshot.at_position(song.position_ms, song.playing))
+                Arc::new(if song.advancing {
+                    snapshot.playing_on(song.position_ms, song.end_ms)
+                } else {
+                    snapshot.at_position(song.position_ms, song.playing)
+                })
             }
             _ => snapshot,
         };
@@ -507,7 +513,11 @@ struct Now {
 struct Song {
     uri: String,
     position_ms: u32,
+    /// Playing or loading, as opposed to paused.
     playing: bool,
+    /// Audibly playing, so the position moves on by itself.
+    advancing: bool,
+    end_ms: u32,
 }
 
 impl Now {
@@ -559,16 +569,16 @@ impl Now {
 
     /// The song the player holds, if any, and where it is now.
     fn song(&self) -> Option<Song> {
+        let end_ms = if self.duration_ms > 0 {
+            self.duration_ms
+        } else {
+            u32::MAX
+        };
         let position_ms = match (self.phase, self.at) {
             (Phase::Stopped, _) => return None,
             (Phase::Playing, Some(at)) => {
                 let played = u32::try_from(at.elapsed().as_millis()).unwrap_or(u32::MAX);
-                let end = if self.duration_ms > 0 {
-                    self.duration_ms
-                } else {
-                    u32::MAX
-                };
-                self.position_ms.saturating_add(played).min(end)
+                self.position_ms.saturating_add(played).min(end_ms)
             }
             _ => self.position_ms,
         };
@@ -576,6 +586,8 @@ impl Now {
             uri: self.uri.clone(),
             position_ms,
             playing: self.phase != Phase::Paused,
+            advancing: self.phase == Phase::Playing,
+            end_ms,
         })
     }
 }
@@ -621,7 +633,8 @@ mod tests {
         });
         now.at = Some(Instant::now() - Duration::from_secs(5));
         let song = now.song().unwrap();
-        assert!(song.playing);
+        assert!(song.playing && song.advancing);
+        assert_eq!(song.end_ms, 200_000);
         assert!((95_000..96_000).contains(&song.position_ms));
 
         // Played past the end: never beyond the track's length.

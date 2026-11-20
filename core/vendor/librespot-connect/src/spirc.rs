@@ -166,6 +166,9 @@ pub struct PlaybackSnapshot {
     username: String,
     position_ms: u32,
     playing: bool,
+    /// Nanyin: set by [`PlaybackSnapshot::playing_on`], the player kept
+    /// playing from `position_ms` since this instant, up to this end.
+    playing_since: Option<(std::time::Instant, u32)>,
 }
 
 impl PlaybackSnapshot {
@@ -202,6 +205,30 @@ impl PlaybackSnapshot {
             username: self.username.clone(),
             position_ms,
             playing,
+            playing_since: None,
+        }
+    }
+
+    /// Like [`at_position`](Self::at_position) for a player that is
+    /// playing: the position keeps advancing until the snapshot is
+    /// restored, never past `end_ms`. A new `Spirc` handles the restore only
+    /// after its dealer has connected, a second or two later; a fixed
+    /// position would take the song back by that much. (Nanyin addition.)
+    pub fn playing_on(&self, position_ms: u32, end_ms: u32) -> Self {
+        Self {
+            playing_since: Some((std::time::Instant::now(), end_ms)),
+            ..self.at_position(position_ms, true)
+        }
+    }
+
+    /// Where to pick up, now.
+    fn position_now(&self) -> u32 {
+        match self.playing_since {
+            Some((since, end_ms)) => {
+                let played = u32::try_from(since.elapsed().as_millis()).unwrap_or(u32::MAX);
+                self.position_ms.saturating_add(played).min(end_ms)
+            }
+            None => self.position_ms,
         }
     }
 
@@ -718,6 +745,7 @@ impl SpircTask {
                     username: self.session.username(),
                     position_ms: self.position(),
                     playing: self.connect_state.is_playing(),
+                    playing_since: None,
                 };
                 *self
                     .disconnected_playback
@@ -870,7 +898,7 @@ impl SpircTask {
                     &mut self.context_resolver,
                 )?;
                 self.handle_activate();
-                self.load_track(snapshot.playing, snapshot.position_ms)?;
+                self.load_track(snapshot.playing, snapshot.position_now())?;
             }
             _ if !self.connect_state.is_active() => {
                 warn!("SpircCommand::{cmd:?} will be ignored while Not Active")
@@ -2110,6 +2138,7 @@ mod recovery_tests {
             username: "original".into(),
             position_ms: 144_075,
             playing: false,
+            playing_since: None,
         };
         let mut state = ConnectState::new(Default::default(), &session);
         let mut resolver = ContextResolver::new(session.clone());
@@ -2125,6 +2154,16 @@ mod recovery_tests {
             .unwrap();
         assert!(state.repeat_context());
         assert_eq!(resolver.pending(), std::slice::from_ref(&pending));
+
+        // Nanyin: a player playing on keeps advancing until the restore.
+        let mut playing_on = snapshot.playing_on(150_000, 151_000);
+        assert!(playing_on.is_playing());
+        let (since, end) = playing_on.playing_since.unwrap();
+        playing_on.playing_since = Some((since - std::time::Duration::from_millis(400), end));
+        assert!((150_400..150_500).contains(&playing_on.position_now()));
+        playing_on.playing_since = Some((since - std::time::Duration::from_secs(5), end));
+        assert_eq!(playing_on.position_now(), 151_000);
+        assert_eq!(snapshot.position_now(), 144_075);
 
         let later = snapshot.at_position(150_000, true);
         assert_eq!((later.position_ms(), later.is_playing()), (150_000, true));
