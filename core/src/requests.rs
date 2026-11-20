@@ -21,6 +21,8 @@ pub enum Ask {
     Playlist { id: String, offset: usize },
     /// An artist's popular songs, read through the session.
     TopTracks { id: String },
+    /// A song's credits, read through the session.
+    Credits { id: String },
 }
 
 impl Ask {
@@ -34,6 +36,9 @@ impl Ask {
             ),
             Self::TopTracks { id } => {
                 serde_json::to_value(reads.top_tracks(&id).await.map_err(|e| e.to_string())?)
+            }
+            Self::Credits { id } => {
+                serde_json::to_value(reads.credits(&id).await.map_err(|e| e.to_string())?)
             }
         };
         answer.map_err(|e| e.to_string())
@@ -62,5 +67,8 @@ mod tests {
         let request: Request =
             serde_json::from_str(r#"{"request":8,"ask":"top_tracks","id":"abc"}"#).unwrap();
         assert_eq!(request.ask, Ask::TopTracks { id: "abc".into() });
+        let request: Request =
+            serde_json::from_str(r#"{"request":9,"ask":"credits","id":"abc"}"#).unwrap();
+        assert_eq!(request.ask, Ask::Credits { id: "abc".into() });
     }
 }
