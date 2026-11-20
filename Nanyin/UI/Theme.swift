@@ -21,6 +21,13 @@ enum Theme {
     // Accent
     static let nsGreen = ns(0x84BD00)
     static let green = Color(nsColor: nsGreen)
+    /// A starred song's star.
+    static let nsStar = ns(0xF2C230)
+
+    // The small button laid over artwork
+    static let artworkButton = hex(0x000000, 0.6)
+    static let artworkButtonEdge = hex(0xFFFFFF, 0.35)
+    static let artworkButtonGlyph = hex(0xFFFFFF)
 
     // Metal (title bar, unified toolbar, buttons on it)
     static let metalText = hex(0x262626)

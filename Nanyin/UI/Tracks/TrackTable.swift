@@ -2,15 +2,16 @@ import AppKit
 import SwiftUI
 
 /// The track list of the 2010 client: graphite column headers, charcoal
-/// zebra rows down to the bottom of the pane, a green speaker on the playing
-/// row. AppKit's table recycles row views, so thousands of rows stay cheap.
+/// zebra rows down to the bottom of the pane, the playing song in green
+/// with a speaker in place of its star, artists and albums as links.
+/// AppKit's table recycles row views, so thousands of rows stay cheap.
 struct TrackTable: NSViewRepresentable {
     enum Column: String {
-        case indicator, star, track, artist, time, popularity, album, added
+        case star, track, artist, time, popularity, album, added
 
-        static let standard: [Column] = [.indicator, .star, .track, .artist, .time, .popularity, .album]
+        static let standard: [Column] = [.star, .track, .artist, .time, .popularity, .album]
 
-        var isFixed: Bool { self == .indicator || self == .star }
+        var isFixed: Bool { self == .star }
         var title: String { isFixed ? "" : rawValue.capitalized }
     }
 
@@ -21,6 +22,8 @@ struct TrackTable: NSViewRepresentable {
         var toggleStar: (TrackRow) -> Void = { _ in }
         /// The context menu for the selected rows.
         var menu: ([TrackRow]) -> [TrackMenuItem] = { _ in [] }
+        /// Opens an artist's or album's page.
+        var open: (Route) -> Void
     }
 
     let rows: [TrackRow]
@@ -50,7 +53,7 @@ struct TrackTable: NSViewRepresentable {
             tableColumn.title = column.title
             tableColumn.headerCell = GraphiteHeaderCell(textCell: column.title)
             switch column {
-            case .indicator, .star: tableColumn.width = 20; tableColumn.minWidth = 20; tableColumn.maxWidth = 20
+            case .star: tableColumn.width = 20; tableColumn.minWidth = 20; tableColumn.maxWidth = 20
             case .track: tableColumn.width = 260; tableColumn.minWidth = 80
             case .artist: tableColumn.width = 170; tableColumn.minWidth = 60
             case .time: tableColumn.width = 46; tableColumn.minWidth = 40; tableColumn.maxWidth = 60
@@ -84,7 +87,7 @@ struct TrackTable: NSViewRepresentable {
         coordinator.actions = actions
         guard let table = coordinator.table else { return }
         let old = coordinator.rows
-        let playingChanged = coordinator.playingURI != playingURI
+        let wasPlaying = coordinator.playingURI
         let starsChanged = coordinator.starsVersion != starsVersion
         coordinator.rows = rows
         coordinator.playingURI = playingURI
@@ -93,23 +96,20 @@ struct TrackTable: NSViewRepresentable {
             // Rows read through the session carry no popularity.
             table.tableColumn(withIdentifier: NSUserInterfaceItemIdentifier(Column.popularity.rawValue))?
                 .isHidden = !rows.contains { $0.popularity != nil }
-            if rows.count > old.count, rows.starts(with: old) {
-                // A page arrived: add its rows, leave the visible ones be.
-                table.insertRows(at: IndexSet(old.count ..< rows.count), withAnimation: [])
-            } else {
-                table.reloadData()
-            }
-        } else {
-            // Only the speaker or the stars changed: redraw those columns for
-            // the rows on screen.
-            let changed = [playingChanged ? Column.indicator : nil, starsChanged ? .star : nil]
-            let indexes = IndexSet(changed.compactMap { $0.flatMap(columns.firstIndex(of:)) })
-            if !indexes.isEmpty {
-                let visible = table.rows(in: table.visibleRect)
-                table.reloadData(
-                    forRowIndexes: IndexSet(integersIn: visible.location ..< visible.location + visible.length),
-                    columnIndexes: indexes)
-            }
+            guard rows.count > old.count, rows.starts(with: old) else { return table.reloadData() }
+            // A page arrived: add its rows, leave the visible ones be.
+            table.insertRows(at: IndexSet(old.count ..< rows.count), withAnimation: [])
+        }
+        // Redraw the rows on screen that changed: every column of the rows
+        // that start or stop playing (green), the stars of all of them.
+        let visible = table.rows(in: table.visibleRect)
+        let onScreen = IndexSet(integersIn: visible.location ..< visible.location + visible.length)
+        if wasPlaying != playingURI {
+            let changed = onScreen.filter { [wasPlaying, playingURI].contains(rows[$0].uri) }
+            table.reloadData(forRowIndexes: IndexSet(changed), columnIndexes: IndexSet(integersIn: 0 ..< table.numberOfColumns))
+        }
+        if starsChanged, let star = columns.firstIndex(of: .star) {
+            table.reloadData(forRowIndexes: onScreen, columnIndexes: [star])
         }
     }
 
@@ -118,7 +118,7 @@ struct TrackTable: NSViewRepresentable {
         var rows: [TrackRow] = []
         var playingURI: String?
         var starsVersion = 0
-        var actions = Actions(play: { _ in })
+        var actions = Actions(play: { _ in }, open: { _ in })
         weak var table: TrackTableView?
 
         func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
@@ -135,31 +135,40 @@ struct TrackTable: NSViewRepresentable {
             guard let tableColumn, let column = Column(rawValue: tableColumn.identifier.rawValue) else { return nil }
             let track = rows[row]
             let isPlaying = track.uri == playingURI
+            let hover = (tableView as? TrackTableView)?.hovered
+            let hovered = hover?.row == row && hover?.column == tableView.column(withIdentifier: tableColumn.identifier)
             switch column {
-            case .indicator:
-                let view = reuse(tableView, "symbol") { SymbolCell() }
-                view.image = isPlaying ? SymbolCell.speaker : nil
-                return view
             case .star:
+                // The speaker takes the playing row's star, as in the 2010
+                // client; the star shows again under the pointer to be clicked.
                 let view = reuse(tableView, "symbol") { SymbolCell() }
-                view.image = actions.isStarred(track).flatMap { $0 ? SymbolCell.starred : SymbolCell.unstarred }
+                let star = actions.isStarred(track).flatMap { $0 ? SymbolCell.starred : SymbolCell.unstarred }
+                view.image = isPlaying && !hovered ? SymbolCell.speaker : star
                 return view
             case .popularity:
                 let view = reuse(tableView, "popularity") { PopularityCell() }
                 view.popularity = track.popularity
                 return view
             case .track, .artist, .album, .time, .added:
-                let text = switch column {
-                case .track: track.name
-                case .artist: track.artistNames
-                case .album: track.album
-                case .time: track.duration
-                default: track.added
+                let parts: [TextCell.Part] = switch column {
+                case .track: [.init(track.name)]
+                case .artist: track.artists.enumerated().flatMap { index, artist in
+                    (index > 0 ? [TextCell.Part(", ")] : []) + [.init(artist.name, link: artist.route)]
+                }
+                case .album: [.init(track.album, link: track.albumRoute)]
+                case .time: [.init(track.duration)]
+                default: [.init(track.added)]
                 }
                 let view = reuse(tableView, "text") { TextCell() }
-                view.set(text, secondary: !track.isPlayable, alignRight: column == .time)
+                view.set(parts, tone: isPlaying ? .playing : track.isPlayable ? .normal : .unplayable,
+                         alignRight: column == .time, hovered: hovered ? hover?.part : nil)
                 return view
             }
+        }
+
+        /// Typing a song's first letters selects it.
+        func tableView(_ tableView: NSTableView, typeSelectStringFor tableColumn: NSTableColumn?, row: Int) -> String? {
+            tableColumn?.identifier.rawValue == Column.track.rawValue ? rows[row].name : nil
         }
 
         private func reuse<T: NSView>(_ table: NSTableView, _ id: String, make: () -> T) -> T {
@@ -170,15 +179,28 @@ struct TrackTable: NSViewRepresentable {
             return view
         }
 
-        /// A click on a star toggles it, without changing the selection's meaning.
+        /// A link clicked once, opened unless a second click makes it a
+        /// double-click (which plays the row, wherever it lands).
+        private var pendingLink: Task<Void, Never>?
+
+        /// A click on a star toggles it, without changing the selection's
+        /// meaning; a click on a link opens its page.
         @objc func clicked(_ sender: NSTableView) {
-            guard rows.indices.contains(sender.clickedRow), sender.clickedColumn >= 0,
-                  sender.tableColumns[sender.clickedColumn].identifier.rawValue == Column.star.rawValue
-            else { return }
-            actions.toggleStar(rows[sender.clickedRow])
+            pendingLink?.cancel()
+            guard rows.indices.contains(sender.clickedRow), sender.clickedColumn >= 0 else { return }
+            if sender.tableColumns[sender.clickedColumn].identifier.rawValue == Column.star.rawValue {
+                actions.toggleStar(rows[sender.clickedRow])
+            } else if let table = sender as? TrackTableView, let route = table.releasedOnPressedLink() {
+                pendingLink = Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(NSEvent.doubleClickInterval))
+                    guard !Task.isCancelled else { return }
+                    self?.actions.open(route)
+                }
+            }
         }
 
         @objc func doubleClicked(_ sender: NSTableView) {
+            pendingLink?.cancel()
             let row = sender.clickedRow
             guard rows.indices.contains(row) else { return }
             actions.play(rows[row])
@@ -223,6 +245,24 @@ struct TrackMenuItem {
     static var separator: TrackMenuItem { TrackMenuItem(title: "") }
 }
 
+/// Track menu items in a SwiftUI context menu.
+struct TrackMenuContent: View {
+    let items: [TrackMenuItem]
+
+    var body: some View {
+        ForEach(items.indices, id: \.self) { index in
+            let item = items[index]
+            if item.title.isEmpty {
+                Divider()
+            } else if item.children.isEmpty {
+                Button(item.title) { item.action?() }
+            } else {
+                Menu(item.title) { AnyView(TrackMenuContent(items: item.children)) }
+            }
+        }
+    }
+}
+
 /// A menu item that runs a closure.
 private final class MenuAction: NSMenuItem {
     private let run: (() -> Void)?
@@ -238,8 +278,102 @@ private final class MenuAction: NSMenuItem {
     @objc private func runAction() { run?() }
 }
 
-/// Return plays the selection, as in iTunes.
+/// Return plays the selection, as in iTunes. Links in cells underline
+/// under the pointer and open on a click that goes down and up on them; a
+/// star shows under the pointer where the speaker stands.
 final class TrackTableView: NSTableView {
+    /// A cell under the pointer: a star cell, or a link (`part`) in a text cell.
+    struct Spot: Equatable {
+        let row: Int, column: Int
+        var part: Int?
+    }
+
+    /// Read when configuring cells, so a recycled cell never keeps it.
+    private(set) var hovered: Spot?
+    private var pressed: Spot?
+    private var trackingArea: NSTrackingArea?
+    private var scrollObserver: (any NSObjectProtocol)?
+
+    private func spot(at point: NSPoint) -> Spot? {
+        let row = row(at: point), column = column(at: point)
+        guard row >= 0, column >= 0 else { return nil }
+        switch view(atColumn: column, row: row, makeIfNecessary: false) {
+        case let cell as TextCell:
+            return cell.link(at: cell.convert(point, from: self)).map { Spot(row: row, column: column, part: $0) }
+        case is SymbolCell:
+            return Spot(row: row, column: column)
+        default:
+            return nil
+        }
+    }
+
+    private func pointer(_ event: NSEvent) -> NSPoint { convert(event.locationInWindow, from: nil) }
+
+    /// The page to open, when the click in progress ends on the link it began on.
+    func releasedOnPressedLink() -> Route? {
+        guard let pressed, let part = pressed.part, let event = NSApp.currentEvent, spot(at: pointer(event)) == pressed,
+              let cell = view(atColumn: pressed.column, row: pressed.row, makeIfNecessary: false) as? TextCell
+        else { return nil }
+        return cell.route(part)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let plain = event.modifierFlags.intersection([.command, .shift, .option, .control]).isEmpty
+        pressed = plain && event.clickCount == 1 ? spot(at: pointer(event)) : nil
+        defer { pressed = nil }
+        super.mouseDown(with: event)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        guard trackingArea == nil else { return }
+        let area = NSTrackingArea(
+            rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+            owner: self)
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        hover(at: pointer(event))
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        hover(at: nil)
+    }
+
+    /// Rows move under a still pointer while the list scrolls. Watched on
+    /// the clip view: overriding `scrollWheel` would end responsive scrolling.
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        scrollObserver.map(NotificationCenter.default.removeObserver)
+        scrollObserver = nil
+        guard let clip = superview as? NSClipView else { return }
+        clip.postsBoundsChangedNotifications = true
+        scrollObserver = NotificationCenter.default.addObserver(
+            forName: NSView.boundsDidChangeNotification, object: clip, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, let window = self.window else { return }
+                let point = self.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+                self.hover(at: self.visibleRect.contains(point) ? point : nil)
+            }
+        }
+    }
+
+    /// Moves the hover, redrawing the cell it leaves and the one it enters.
+    private func hover(at point: NSPoint?) {
+        let spot = point.flatMap(spot(at:))
+        guard spot != hovered else { return }
+        let left = hovered
+        hovered = spot
+        for changed in [left, spot].compactMap(\.self) where changed.row < numberOfRows {
+            reloadData(forRowIndexes: [changed.row], columnIndexes: [changed.column])
+        }
+    }
+
     override func keyDown(with event: NSEvent) {
         guard let coordinator = delegate as? TrackTable.Coordinator else { return super.keyDown(with: event) }
         switch event.keyCode {
@@ -287,37 +421,121 @@ final class ZebraRowView: NSTableRowView {
     override var interiorBackgroundStyle: NSView.BackgroundStyle { .normal }
 }
 
-private final class TextCell: NSTableCellView {
-    private static let unplayable = Theme.nsSecondaryText.withAlphaComponent(0.6)
-    private let label = NSTextField(labelWithString: "")
+/// A line of text in parts, some of them links: the artists of a song,
+/// each opening their page. A link underlines while hovered and shows the
+/// pointing hand. The playing song's text is green. The text and its
+/// measurements are made once per `set`, not per draw or pointer move.
+private final class TextCell: NSView {
+    enum Tone {
+        case normal, playing, unplayable
 
-    override init(frame: NSRect) {
-        super.init(frame: frame)
-        label.font = AquaFont.ns(11)
-        label.lineBreakMode = .byTruncatingTail
-        label.cell?.truncatesLastVisibleLine = true
-        label.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(label)
-        textField = label
-        NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 5),
-            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -5),
-            label.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
+        var color: NSColor {
+            switch self {
+            case .normal: Theme.nsText
+            case .playing: Theme.nsGreen
+            case .unplayable: Theme.nsSecondaryText.withAlphaComponent(0.6)
+            }
+        }
     }
 
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { nil }
+    struct Part {
+        let text: String
+        var link: Route?
 
-    func set(_ text: String, secondary: Bool, alignRight: Bool) {
-        label.stringValue = text
-        label.textColor = secondary ? Self.unplayable : Theme.nsText
-        label.alignment = alignRight ? .right : .left
+        init(_ text: String, link: Route? = nil) {
+            self.text = text
+            self.link = link
+        }
     }
+
+    private static let font = AquaFont.ns(11)
+    private static let lineHeight = NSLayoutManager().defaultLineHeight(for: font)
+    private static let inset: CGFloat = 7
+    private static let ellipsis = NSAttributedString(string: "…", attributes: [.font: font]).size().width
+    private static let leftAligned = paragraph(.left)
+    private static let rightAligned = paragraph(.right)
+
+    private static func paragraph(_ alignment: NSTextAlignment) -> NSParagraphStyle {
+        let style = NSMutableParagraphStyle()
+        style.lineBreakMode = .byTruncatingTail
+        style.alignment = alignment
+        return style
+    }
+
+    private var parts: [Part] = []
+    private var alignRight = false
+    private var text = NSAttributedString()
+    /// Where each part ends, from the text's start.
+    private var ends: [CGFloat] = []
+
+    override var isFlipped: Bool { true }
+
+    func set(_ parts: [Part], tone: Tone, alignRight: Bool = false, hovered: Int? = nil) {
+        self.parts = parts
+        self.alignRight = alignRight
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: Self.font, .foregroundColor: tone.color, .paragraphStyle: alignRight ? Self.rightAligned : Self.leftAligned,
+        ]
+        let text = NSMutableAttributedString()
+        ends = []
+        for (index, part) in parts.enumerated() {
+            let run = NSAttributedString(string: part.text, attributes: attributes)
+            ends.append((ends.last ?? 0) + run.size().width)
+            text.append(run)
+            if index == hovered {
+                text.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue,
+                                  range: NSRange(location: text.length - run.length, length: run.length))
+            }
+        }
+        self.text = text
+        needsDisplay = true
+        window?.invalidateCursorRects(for: self)
+    }
+
+    func route(_ part: Int) -> Route? { parts.indices.contains(part) ? parts[part].link : nil }
+
+    private var textRect: NSRect {
+        NSRect(
+            x: Self.inset, y: ((bounds.height - Self.lineHeight) / 2).rounded(),
+            width: max(0, bounds.width - 2 * Self.inset), height: Self.lineHeight)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        text.draw(with: textRect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+    }
+
+    /// The links' spans on screen, by part: nothing past where a truncated
+    /// line's ellipsis begins.
+    private var linkSpans: [(part: Int, span: ClosedRange<CGFloat>)] {
+        guard !alignRight else { return [] }
+        let rect = textRect
+        let shown = (ends.last ?? 0) <= rect.width ? rect.maxX : rect.maxX - Self.ellipsis
+        return parts.indices.compactMap { index in
+            let start = rect.minX + (index > 0 ? ends[index - 1] : 0)
+            let end = min(rect.minX + ends[index], shown)
+            return parts[index].link != nil && start < end ? (index, start ... end) : nil
+        }
+    }
+
+    /// The part of the link at `point`, in this view's coordinates.
+    func link(at point: NSPoint) -> Int? {
+        guard point.y >= 0, point.y < bounds.height else { return nil }
+        return linkSpans.first { $0.span.contains(point.x) }?.part
+    }
+
+    override func resetCursorRects() {
+        for (_, span) in linkSpans {
+            addCursorRect(NSRect(x: span.lowerBound, y: 0, width: span.upperBound - span.lowerBound, height: bounds.height),
+                          cursor: .pointingHand)
+        }
+    }
+
+    override func isAccessibilityElement() -> Bool { true }
+    override func accessibilityRole() -> NSAccessibility.Role? { .staticText }
+    override func accessibilityValue() -> Any? { text.string }
 }
 
-/// The green speaker on the row that is playing.
-/// A small symbol centred in its cell: the playing speaker, a star.
+/// A small symbol centred in its cell: a star, or the playing speaker.
 private final class SymbolCell: NSView {
     var image: NSImage? { didSet { if image !== oldValue { needsDisplay = true } } }
 
@@ -327,8 +545,8 @@ private final class SymbolCell: NSView {
     }
 
     static let speaker = symbol("speaker.wave.2.fill", Theme.nsGreen)
-    /// The 2010 star: an outline until starred, then filled.
-    static let starred = symbol("star.fill", Theme.nsText)
+    /// The 2010 star: an outline until starred, then filled in gold.
+    static let starred = symbol("star.fill", Theme.nsStar)
     static let unstarred = symbol("star", Theme.nsSecondaryText.withAlphaComponent(0.5))
 
     override func draw(_ dirtyRect: NSRect) {

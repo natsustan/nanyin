@@ -48,6 +48,33 @@ final class ArtistDetail {
     }
 }
 
+/// A song's credits, shown in a sheet over the window.
+@MainActor
+@Observable
+final class TrackCredits: Identifiable {
+    let title: String
+    let artists: String
+    private(set) var credits: CoreCredits?
+    private(set) var error: String?
+
+    init(trackID id: String, title: String, artists: String, session: PlaybackSession) {
+        self.title = title
+        self.artists = artists
+        Task {
+            do {
+                let credits = try await session.readCredits(trackID: id)
+                if credits.roles.allSatisfy(\.artists.isEmpty) {
+                    error = "Spotify has no credits for this song."
+                } else {
+                    self.credits = credits
+                }
+            } catch {
+                self.error = error.localizedDescription
+            }
+        }
+    }
+}
+
 /// One search: matching artists and albums, and the matching tracks.
 @MainActor
 @Observable

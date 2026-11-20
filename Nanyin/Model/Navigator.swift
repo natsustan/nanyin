@@ -31,6 +31,11 @@ extension Route {
         return "https://open.spotify.com/\(kind)/\(id)"
     }
 
+    /// The id of a `spotify:track:…` URI, or nil for anything else.
+    static func trackID(_ uri: String) -> String? {
+        parse(uri).flatMap { $0.kind == "track" ? $0.id : nil }
+    }
+
     private static func parse(_ uri: String) -> (kind: String, id: String)? {
         let parts = uri.split(separator: ":")
         guard parts.count == 3, parts[0] == "spotify" else { return nil }
