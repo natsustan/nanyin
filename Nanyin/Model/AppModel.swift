@@ -10,6 +10,7 @@ final class AppModel {
     let session: PlaybackSession
     let player: Player
     let library: Library
+    let stars: Stars
     let navigator = Navigator()
     private let nowPlaying: NowPlayingBridge
 
@@ -26,6 +27,7 @@ final class AppModel {
         session = PlaybackSession(secrets: secrets)
         player = Player(session: session)
         library = Library(api: account.api)
+        stars = Stars(api: account.api)
         nowPlaying = NowPlayingBridge(player: player)
         navigator.willShow = { [library] route in library.prepare(route) }
         #if DEBUG
@@ -50,6 +52,7 @@ final class AppModel {
     func signOut() async {
         session.signOut()
         library.signedOut()
+        stars.reset()
         navigator.reset()
         await account.signOut()
     }

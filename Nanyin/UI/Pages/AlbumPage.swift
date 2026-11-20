@@ -18,7 +18,7 @@ struct AlbumPage: View {
                 PageHeader(title: "Album", subtitle: detail.error ?? "Loading…")
             }
             if let tracks = detail.tracks {
-                TrackListTable(list: tracks, columns: [.indicator, .track, .artist, .time])
+                TrackListTable(list: tracks, columns: [.indicator, .star, .track, .artist, .time])
             } else {
                 Theme.content
             }
@@ -66,7 +66,7 @@ struct ArtistPage: View {
             }
             GraphiteHeader { Text("Popular") }
             if let tracks = detail.topTracks {
-                TrackListTable(list: tracks, columns: [.indicator, .track, .time, .popularity, .album])
+                TrackListTable(list: tracks, columns: [.indicator, .star, .track, .time, .popularity, .album])
             } else {
                 Theme.content
             }

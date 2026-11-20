@@ -40,7 +40,7 @@ private struct RouteView: View {
         case (.queue, _) where app.player.upNext.rows.isEmpty:
             PagePlaceholder(title: "Play Queue", message: "Songs you add to the queue appear here.")
         case (.queue, _):
-            TrackListPage(title: "Play Queue", list: app.player.upNext, columns: [.indicator, .track, .artist, .time, .album])
+            TrackListPage(title: "Play Queue", list: app.player.upNext, columns: [.indicator, .star, .track, .artist, .time, .album])
         case (.albums, .albums(let albums)?):
             GridPage(title: "Albums", list: albums) { album in
                 Tile(title: album.name, subtitle: album.artists.names, image: album.images?.best(minimum: 200)) {
@@ -55,9 +55,9 @@ private struct RouteView: View {
             }
         case (.whatsNew, .tracks(let list)?):
             TrackListPage(title: "What's New", subtitle: "Recently played", list: list,
-                          columns: [.indicator, .track, .artist, .time, .album])
+                          columns: [.indicator, .star, .track, .artist, .time, .album])
         case (.likedSongs, .tracks(let list)?):
-            TrackListPage(title: "Starred", list: list, columns: [.indicator, .track, .artist, .time, .album, .added])
+            TrackListPage(title: "Starred", list: list, columns: [.indicator, .star, .track, .artist, .time, .album, .added])
         case (.playlist(_, let name), .tracks(let list)?):
             TrackListPage(title: name, list: list)
         case (_, .album(let detail)?):

@@ -15,6 +15,8 @@ struct TrackRow: Identifiable, Hashable, Sendable {
     let popularity: Int?
     let added: String
     let isPlayable: Bool
+    /// Starred as far as the source knows (rows of Liked Songs are).
+    var starred: Bool?
 
     init(index: Int, uri: String, name: String, artists: String, album: String, durationMs: Int,
          popularity: Int? = nil, addedAt: String? = nil, isPlayable: Bool = true) {
@@ -121,7 +123,9 @@ extension TrackList {
         TrackList(contextURI: "spotify:user:\(username):collection") { offset in
             let page = try await api.savedTracks(offset: offset)
             let rows = page.items.enumerated().map {
-                TrackRow(index: offset + $0.offset, track: $0.element.track, addedAt: $0.element.added_at)
+                var row = TrackRow(index: offset + $0.offset, track: $0.element.track, addedAt: $0.element.added_at)
+                row.starred = true
+                return row
             }
             return (rows, page.total, page.next == nil ? nil : offset + page.items.count)
         }

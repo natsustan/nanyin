@@ -6,11 +6,12 @@ import SwiftUI
 /// row. AppKit's table recycles row views, so thousands of rows stay cheap.
 struct TrackTable: NSViewRepresentable {
     enum Column: String {
-        case indicator, track, artist, time, popularity, album, added
+        case indicator, star, track, artist, time, popularity, album, added
 
-        static let standard: [Column] = [.indicator, .track, .artist, .time, .popularity, .album]
+        static let standard: [Column] = [.indicator, .star, .track, .artist, .time, .popularity, .album]
 
-        var title: String { self == .indicator ? "" : rawValue.capitalized }
+        var title: String { self == .indicator || self == .star ? "" : rawValue.capitalized }
+        var isFixed: Bool { self == .indicator || self == .star }
     }
 
     struct Actions {
@@ -18,10 +19,14 @@ struct TrackTable: NSViewRepresentable {
         var addToQueue: (TrackRow) -> Void
         var togglePlayPause: () -> Void
         var rowAppeared: (Int) -> Void = { _ in }
+        var isStarred: (TrackRow) -> Bool? = { _ in nil }
+        var toggleStar: (TrackRow) -> Void = { _ in }
     }
 
     let rows: [TrackRow]
     let playingURI: String?
+    /// Changes whenever any star changes.
+    var starsVersion = 0
     var columns = Column.standard
     let actions: Actions
 
@@ -45,7 +50,7 @@ struct TrackTable: NSViewRepresentable {
             tableColumn.title = column.title
             tableColumn.headerCell = GraphiteHeaderCell(textCell: column.title)
             switch column {
-            case .indicator: tableColumn.width = 22; tableColumn.minWidth = 22; tableColumn.maxWidth = 22
+            case .indicator, .star: tableColumn.width = 20; tableColumn.minWidth = 20; tableColumn.maxWidth = 20
             case .track: tableColumn.width = 260; tableColumn.minWidth = 80
             case .artist: tableColumn.width = 170; tableColumn.minWidth = 60
             case .time: tableColumn.width = 46; tableColumn.minWidth = 40; tableColumn.maxWidth = 60
@@ -53,13 +58,14 @@ struct TrackTable: NSViewRepresentable {
             case .album: tableColumn.width = 190; tableColumn.minWidth = 60
             case .added: tableColumn.width = 86; tableColumn.minWidth = 60
             }
-            tableColumn.resizingMask = column == .indicator ? [] : [.userResizingMask, .autoresizingMask]
+            tableColumn.resizingMask = column.isFixed ? [] : [.userResizingMask, .autoresizingMask]
             table.addTableColumn(tableColumn)
         }
         table.dataSource = context.coordinator
         table.delegate = context.coordinator
         table.target = context.coordinator
         table.doubleAction = #selector(Coordinator.doubleClicked(_:))
+        table.action = #selector(Coordinator.clicked(_:))
         table.menu = context.coordinator.makeMenu()
         context.coordinator.table = table
 
@@ -87,22 +93,33 @@ struct TrackTable: NSViewRepresentable {
             } else {
                 table.reloadData()
             }
-        } else if coordinator.playingURI != playingURI {
-            coordinator.playingURI = playingURI
-            // Only the speaker moves: redraw that column for the rows on screen.
-            if let column = columns.firstIndex(of: .indicator) {
+        } else {
+            // Only the speaker or the stars changed: redraw those columns for
+            // the rows on screen.
+            var changed: [Column] = []
+            if coordinator.playingURI != playingURI {
+                coordinator.playingURI = playingURI
+                changed.append(.indicator)
+            }
+            if coordinator.starsVersion != starsVersion {
+                changed.append(.star)
+            }
+            let indexes = IndexSet(changed.compactMap { columns.firstIndex(of: $0) })
+            if !indexes.isEmpty {
                 let visible = table.rows(in: table.visibleRect)
                 table.reloadData(
                     forRowIndexes: IndexSet(integersIn: visible.location ..< visible.location + visible.length),
-                    columnIndexes: IndexSet(integer: column))
+                    columnIndexes: indexes)
             }
         }
+        coordinator.starsVersion = starsVersion
     }
 
     @MainActor
     final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSMenuDelegate {
         var rows: [TrackRow] = []
         var playingURI: String?
+        var starsVersion = 0
         var actions = Actions(play: { _ in }, addToQueue: { _ in }, togglePlayPause: {})
         weak var table: TrackTableView?
 
@@ -122,8 +139,12 @@ struct TrackTable: NSViewRepresentable {
             let isPlaying = track.uri == playingURI
             switch column {
             case .indicator:
-                let view = reuse(tableView, "indicator") { IndicatorCell() }
-                view.isPlaying = isPlaying
+                let view = reuse(tableView, "symbol") { SymbolCell() }
+                view.image = isPlaying ? SymbolCell.speaker : nil
+                return view
+            case .star:
+                let view = reuse(tableView, "symbol") { SymbolCell() }
+                view.image = actions.isStarred(track).flatMap { $0 ? SymbolCell.starred : SymbolCell.unstarred }
                 return view
             case .popularity:
                 let view = reuse(tableView, "popularity") { PopularityCell() }
@@ -149,6 +170,14 @@ struct TrackTable: NSViewRepresentable {
             let view = make()
             view.identifier = identifier
             return view
+        }
+
+        /// A click on a star toggles it, without changing the selection's meaning.
+        @objc func clicked(_ sender: NSTableView) {
+            guard rows.indices.contains(sender.clickedRow), sender.clickedColumn >= 0,
+                  sender.tableColumns[sender.clickedColumn].identifier.rawValue == Column.star.rawValue
+            else { return }
+            actions.toggleStar(rows[sender.clickedRow])
         }
 
         @objc func doubleClicked(_ sender: NSTableView) {
@@ -289,13 +318,22 @@ private final class TextCell: NSTableCellView {
 }
 
 /// The green speaker on the row that is playing.
-private final class IndicatorCell: NSView {
-    var isPlaying = false { didSet { needsDisplay = true } }
-    private static let image = NSImage(systemSymbolName: "speaker.wave.2.fill", accessibilityDescription: "Playing")?
-        .withSymbolConfiguration(.init(pointSize: 10, weight: .regular).applying(.init(paletteColors: [Theme.nsGreen])))
+/// A small symbol centred in its cell: the playing speaker, a star.
+private final class SymbolCell: NSView {
+    var image: NSImage? { didSet { if image !== oldValue { needsDisplay = true } } }
+
+    static func symbol(_ name: String, _ color: NSColor) -> NSImage? {
+        NSImage(systemSymbolName: name, accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 10, weight: .regular).applying(.init(paletteColors: [color])))
+    }
+
+    static let speaker = symbol("speaker.wave.2.fill", Theme.nsGreen)
+    /// The 2010 star: an outline until starred, then filled.
+    static let starred = symbol("star.fill", Theme.nsText)
+    static let unstarred = symbol("star", Theme.nsSecondaryText.withAlphaComponent(0.5))
 
     override func draw(_ dirtyRect: NSRect) {
-        guard isPlaying, let image = Self.image else { return }
+        guard let image else { return }
         let size = image.size
         image.draw(in: NSRect(
             x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2,

@@ -35,15 +35,24 @@ struct TrackListTable: View {
 
     var body: some View {
         let player = app.player
+        let stars = app.stars
         TrackTable(
             rows: list.rows,
             playingURI: player.playingURI,
+            starsVersion: stars.version,
             columns: columns,
             actions: .init(
                 play: { player.play($0, in: list) },
                 addToQueue: { player.addToQueue($0.uri) },
                 togglePlayPause: player.togglePlayPause,
-                rowAppeared: list.rowAppeared))
+                rowAppeared: { index in
+                    list.rowAppeared(index)
+                    if list.rows.indices.contains(index), list.rows[index].starred == nil {
+                        stars.need(list.rows[index].uri)
+                    }
+                },
+                isStarred: { stars.isStarred($0.uri, hint: $0.starred) },
+                toggleStar: { stars.toggle($0.uri, hint: $0.starred) }))
     }
 }
 

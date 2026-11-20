@@ -10,10 +10,12 @@ enum DemoContent {
         app.account.showDemo(decode(#"{"id":"demo","display_name":"rasmus","product":"premium"}"#))
         app.session.showDemoReady()
         let rows = tracks.enumerated().map { index, track in
-            TrackRow(
+            var row = TrackRow(
                 index: index, uri: "spotify:track:demo\(index)", name: track.0,
                 artists: track.1, album: track.2, durationMs: track.3,
                 popularity: 90 - index * 4, addedAt: "2010-0\(index % 9 + 1)-1\(index % 9)T10:00:00Z")
+            row.starred = index % 3 == 0
+            return row
         }
         let list = TrackList(rows: rows, contextURI: "spotify:user:demo:collection")
         let playlists: [Playlist] = playlistNames.enumerated().map { index, name in
