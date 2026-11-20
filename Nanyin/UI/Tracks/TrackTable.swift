@@ -373,7 +373,11 @@ final class GraphiteHeaderView: NSTableHeaderView {
     }
 }
 
+/// The header's piece above the scroller. Flipped like the header view, so
+/// the shared drawing lands the same way up.
 final class GraphiteCornerView: NSView {
+    override var isFlipped: Bool { true }
+
     override func draw(_ dirtyRect: NSRect) {
         GraphiteHeaderCell.drawBackground(in: bounds)
     }
