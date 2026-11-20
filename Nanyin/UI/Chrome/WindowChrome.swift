@@ -78,10 +78,12 @@ final class TrafficLightsView: NSView {
     static let size = CGSize(width: AquaWindowButton.size + spacing * 2, height: AquaWindowButton.size)
 
     private let buttons: [AquaWindowButton]
+    private let group: AquaWindowButton.Group
     private var observers: [NSObjectProtocol] = []
 
     init() {
         let group = AquaWindowButton.Group()
+        self.group = group
         buttons = AquaWindowButton.Kind.allCases.map { AquaWindowButton(kind: $0, group: group) }
         super.init(frame: NSRect(origin: .zero, size: Self.size))
         for (index, button) in buttons.enumerated() {
@@ -101,11 +103,18 @@ final class TrafficLightsView: NSView {
         let names: [Notification.Name] = [
             NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification,
             NSWindow.didBecomeMainNotification, NSWindow.didResignMainNotification,
+            NSWindow.didDeminiaturizeNotification,
+            NSWindow.didEnterFullScreenNotification, NSWindow.didExitFullScreenNotification,
         ]
         for name in names {
             observers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) {
                 [weak self] _ in
-                MainActor.assumeIsolated { self?.buttons.forEach { $0.needsDisplay = true } }
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.buttons.forEach { $0.needsDisplay = true }
+                    // The window may have moved out from under the mouse.
+                    self.group.update()
+                }
             })
         }
     }

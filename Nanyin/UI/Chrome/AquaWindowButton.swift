@@ -104,29 +104,34 @@ final class AquaWindowButton: NSButton {
     }
 
     /// The three buttons of one window: hovering any shows all glyphs.
+    /// Asks where the mouse is rather than counting enters and exits: a
+    /// click that minimises the window or takes it full screen moves it out
+    /// from under the mouse, and no exit ever comes.
     @MainActor
     final class Group {
-        private var hovered = 0
-        private var pendingHide: DispatchWorkItem?
+        private var pendingCheck: DispatchWorkItem?
         fileprivate let buttons = NSHashTable<AquaWindowButton>.weakObjects()
         fileprivate private(set) var showsGlyphs = false
 
-        fileprivate func hoverChanged(_ entered: Bool) {
-            hovered = max(0, hovered + (entered ? 1 : -1))
-            pendingHide?.cancel()
-            if hovered > 0 {
-                setShowsGlyphs(true)
-            } else {
-                // Moving between buttons sends exit before enter; wait briefly so glyphs do not flicker.
-                let work = DispatchWorkItem { [weak self] in
-                    MainActor.assumeIsolated {
-                        guard let self, self.hovered == 0 else { return }
-                        self.setShowsGlyphs(false)
-                    }
-                }
-                pendingHide = work
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: work)
+        fileprivate func mouseEntered() {
+            pendingCheck?.cancel()
+            setShowsGlyphs(true)
+        }
+
+        /// Moving between buttons sends exit before enter; look again a
+        /// moment later so glyphs do not flicker.
+        fileprivate func mouseExited() {
+            pendingCheck?.cancel()
+            let work = DispatchWorkItem { [weak self] in
+                MainActor.assumeIsolated { self?.update() }
             }
+            pendingCheck = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: work)
+        }
+
+        /// Shows the glyphs only while the mouse is over a button.
+        func update() {
+            setShowsGlyphs(buttons.allObjects.contains(where: \.containsMouse))
         }
 
         private func setShowsGlyphs(_ value: Bool) {
@@ -170,8 +175,13 @@ final class AquaWindowButton: NSButton {
             rect: bounds, options: [.activeAlways, .mouseEnteredAndExited, .inVisibleRect], owner: self))
     }
 
-    override func mouseEntered(with event: NSEvent) { group.hoverChanged(true) }
-    override func mouseExited(with event: NSEvent) { group.hoverChanged(false) }
+    override func mouseEntered(with event: NSEvent) { group.mouseEntered() }
+    override func mouseExited(with event: NSEvent) { group.mouseExited() }
+
+    fileprivate var containsMouse: Bool {
+        guard let window, window.isVisible, !window.isMiniaturized else { return false }
+        return bounds.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil))
+    }
 
     /// Clickable while the window is inactive, like the system buttons.
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
