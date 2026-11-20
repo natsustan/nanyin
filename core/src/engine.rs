@@ -209,12 +209,17 @@ impl Engine {
             let session = session.clone();
             async move {
                 while let Some(event) = events.recv().await {
-                    if matches!(event, PlayerEvent::SessionDisconnected { .. })
-                        && session.is_invalid()
+                    if session.is_invalid()
+                        && matches!(
+                            event,
+                            PlayerEvent::SessionDisconnected { .. }
+                                | PlayerEvent::Unavailable { .. }
+                        )
                     {
-                        // Spirc says this when our own connection drops too;
-                        // that is not another device taking over, and
-                        // `SessionEnded` follows.
+                        // Our own connection dropped: Spirc reports it as a
+                        // disconnect, and a track loading meanwhile fails for
+                        // want of its key. Neither is another device taking
+                        // over or a missing song; `SessionEnded` follows.
                         continue;
                     }
                     if let PlayerEvent::SetQueue {

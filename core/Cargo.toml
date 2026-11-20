@@ -36,3 +36,9 @@ opt-level = 1
 
 [profile.dev.package."*"]
 opt-level = 3
+
+# One local change to librespot's player: a track whose key cannot be
+# fetched fails to load instead of being decoded undecrypted. See
+# vendor/librespot-playback/NANYIN-PATCH.md.
+[patch."https://github.com/librespot-org/librespot"]
+librespot-playback = { path = "vendor/librespot-playback" }
