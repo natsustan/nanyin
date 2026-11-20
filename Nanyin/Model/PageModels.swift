@@ -26,7 +26,8 @@ final class AlbumDetail {
     }
 }
 
-/// An artist page: the artist, popular tracks and releases, read together.
+/// An artist page: the artist, popular tracks and releases. Each is read
+/// on its own, so one refused read leaves the others on the page.
 @MainActor
 @Observable
 final class ArtistDetail {
@@ -34,19 +35,22 @@ final class ArtistDetail {
     private(set) var topTracks: TrackList?
     private(set) var albums: [AlbumSummary] = []
     private(set) var error: String?
+    private(set) var topTracksError: String?
 
-    init(id: String, api: SpotifyWebAPI) {
+    init(id: String, api: SpotifyWebAPI, session: PlaybackSession) {
         Task {
-            async let artist = api.artist(id)
-            async let top = api.artistTopTracks(id)
-            async let albums = api.artistAlbums(id)
+            do { artist = try await api.artist(id) } catch { self.error = error.localizedDescription }
+        }
+        Task {
+            do { albums = try await api.artistAlbums(id).items } catch {}
+        }
+        Task {
             do {
-                self.artist = try await artist
-                let rows = try await top.enumerated().map { TrackRow(index: $0.offset, track: $0.element) }
+                let tracks = try await session.readTopTracks(artistID: id)
+                let rows = tracks.enumerated().map { TrackRow(index: $0.offset, track: $0.element) }
                 topTracks = TrackList(rows: rows, contextURI: "spotify:artist:\(id)")
-                self.albums = try await albums.items
             } catch {
-                self.error = error.localizedDescription
+                topTracksError = error.localizedDescription
             }
         }
     }

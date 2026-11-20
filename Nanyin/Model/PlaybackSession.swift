@@ -126,13 +126,20 @@ final class PlaybackSession {
         return try await engine.request(.playlist(id: id, offset: offset))
     }
 
+    /// An artist's popular songs, read through the session: the Web API
+    /// answers Development Mode apps 403 for them.
+    func readTopTracks(artistID: String) async throws -> [CoreTrack] {
+        try await untilReady()
+        return try await engine.request(.topTracks(artistID: artistID))
+    }
+
     /// Waits out a connection in progress (just after launch, or a
     /// reconnect); fails at once if none is coming.
     private func untilReady() async throws {
         switch state {
         case .ready: return
         case .connecting, .authorizing, .waiting: try await withCheckedThrowingContinuation { readyWaiters.append($0) }
-        default: throw ReadError(errorDescription: "Connect playback on this Mac to open this playlist.")
+        default: throw ReadError(errorDescription: "Connect playback on this Mac to read this from Spotify.")
         }
     }
 
@@ -141,7 +148,7 @@ final class PlaybackSession {
         switch state {
         case .ready: result = .success(())
         case .connecting, .authorizing, .waiting: return
-        default: result = .failure(ReadError(errorDescription: "Connect playback on this Mac to open this playlist."))
+        default: result = .failure(ReadError(errorDescription: "Connect playback on this Mac to read this from Spotify."))
         }
         let waiters = readyWaiters
         readyWaiters = []

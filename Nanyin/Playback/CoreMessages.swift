@@ -121,6 +121,8 @@ struct SessionPlaylistPage: Decodable, Equatable, Sendable {
 enum CoreAsk: Encodable, Sendable {
     /// Answered with a `SessionPlaylistPage`.
     case playlist(id: String, offset: Int)
+    /// Answered with `[CoreTrack]`.
+    case topTracks(artistID: String)
 
     private enum Key: String, CodingKey { case ask, id, offset }
 
@@ -131,6 +133,9 @@ enum CoreAsk: Encodable, Sendable {
             try c.encode("playlist", forKey: .ask)
             try c.encode(id, forKey: .id)
             try c.encode(offset, forKey: .offset)
+        case .topTracks(let artistID):
+            try c.encode("top_tracks", forKey: .ask)
+            try c.encode(artistID, forKey: .id)
         }
     }
 }

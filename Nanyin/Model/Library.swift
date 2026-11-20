@@ -103,7 +103,7 @@ final class Library {
             let owned = playlists.contains { $0.id == id && isOwn($0) }
             content = .tracks(owned ? .playlist(api: api, id: id) : .sessionPlaylist(session: session, id: id))
         case .album(let id): content = .album(AlbumDetail(id: id, api: api))
-        case .artist(let id): content = .artist(ArtistDetail(id: id, api: api))
+        case .artist(let id): content = .artist(ArtistDetail(id: id, api: api, session: session))
         case .search(let query): content = .search(SearchResultsModel(query: query, api: api))
         case .albums: content = .albums(.savedAlbums(api: api))
         case .artists: content = .artists(.followedArtists(api: api))

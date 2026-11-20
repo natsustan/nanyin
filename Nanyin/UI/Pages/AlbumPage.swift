@@ -62,9 +62,14 @@ struct ArtistPage: View {
             }
             GraphiteHeader { Text("Popular") }
             if let tracks = detail.topTracks {
-                TrackListTable(list: tracks, columns: [.indicator, .star, .track, .time, .popularity, .album])
+                TrackListTable(list: tracks, columns: [.indicator, .star, .track, .time, .album])
             } else {
-                Theme.content
+                Text(detail.topTracksError ?? "Loading…")
+                    .font(AquaFont.regular(11))
+                    .foregroundStyle(Theme.secondaryText)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .background(Theme.content)
             }
         }
     }

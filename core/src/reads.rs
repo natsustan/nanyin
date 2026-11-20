@@ -1,6 +1,6 @@
 //! Catalogue reads over the streaming session, for what the app's Web API
 //! grant cannot read: since late 2024, Development Mode apps get no access
-//! to playlists the listener does not own. The session speaks the protocol
+//! to playlists the listener does not own, nor to an artist's top tracks. The session speaks the protocol
 //! Spotify's own clients use, as spotifast does. Also resolves the play
 //! queue's tracks, so both go through one batched, cached lookup.
 
@@ -10,7 +10,7 @@ use std::{
 };
 
 use librespot_core::{Error, Session, SpotifyUri, spotify_id::SpotifyId};
-use librespot_metadata::{Metadata, Playlist, Track as SessionTrack};
+use librespot_metadata::{Artist, Metadata, Playlist, Track as SessionTrack};
 use librespot_protocol::{
     extended_metadata::{BatchedEntityRequest, EntityRequest, ExtensionQuery},
     extension_kind::ExtensionKind,
@@ -23,6 +23,8 @@ use crate::events::Track;
 
 /// Rows per page, as the Web API's limit.
 const PAGE: usize = 50;
+/// Songs on an artist's Popular list, as Spotify's own clients show.
+const TOP: usize = 10;
 /// Lists kept between pages of one read; past this the least recently
 /// read is let go.
 const KEPT: usize = 8;
@@ -93,6 +95,24 @@ impl Reads {
             rows,
             next: (end < list.len()).then_some(end),
         })
+    }
+
+    /// An artist's most played songs in the account's country (or
+    /// worldwide when Spotify ranks none there): one artist fetch, then one
+    /// batched track lookup.
+    pub async fn top_tracks(&self, id: &str) -> Result<Vec<Track>, Error> {
+        let uri = SpotifyUri::Artist {
+            id: SpotifyId::from_base62(id)?,
+        };
+        let artist = Artist::get(&self.session, &uri).await?;
+        let uris: Vec<SpotifyUri> = artist
+            .top_tracks
+            .for_country(&self.session.country())
+            .iter()
+            .take(TOP)
+            .cloned()
+            .collect();
+        Ok(self.tracks(&uris).await?.into_iter().flatten().collect())
     }
 
     /// The tracks at `uris`, in order; none where Spotify has no song.
