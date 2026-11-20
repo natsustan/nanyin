@@ -29,13 +29,7 @@ final class PlaybackEngine {
     }
 
     private init() {
-        nanyin_init({ _, generation, json in
-            guard let json else { return }
-            let text = String(cString: json)
-            DispatchQueue.main.async {
-                MainActor.assumeIsolated { PlaybackEngine.shared.receive(generation, text) }
-            }
-        }, nil)
+        nanyin_init(receiveCoreEvent, nil)
     }
 
     func connect(_ config: CoreConfig) {
@@ -91,7 +85,7 @@ final class PlaybackEngine {
         }
     }
 
-    private func receive(_ eventGeneration: UInt64, _ json: String) {
+    fileprivate func receive(_ eventGeneration: UInt64, _ json: String) {
         guard eventGeneration == generation, generation != 0 else { return }
         let data = Data(json.utf8)
         if let reply = try? decoder.decode(ReplyHeader.self, from: data), reply.type == "reply" {
@@ -104,6 +98,18 @@ final class PlaybackEngine {
         } catch {
             NSLog("Nanyin: undecodable core event %@", json)
         }
+    }
+}
+
+/// The core's event callback. Rust calls it on its own worker threads, so it
+/// must not be isolated to the main actor: a closure written inside
+/// `PlaybackEngine` would inherit `@MainActor`, and Swift 6 checks that
+/// isolation on entry (in Release the failed check traps).
+private func receiveCoreEvent(_: UnsafeMutableRawPointer?, generation: UInt64, json: UnsafePointer<CChar>?) {
+    guard let json else { return }
+    let text = String(cString: json)
+    DispatchQueue.main.async {
+        MainActor.assumeIsolated { PlaybackEngine.shared.receive(generation, text) }
     }
 }
 

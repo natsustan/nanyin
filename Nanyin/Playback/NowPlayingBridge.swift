@@ -76,8 +76,14 @@ final class NowPlayingBridge {
         guard let url else { return }
         artworkTask = Task {
             guard let image = await ImageLoader.shared.image(url), !Task.isCancelled else { return }
-            artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+            artwork = Self.artwork(image)
             MPNowPlayingInfoCenter.default().nowPlayingInfo?[MPMediaItemPropertyArtwork] = artwork
         }
+    }
+
+    /// MediaPlayer asks for the image on its own queue, so the handler must
+    /// not inherit this class's main-actor isolation (Swift 6 traps on it).
+    private nonisolated static func artwork(_ image: NSImage) -> MPMediaItemArtwork {
+        MPMediaItemArtwork(boundsSize: image.size) { _ in image }
     }
 }

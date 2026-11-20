@@ -73,3 +73,6 @@ account safe; most come from spotifast's experience (`research-repos/spotifast/d
   the time tick (TimelineView). Never publish position app-wide.
 - Interface is optimistic: show the result of a control at once, let core
   events confirm it.
+- Callbacks that other threads call (the core's C callback, MediaPlayer
+  handlers) must be `nonisolated`: a closure written inside a `@MainActor`
+  type inherits that isolation, and Release builds trap on the check.
