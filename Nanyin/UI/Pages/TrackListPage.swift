@@ -58,7 +58,8 @@ struct TrackListTable: View {
                 togglePlayPause: player.togglePlayPause,
                 rowAppeared: list.pages.appeared,
                 isStarred: { stars.isStarred($0.uri) },
-                toggleStar: { stars.toggle($0.uri) }))
+                toggleStar: { stars.toggle($0.uri) },
+                show: { app.navigator.go(to: $0) }))
     }
 }
 

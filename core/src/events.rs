@@ -87,6 +87,8 @@ pub struct Track {
     pub name: String,
     pub artists: Vec<Artist>,
     pub album: String,
+    /// Known when read from metadata; playback's audio item does not carry it.
+    pub album_uri: Option<String>,
     pub cover_url: Option<String>,
     pub duration_ms: u32,
     pub explicit: bool,
@@ -134,6 +136,7 @@ impl Track {
             name: item.name.clone(),
             artists,
             album,
+            album_uri: None,
             cover_url,
             duration_ms: item.duration_ms,
             explicit: item.is_explicit,
@@ -156,6 +159,7 @@ impl Track {
                 })
                 .collect(),
             album: track.album.name.clone(),
+            album_uri: Some(track.album.id.to_uri()),
             cover_url: track
                 .album
                 .covers

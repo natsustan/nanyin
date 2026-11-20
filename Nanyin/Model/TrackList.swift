@@ -15,10 +15,16 @@ struct TrackRow: Identifiable, Hashable, Sendable {
     let popularity: Int?
     let added: String
     let isPlayable: Bool
+    /// For "Show Album" and "Show Artist" (the first credited artist).
+    var albumID: String?
+    var artistID: String?
 
     init(index: Int, uri: String, name: String, artists: String, album: String, durationMs: Int,
-         popularity: Int? = nil, added: Date? = nil, isPlayable: Bool = true) {
+         popularity: Int? = nil, added: Date? = nil, isPlayable: Bool = true,
+         albumID: String? = nil, artistID: String? = nil) {
         id = index
+        self.albumID = albumID
+        self.artistID = artistID
         self.uri = uri
         self.name = name
         artistNames = artists
@@ -34,17 +40,24 @@ struct TrackRow: Identifiable, Hashable, Sendable {
             index: index, uri: track.uri, name: track.name, artists: track.artists.names, album: track.album?.name ?? "",
             durationMs: track.duration_ms, popularity: track.popularity,
             added: addedAt.flatMap { Self.isoParser.date(from: $0) },
-            isPlayable: track.is_playable ?? true)
+            isPlayable: track.is_playable ?? true, albumID: track.album?.id, artistID: track.artists.first?.id)
     }
 
     init(index: Int, track: AlbumTrack, album: Album) {
         self.init(index: index, uri: track.uri, name: track.name, artists: track.artists.names, album: album.name,
-                  durationMs: track.duration_ms)
+                  durationMs: track.duration_ms, albumID: album.id, artistID: track.artists.first?.id)
     }
 
     init(index: Int, track: CoreTrack, added: Date? = nil) {
         self.init(index: index, uri: track.uri, name: track.name, artists: track.artistNames, album: track.album,
-                  durationMs: track.durationMs, added: added)
+                  durationMs: track.durationMs, added: added,
+                  albumID: track.albumURI.flatMap(Self.id(from:)), artistID: track.artists.first.flatMap { Self.id(from: $0.uri) })
+    }
+
+    /// The id at the end of a `spotify:kind:id` URI.
+    static func id(from uri: String) -> String? {
+        let parts = uri.split(separator: ":")
+        return parts.count == 3 ? String(parts[2]) : nil
     }
 
     /// "3:07".

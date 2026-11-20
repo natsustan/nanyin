@@ -88,12 +88,14 @@ struct CoreTrack: Decodable, Equatable, Sendable {
     let name: String
     let artists: [Artist]
     let album: String
+    let albumURI: String?
     let coverURL: URL?
     let durationMs: Int
     let explicit: Bool
 
     enum CodingKeys: String, CodingKey {
         case uri, name, artists, album, explicit
+        case albumURI = "album_uri"
         case coverURL = "cover_url"
         case durationMs = "duration_ms"
     }

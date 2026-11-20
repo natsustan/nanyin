@@ -27,7 +27,7 @@ enum DemoContent {
         app.player.showDemo(
             CoreTrack(
                 uri: rows[4].uri, name: rows[4].name, artists: [.init(uri: "", name: rows[4].artistNames)],
-                album: rows[4].album, coverURL: nil, durationMs: 206_000, explicit: false),
+                album: rows[4].album, albumURI: nil, coverURL: nil, durationMs: 206_000, explicit: false),
             positionMs: 112_000,
             upNext: TrackList(rows: Array(rows.dropFirst(5))))
     }

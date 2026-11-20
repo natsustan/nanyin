@@ -21,6 +21,7 @@ struct TrackTable: NSViewRepresentable {
         var rowAppeared: (Int) -> Void = { _ in }
         var isStarred: (TrackRow) -> Bool? = { _ in nil }
         var toggleStar: (TrackRow) -> Void = { _ in }
+        var show: (Route) -> Void = { _ in }
     }
 
     let rows: [TrackRow]
@@ -199,6 +200,8 @@ struct TrackTable: NSViewRepresentable {
             menu.addItem(item("Play", #selector(playClicked)))
             menu.addItem(item("Add to Play Queue", #selector(queueClicked)))
             menu.addItem(.separator())
+            if rows[row].albumID != nil { menu.addItem(item("Show Album", #selector(showAlbum))) }
+            if rows[row].artistID != nil { menu.addItem(item("Show Artist", #selector(showArtist))) }
             menu.addItem(item("Copy Spotify Link", #selector(copyLink)))
         }
 
@@ -219,6 +222,19 @@ struct TrackTable: NSViewRepresentable {
 
         @objc private func queueClicked() {
             targetRows.forEach(actions.addToQueue)
+        }
+
+        @objc private func showAlbum() {
+            if let id = clickedRow?.albumID { actions.show(.album(id: id)) }
+        }
+
+        @objc private func showArtist() {
+            if let id = clickedRow?.artistID { actions.show(.artist(id: id)) }
+        }
+
+        private var clickedRow: TrackRow? {
+            guard let row = table?.clickedRow, rows.indices.contains(row) else { return nil }
+            return rows[row]
         }
 
         @objc private func copyLink() {
