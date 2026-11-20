@@ -9,20 +9,29 @@ publish = false
 name = "nanyin_core"
 crate-type = ["staticlib", "rlib"]
 
-# Upstream librespot, pinned to a dev-branch commit after 0.8.0 for
-# in-memory credentials (#1802) and bounded handshake packets (#1807).
-# Move every crate together.
+# librespot from Nanyin's fork, natsustan/librespot branch `nanyin`: the
+# dev-branch commit 15e02e8 after 0.8.0 (in-memory credentials #1802,
+# bounded handshake packets #1807) plus, one commit each:
+# - librespot-org/librespot#1765, playback kept across a dropped session;
+# - a load whose audio key cannot be fetched fails instead of decoding the
+#   encrypted file;
+# - PlaybackSnapshot::track_uri and ::playing_on, a restore position that
+#   advances until Spirc applies it;
+# - Spirc::restore_playback_reporting, and no restore over another device
+#   that was playing when this one registered.
+# Every crate comes from the same rev, so one copy of each exists. Drop
+# each change once upstream has it.
 [dependencies]
-librespot-core = { git = "https://github.com/librespot-org/librespot", rev = "15e02e86c72d96dd39d548e3749f00abe39ffdde" }
-librespot-connect = { git = "https://github.com/librespot-org/librespot", rev = "15e02e86c72d96dd39d548e3749f00abe39ffdde" }
-librespot-playback = { git = "https://github.com/librespot-org/librespot", rev = "15e02e86c72d96dd39d548e3749f00abe39ffdde" }
-librespot-metadata = { git = "https://github.com/librespot-org/librespot", rev = "15e02e86c72d96dd39d548e3749f00abe39ffdde" }
+librespot-core = { git = "https://github.com/natsustan/librespot", rev = "fa9eff732980e144db134f96553f25bc0c76cde6" }
+librespot-connect = { git = "https://github.com/natsustan/librespot", rev = "fa9eff732980e144db134f96553f25bc0c76cde6" }
+librespot-playback = { git = "https://github.com/natsustan/librespot", rev = "fa9eff732980e144db134f96553f25bc0c76cde6" }
+librespot-metadata = { git = "https://github.com/natsustan/librespot", rev = "fa9eff732980e144db134f96553f25bc0c76cde6" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 log = "0.4"
 env_logger = "0.11"
-librespot-protocol = { git = "https://github.com/librespot-org/librespot", rev = "15e02e86c72d96dd39d548e3749f00abe39ffdde", version = "0.8.0" }
+librespot-protocol = { git = "https://github.com/natsustan/librespot", rev = "fa9eff732980e144db134f96553f25bc0c76cde6", version = "0.8.0" }
 protobuf = "3"
 
 [profile.release]
@@ -36,10 +45,3 @@ opt-level = 1
 
 [profile.dev.package."*"]
 opt-level = 3
-
-# Local changes to librespot, each explained in its NANYIN-PATCH.md:
-# playback fails a track whose key cannot be fetched instead of decoding it
-# undecrypted; connect keeps playback across a dropped session (#1765).
-[patch."https://github.com/librespot-org/librespot"]
-librespot-connect = { path = "vendor/librespot-connect" }
-librespot-playback = { path = "vendor/librespot-playback" }

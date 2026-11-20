@@ -8,7 +8,6 @@ era). Swift/SwiftUI app, librespot (Rust) for playback.
 | Path | What |
 |---|---|
 | `core/` | Rust staticlib `nanyin_core`: librespot session, player, Spotify Connect device. C ABI in `core/include/nanyin_core.h`; commands and events are JSON. |
-| `core/vendor/` | librespot crates with local patches, swapped in by `[patch]` in `core/Cargo.toml`; each `NANYIN-PATCH.md` says what changed and how to carry it to a new librespot rev. |
 | `Packages/NanyinKit/` | Swift package, testable without the app: OAuth (PKCE + loopback), Keychain, Web API client, reconnect policy. |
 | `Nanyin/Playback/` | Swift side of the core ABI (`PlaybackEngine`, message types). |
 | `Nanyin/Model/` | `@Observable` models: `Account`, `PlaybackSession`, `Player`, `Library`, `Navigator`, `TrackList`, wired in `AppModel`. |
@@ -34,6 +33,17 @@ The core logs to stderr and to `~/Library/Logs/<app name>/core.log`
 
 Never edit `Nanyin.xcodeproj` by hand; it is generated and git-ignored.
 
+## librespot fork
+
+librespot comes from [natsustan/librespot](https://github.com/natsustan/librespot),
+branch `nanyin`: upstream `dev` plus one commit per change, listed in
+`core/Cargo.toml`. Change librespot there, never by copying its code here:
+commit on `nanyin` (formatted and clippy-clean, with a CHANGELOG line, ready
+to offer upstream), push, then move every librespot crate in
+`core/Cargo.toml` to the new rev together. To follow upstream, rebase
+`nanyin` on `upstream/dev` and drop commits upstream has merged.
+`research-repos/librespot` stays a read-only reference.
+
 ## Spotify account safety (do not regress)
 
 Spotify watches for abusive traffic. These rules keep a normal listener's
@@ -52,7 +62,7 @@ account safe; most come from spotifast's experience (`research-repos/spotifast/d
    (`FailureReason::AuthRejected`). Timeouts and other errors back off
    (`ReconnectPolicy`: 5/15/60/120/300/600 s; ≤ 6 session drops per 10 min).
    A dropped session's song plays on from the kept player; the next session
-   takes it over and restores its queue once (librespot#1765, vendored).
+   takes it over and restores its queue once (librespot#1765, in the fork).
    Nothing new ever starts on its own.
 4. **The browser opens only from a user's click.** Never from an error path.
 5. **One Connect device id per install**, never derived per launch.
