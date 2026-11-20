@@ -121,6 +121,15 @@ extension TrackList {
         }
     }
 
+    /// An artist's popular songs, read through the playback session (the
+    /// Web API refuses them to Development Mode apps).
+    static func topTracks(session: PlaybackSession, artistID: String) -> TrackList {
+        TrackList(contextURI: "spotify:artist:\(artistID)") { _ in
+            let tracks = try await session.readTopTracks(artistID: artistID)
+            return (tracks.enumerated().map { TrackRow(index: $0.offset, track: $0.element) }, tracks.count, nil)
+        }
+    }
+
     static func recentlyPlayed(api: SpotifyWebAPI) -> TrackList {
         TrackList(contextURI: nil) { _ in
             var seen = Set<String>()

@@ -44,11 +44,6 @@ public extension SpotifyWebAPI {
         try await get("/artists/\(id)")
     }
 
-    func artistTopTracks(_ id: String) async throws -> [Track] {
-        struct Body: Decodable, Sendable { let tracks: [Track] }
-        return try await get("/artists/\(id)/top-tracks", as: Body.self).tracks
-    }
-
     func artistAlbums(_ id: String) async throws -> Paging<AlbumSummary> {
         try await get("/artists/\(id)/albums", query: ["include_groups": "album,single", "limit": "10"])
     }

@@ -80,7 +80,9 @@ account safe; most come from spotifast's experience (`research-repos/spotifast/d
 11. **Playlists the listener does not own are read through the session**
     (`core/src/reads.rs`): Development Mode apps get 403 for them. One
     playlist fetch, then one batched metadata request per 50 rows; the play
-    queue resolves through the same cached lookup. Swift asks with
+    queue resolves through the same cached lookup. An artist's top tracks
+    (also 403 on the Web API) come the same way: one artist fetch, one
+    batched lookup of the first 10. Swift asks with
     `PlaybackEngine.request` (`nanyin_request`, answered by a `reply` event).
 
 ## Conventions

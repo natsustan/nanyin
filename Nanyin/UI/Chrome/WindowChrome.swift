@@ -78,10 +78,12 @@ final class TrafficLightsView: NSView {
     static let size = CGSize(width: AquaWindowButton.size + spacing * 2, height: AquaWindowButton.size)
 
     private let buttons: [AquaWindowButton]
+    private let group: AquaWindowButton.Group
     private var observers: [NSObjectProtocol] = []
 
     init() {
         let group = AquaWindowButton.Group()
+        self.group = group
         buttons = AquaWindowButton.Kind.allCases.map { AquaWindowButton(kind: $0, group: group) }
         super.init(frame: NSRect(origin: .zero, size: Self.size))
         for (index, button) in buttons.enumerated() {
@@ -98,14 +100,27 @@ final class TrafficLightsView: NSView {
         observers.forEach(NotificationCenter.default.removeObserver)
         observers.removeAll()
         guard let window else { return }
-        let names: [Notification.Name] = [
+        // Key and main changes recolour the buttons.
+        let recolour: [Notification.Name] = [
             NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification,
             NSWindow.didBecomeMainNotification, NSWindow.didResignMainNotification,
         ]
-        for name in names {
+        // These can move the window out from under a still mouse (Option-click
+        // zoom resizes it); a live resize waits for its end.
+        let moved: [Notification.Name] = [
+            NSWindow.didDeminiaturizeNotification,
+            NSWindow.didEnterFullScreenNotification, NSWindow.didExitFullScreenNotification,
+            NSWindow.didResizeNotification, NSWindow.didEndLiveResizeNotification,
+        ]
+        for name in recolour + moved {
+            let redraws = recolour.contains(name)
             observers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) {
                 [weak self] _ in
-                MainActor.assumeIsolated { self?.buttons.forEach { $0.needsDisplay = true } }
+                MainActor.assumeIsolated {
+                    guard let self, self.window?.inLiveResize != true else { return }
+                    if redraws { self.buttons.forEach { $0.needsDisplay = true } }
+                    self.group.update()
+                }
             })
         }
     }

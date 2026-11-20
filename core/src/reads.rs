@@ -1,8 +1,9 @@
 //! Catalogue reads over the streaming session, for what the app's Web API
 //! grant cannot read: since late 2024, Development Mode apps get no access
-//! to playlists the listener does not own. The session speaks the protocol
-//! Spotify's own clients use, as spotifast does. Also resolves the play
-//! queue's tracks, so both go through one batched, cached lookup.
+//! to playlists the listener does not own, nor to an artist's top tracks.
+//! The session speaks the protocol Spotify's own clients use, as spotifast
+//! does. Also resolves the play queue's tracks, so all go through one
+//! batched, cached lookup.
 
 use std::{
     collections::{HashMap, VecDeque},
@@ -10,7 +11,9 @@ use std::{
 };
 
 use librespot_core::{Error, Session, SpotifyUri, spotify_id::SpotifyId};
-use librespot_metadata::{Metadata, Playlist, Track as SessionTrack};
+use librespot_metadata::{
+    Artist, Metadata, Playlist, Track as SessionTrack, artist::CountryTopTracks,
+};
 use librespot_protocol::{
     extended_metadata::{BatchedEntityRequest, EntityRequest, ExtensionQuery},
     extension_kind::ExtensionKind,
@@ -23,6 +26,8 @@ use crate::events::Track;
 
 /// Rows per page, as the Web API's limit.
 const PAGE: usize = 50;
+/// Songs on an artist's Popular list, as Spotify's own clients show.
+const TOP: usize = 10;
 /// Lists kept between pages of one read; past this the least recently
 /// read is let go.
 const KEPT: usize = 8;
@@ -93,6 +98,18 @@ impl Reads {
             rows,
             next: (end < list.len()).then_some(end),
         })
+    }
+
+    /// An artist's most played songs in the account's country (or
+    /// worldwide when Spotify ranks none there): one artist fetch, then one
+    /// batched track lookup.
+    pub async fn top_tracks(&self, id: &str) -> Result<Vec<Track>, Error> {
+        let uri = SpotifyUri::Artist {
+            id: SpotifyId::from_base62(id)?,
+        };
+        let artist = Artist::get(&self.session, &uri).await?;
+        let uris = top_track_uris(&artist.top_tracks, &self.session.country());
+        Ok(self.tracks(&uris).await?.into_iter().flatten().collect())
     }
 
     /// The tracks at `uris`, in order; none where Spotify has no song.
@@ -206,5 +223,54 @@ impl Reads {
             }
         }
         Ok(tracks)
+    }
+}
+
+/// The first songs of the account's country's ranking, or of the worldwide
+/// one (`ZZ`; librespot's `for_country` falls back to an empty country,
+/// which Spotify does not send). An empty ranking counts as none.
+fn top_track_uris(top: &CountryTopTracks, country: &str) -> Vec<SpotifyUri> {
+    let ranked = |code: &str| {
+        top.iter()
+            .find(|ranking| ranking.country == code && !ranking.tracks.is_empty())
+    };
+    ranked(country)
+        .or_else(|| ranked("ZZ"))
+        .map(|ranking| ranking.tracks.iter().take(TOP).cloned().collect())
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use librespot_metadata::{artist::TopTracks, track::Tracks};
+
+    use super::*;
+
+    fn ranking(country: &str, ids: &[u128]) -> TopTracks {
+        TopTracks {
+            country: country.into(),
+            tracks: Tracks(
+                ids.iter()
+                    .map(|&id| SpotifyUri::Track {
+                        id: SpotifyId { id },
+                    })
+                    .collect(),
+            ),
+        }
+    }
+
+    #[test]
+    fn top_tracks_prefer_the_country_then_worldwide() {
+        let top = CountryTopTracks(vec![
+            ranking("ZZ", &[1, 2]),
+            ranking("SE", &[3]),
+            ranking("NO", &[]),
+        ]);
+        assert_eq!(top_track_uris(&top, "SE").len(), 1);
+        assert_eq!(top_track_uris(&top, "JP").len(), 2);
+        assert_eq!(top_track_uris(&top, "NO").len(), 2);
+        assert!(top_track_uris(&CountryTopTracks::default(), "JP").is_empty());
+        let many = CountryTopTracks(vec![ranking("ZZ", &(0..15).collect::<Vec<_>>())]);
+        assert_eq!(top_track_uris(&many, "JP").len(), TOP);
     }
 }
