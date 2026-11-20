@@ -10,7 +10,9 @@ use std::{
 };
 
 use librespot_core::{Error, Session, SpotifyUri, spotify_id::SpotifyId};
-use librespot_metadata::{Artist, Metadata, Playlist, Track as SessionTrack};
+use librespot_metadata::{
+    Artist, Metadata, Playlist, Track as SessionTrack, artist::CountryTopTracks,
+};
 use librespot_protocol::{
     extended_metadata::{BatchedEntityRequest, EntityRequest, ExtensionQuery},
     extension_kind::ExtensionKind,
@@ -105,13 +107,7 @@ impl Reads {
             id: SpotifyId::from_base62(id)?,
         };
         let artist = Artist::get(&self.session, &uri).await?;
-        let uris: Vec<SpotifyUri> = artist
-            .top_tracks
-            .for_country(&self.session.country())
-            .iter()
-            .take(TOP)
-            .cloned()
-            .collect();
+        let uris = top_track_uris(&artist.top_tracks, &self.session.country());
         Ok(self.tracks(&uris).await?.into_iter().flatten().collect())
     }
 
@@ -226,5 +222,46 @@ impl Reads {
             }
         }
         Ok(tracks)
+    }
+}
+
+/// The first songs of the account's country's ranking, or of the worldwide
+/// one (`ZZ`; librespot's `for_country` falls back to an empty country,
+/// which Spotify does not send).
+fn top_track_uris(top: &CountryTopTracks, country: &str) -> Vec<SpotifyUri> {
+    top.iter()
+        .find(|ranking| ranking.country == country)
+        .or_else(|| top.iter().find(|ranking| ranking.country == "ZZ"))
+        .map(|ranking| ranking.tracks.iter().take(TOP).cloned().collect())
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use librespot_metadata::{artist::TopTracks, track::Tracks};
+
+    use super::*;
+
+    fn ranking(country: &str, ids: &[u128]) -> TopTracks {
+        TopTracks {
+            country: country.into(),
+            tracks: Tracks(
+                ids.iter()
+                    .map(|&id| SpotifyUri::Track {
+                        id: SpotifyId { id },
+                    })
+                    .collect(),
+            ),
+        }
+    }
+
+    #[test]
+    fn top_tracks_prefer_the_country_then_worldwide() {
+        let top = CountryTopTracks(vec![ranking("ZZ", &[1, 2]), ranking("SE", &[3])]);
+        assert_eq!(top_track_uris(&top, "SE").len(), 1);
+        assert_eq!(top_track_uris(&top, "JP").len(), 2);
+        assert!(top_track_uris(&CountryTopTracks::default(), "JP").is_empty());
+        let many = CountryTopTracks(vec![ranking("ZZ", &(0..15).collect::<Vec<_>>())]);
+        assert_eq!(top_track_uris(&many, "JP").len(), TOP);
     }
 }
