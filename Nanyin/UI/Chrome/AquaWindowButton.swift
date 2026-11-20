@@ -178,9 +178,12 @@ final class AquaWindowButton: NSButton {
     override func mouseEntered(with event: NSEvent) { group.mouseEntered() }
     override func mouseExited(with event: NSEvent) { group.mouseExited() }
 
+    /// Over this button, and not behind another window that covers it.
     fileprivate var containsMouse: Bool {
-        guard let window, window.isVisible, !window.isMiniaturized else { return false }
-        return bounds.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil))
+        guard let window, window.isVisible, !window.isMiniaturized,
+              bounds.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil))
+        else { return false }
+        return NSWindow.windowNumber(at: NSEvent.mouseLocation, belowWindowWithWindowNumber: 0) == window.windowNumber
     }
 
     /// Clickable while the window is inactive, like the system buttons.

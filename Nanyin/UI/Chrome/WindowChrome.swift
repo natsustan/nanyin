@@ -105,6 +105,8 @@ final class TrafficLightsView: NSView {
             NSWindow.didBecomeMainNotification, NSWindow.didResignMainNotification,
             NSWindow.didDeminiaturizeNotification,
             NSWindow.didEnterFullScreenNotification, NSWindow.didExitFullScreenNotification,
+            // Option-click zoom resizes the window under a still mouse.
+            NSWindow.didResizeNotification,
         ]
         for name in names {
             observers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) {
