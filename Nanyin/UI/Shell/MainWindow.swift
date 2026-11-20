@@ -121,12 +121,11 @@ private struct PlaybackNotice: View {
 
     var body: some View {
         let session = app.session
-        let message: String?
-        let action: (title: String, run: () -> Void)?
+        var message: String?
+        var action: (title: String, run: () -> Void)?
         switch session.state {
         case .ready:
-            message = app.player.lastError
-            action = message == nil ? nil : ("Dismiss", { app.player.lastError = nil })
+            break
         case .notSetUp:
             message = "To play music on this Mac, approve playback with Spotify once."
             action = ("Set Up Playback…", session.authorize)
@@ -145,6 +144,14 @@ private struct PlaybackNotice: View {
         case .failed(let reason):
             message = reason
             action = ("Try Again", session.retry)
+        }
+        // A failed action outranks the standing state until dismissed.
+        if let transient = app.player.lastError ?? app.library.notice {
+            message = transient
+            action = ("Dismiss", {
+                app.player.lastError = nil
+                app.library.notice = nil
+            })
         }
         return Group {
             if let message {

@@ -58,6 +58,12 @@ public extension SpotifyWebAPI {
     }
 
     /// Saves tracks, albums, artists or playlists by URI (2026 unified library).
+    /// Appends `uris` (at most 100) to a playlist the listener may edit.
+    func addToPlaylist(_ id: String, uris: [String]) async throws {
+        struct Body: Encodable, Sendable { let uris: [String] }
+        try await send("POST", "/playlists/\(id)/items", body: Body(uris: uris))
+    }
+
     func save(_ uris: [String]) async throws {
         try await send("PUT", "/me/library", query: ["uris": uris.joined(separator: ",")])
     }

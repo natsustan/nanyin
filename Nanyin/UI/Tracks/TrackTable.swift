@@ -22,6 +22,9 @@ struct TrackTable: NSViewRepresentable {
         var isStarred: (TrackRow) -> Bool? = { _ in nil }
         var toggleStar: (TrackRow) -> Void = { _ in }
         var show: (Route) -> Void = { _ in }
+        /// Playlists the rows can be added to, by id and name.
+        var playlists: () -> [(id: String, name: String)] = { [] }
+        var addToPlaylist: ([TrackRow], String) -> Void = { _, _ in }
     }
 
     let rows: [TrackRow]
@@ -199,6 +202,18 @@ struct TrackTable: NSViewRepresentable {
             }
             menu.addItem(item("Play", #selector(playClicked)))
             menu.addItem(item("Add to Play Queue", #selector(queueClicked)))
+            let playlists = actions.playlists()
+            if !playlists.isEmpty {
+                let submenu = NSMenu()
+                for playlist in playlists {
+                    let entry = item(playlist.name, #selector(addToPlaylist(_:)))
+                    entry.representedObject = playlist.id
+                    submenu.addItem(entry)
+                }
+                let parent = NSMenuItem(title: "Add to Playlist", action: nil, keyEquivalent: "")
+                parent.submenu = submenu
+                menu.addItem(parent)
+            }
             menu.addItem(.separator())
             if rows[row].albumID != nil { menu.addItem(item("Show Album", #selector(showAlbum))) }
             if rows[row].artistID != nil { menu.addItem(item("Show Artist", #selector(showArtist))) }
@@ -222,6 +237,11 @@ struct TrackTable: NSViewRepresentable {
 
         @objc private func queueClicked() {
             targetRows.forEach(actions.addToQueue)
+        }
+
+        @objc private func addToPlaylist(_ sender: NSMenuItem) {
+            guard let id = sender.representedObject as? String else { return }
+            actions.addToPlaylist(targetRows, id)
         }
 
         @objc private func showAlbum() {

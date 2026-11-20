@@ -59,7 +59,13 @@ struct TrackListTable: View {
                 rowAppeared: list.pages.appeared,
                 isStarred: { stars.isStarred($0.uri) },
                 toggleStar: { stars.toggle($0.uri) },
-                show: { app.navigator.go(to: $0) }))
+                show: { app.navigator.go(to: $0) },
+                playlists: { app.library.editablePlaylists.map { ($0.id, $0.name) } },
+                addToPlaylist: { rows, id in
+                    if let playlist = app.library.playlists.first(where: { $0.id == id }) {
+                        app.library.add(rows.map(\.uri), to: playlist)
+                    }
+                }))
     }
 }
 

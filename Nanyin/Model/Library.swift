@@ -18,6 +18,8 @@ enum PageContent {
 final class Library {
     private(set) var playlists: [Playlist] = []
     private(set) var playlistsError: String?
+    /// A change that failed, for the notice strip until dismissed.
+    var notice: String?
     /// Filled by `prepare` before a route is shown; views only read it.
     @ObservationIgnored private var pages: [Route: PageContent] = [:]
     private let api: SpotifyWebAPI
@@ -58,6 +60,25 @@ final class Library {
             } while true
         } catch {
             playlistsError = error.localizedDescription
+        }
+    }
+
+    /// Playlists the listener may add tracks to: their own and collaborative ones.
+    var editablePlaylists: [Playlist] {
+        playlists.filter { $0.owner.id == username || $0.collaborative == true }
+    }
+
+    func add(_ uris: [String], to playlist: Playlist) {
+        Task {
+            do {
+                for start in stride(from: 0, to: uris.count, by: 100) {
+                    try await api.addToPlaylist(playlist.id, uris: Array(uris[start ..< min(start + 100, uris.count)]))
+                }
+                // Shown afresh next time it is opened.
+                pages[.playlist(id: playlist.id, name: playlist.name)] = nil
+            } catch {
+                notice = "Could not add to “\(playlist.name)”: \(error.localizedDescription)"
+            }
         }
     }
 

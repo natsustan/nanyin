@@ -79,6 +79,7 @@ public struct Playlist: Codable, Sendable, Hashable, Identifiable {
     public let description: String?
     public let images: [SpotifyImage]?
     public let owner: PlaylistOwner
+    public let collaborative: Bool?
 }
 
 public struct Album: Codable, Sendable, Hashable, Identifiable {
