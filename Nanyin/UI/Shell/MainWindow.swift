@@ -48,9 +48,7 @@ private struct SidebarDivider: View {
                 Color.clear
                     .frame(width: 7)
                     .contentShape(Rectangle())
-                    .onHover { inside in
-                        if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
-                    }
+                    .pointerStyle(.columnResize)
                     .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
                         .onChanged { drag in
                             let origin = start ?? width
@@ -62,7 +60,8 @@ private struct SidebarDivider: View {
     }
 }
 
-/// Space plays and pauses unless the cursor is in a text field.
+/// Space plays and pauses in the main window, unless a text field or a
+/// button (with Full Keyboard Access) wants it; held down, it acts once.
 @MainActor
 private final class SpaceKeyMonitor {
     private var monitor: Any?
@@ -70,9 +69,11 @@ private final class SpaceKeyMonitor {
     func install(_ action: @escaping @MainActor () -> Void) {
         guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            guard event.keyCode == 49,
+            let responder = event.window?.firstResponder
+            guard event.keyCode == 49, !event.isARepeat,
                   event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting(.capsLock).isEmpty,
-                  !(event.window?.firstResponder is NSText)
+                  let window = event.window, window === NSApp.mainWindow, window.attachedSheet == nil,
+                  !(responder is NSText), !(responder is NSControl) || responder is NSTableView
             else { return event }
             MainActor.assumeIsolated(action)
             return nil

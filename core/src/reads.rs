@@ -4,7 +4,7 @@
 //! Spotify's own clients use, as spotifast does.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     sync::{Arc, Mutex},
 };
 
@@ -22,12 +22,14 @@ use crate::events::Track;
 
 /// Rows per page, as the Web API's limit.
 const PAGE: usize = 50;
-/// Lists kept between pages of one read; more start over.
+/// Lists kept between pages of one read; past this the least recently
+/// read is let go.
 const KEPT: usize = 8;
 
 #[derive(Debug, Serialize, PartialEq)]
 pub struct PlaylistPage {
     pub name: String,
+    /// The songs in the whole list; episodes and local files are not shown.
     pub total: usize,
     pub rows: Vec<PlaylistRow>,
     /// The offset of the next page, or none at the end.
@@ -46,11 +48,13 @@ pub struct PlaylistRow {
 struct List {
     name: String,
     rows: Vec<(SpotifyUri, Option<i64>)>,
+    songs: usize,
 }
 
 pub struct Reads {
     session: Session,
-    lists: Mutex<HashMap<String, Arc<List>>>,
+    /// Most recently read last.
+    lists: Mutex<VecDeque<(String, Arc<List>)>>,
 }
 
 impl Reads {
@@ -83,14 +87,19 @@ impl Reads {
             .collect();
         Ok(PlaylistPage {
             name: list.name.clone(),
-            total: list.rows.len(),
+            total: list.songs,
             rows,
             next: (end < list.rows.len()).then_some(end),
         })
     }
 
     fn kept(&self, id: &str) -> Option<Arc<List>> {
-        self.lists.lock().ok()?.get(id).cloned()
+        let mut lists = self.lists.lock().ok()?;
+        let index = lists.iter().position(|(kept, _)| kept == id)?;
+        let entry = lists.remove(index)?;
+        let list = entry.1.clone();
+        lists.push_back(entry);
+        Some(list)
     }
 
     async fn fetch(&self, id: &str) -> Result<Arc<List>, Error> {
@@ -99,23 +108,29 @@ impl Reads {
             user: None,
         };
         let playlist = Playlist::get(&self.session, &uri).await?;
+        let rows: Vec<_> = playlist
+            .contents
+            .items
+            .iter()
+            .map(|item| {
+                let added = item.attributes.timestamp.as_timestamp_ms();
+                (item.id.clone(), (added > 0).then_some(added))
+            })
+            .collect();
         let list = Arc::new(List {
             name: playlist.attributes.name.clone(),
-            rows: playlist
-                .contents
-                .items
+            songs: rows
                 .iter()
-                .map(|item| {
-                    let added = item.attributes.timestamp.as_timestamp_ms();
-                    (item.id.clone(), (added > 0).then_some(added))
-                })
-                .collect(),
+                .filter(|(uri, _)| matches!(uri, SpotifyUri::Track { .. }))
+                .count(),
+            rows,
         });
         if let Ok(mut lists) = self.lists.lock() {
+            lists.retain(|(kept, _)| kept != id);
             if lists.len() >= KEPT {
-                lists.clear();
+                lists.pop_front();
             }
-            lists.insert(id.to_owned(), list.clone());
+            lists.push_back((id.to_owned(), list.clone()));
         }
         Ok(list)
     }

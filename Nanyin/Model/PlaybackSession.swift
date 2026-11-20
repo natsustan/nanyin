@@ -110,13 +110,37 @@ final class PlaybackSession {
 
     /// A page of a playlist, read through the session rather than the Web API.
     func readPlaylist(id: String, offset: Int) async throws -> SessionPlaylistPage {
-        guard isReady else { throw ReadError(errorDescription: "Connect playback on this Mac to open this playlist.") }
+        try await untilReady()
         lastRequest += 1
         let request = lastRequest
+        // An answer lost on the way must not leave the page loading forever.
+        Task {
+            try? await Task.sleep(for: Self.readTimeout)
+            finishRead(request, .failure(ReadError(errorDescription: "Spotify did not answer in time.")))
+        }
         return try await withCheckedThrowingContinuation { continuation in
             reads[request] = continuation
             if !engine.send(.readPlaylist(request: request, id: id, offset: offset)) {
                 finishRead(request, .failure(ReadError(errorDescription: "Playback stopped responding.")))
+            }
+        }
+    }
+
+    private static let readTimeout = Duration.seconds(45)
+
+    /// Waits out a connection in progress (just after launch, or a
+    /// reconnect); fails at once if none is coming.
+    private func untilReady() async throws {
+        let deadline = ContinuousClock.now + Self.readTimeout
+        while !isReady {
+            switch state {
+            case .connecting, .authorizing, .waiting:
+                guard ContinuousClock.now < deadline else {
+                    throw ReadError(errorDescription: "Playback is still connecting. Try again in a moment.")
+                }
+                try await Task.sleep(for: .milliseconds(250))
+            default:
+                throw ReadError(errorDescription: "Connect playback on this Mac to open this playlist.")
             }
         }
     }

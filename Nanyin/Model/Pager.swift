@@ -36,14 +36,18 @@ final class Pager<Item: Sendable, Cursor: Sendable> {
         guard let cursor = next, !isLoading, error == nil else { return }
         isLoading = true
         Task {
-            defer { isLoading = false }
             do {
                 let page = try await fetch(cursor)
                 items += page.items
                 total = page.total
-                next = page.items.isEmpty ? nil : page.next
+                next = page.next
+                isLoading = false
+                // A page can come back empty yet not be the last (a playlist
+                // stretch of episodes); no row will appear to ask for more.
+                if page.items.isEmpty { loadMore() }
             } catch {
                 self.error = error.localizedDescription
+                isLoading = false
             }
         }
     }

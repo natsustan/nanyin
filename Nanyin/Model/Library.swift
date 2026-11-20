@@ -73,8 +73,9 @@ final class Library {
         case .whatsNew: content = .tracks(.recentlyPlayed(api: api))
         case .likedSongs: content = .tracks(.liked(api: api, username: username, stars: stars))
         case .playlist(let id, _):
-            // Development Mode grants read only the listener's own playlists.
-            let owned = playlists.first { $0.id == id }.map { $0.owner.id == username } ?? true
+            // Development Mode grants read only the listener's own playlists;
+            // the session reads any, so it takes every one not known as own.
+            let owned = playlists.contains { $0.id == id && $0.owner.id == username }
             content = .tracks(owned ? .playlist(api: api, id: id) : .sessionPlaylist(session: session, id: id))
         case .album(let id): content = .album(AlbumDetail(id: id, api: api))
         case .artist(let id): content = .artist(ArtistDetail(id: id, api: api))
