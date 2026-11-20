@@ -26,6 +26,9 @@ pub enum Event {
     },
     /// Another device took over playback.
     Deactivated,
+    /// The next session could not pick up the song a dropped one left
+    /// playing; it has stopped.
+    ResumeFailed,
     TrackChanged {
         track: Track,
     },

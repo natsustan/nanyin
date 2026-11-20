@@ -240,26 +240,33 @@ final class Player {
             // the next session takes it over. Nothing changes here.
             break
         case .sessionEnded(resuming: false):
-            // Our connection dropped; another one is on its way. Keep the
-            // track, its context and the position, ready for the next Play.
-            // A drop during a track change leaves the next one loading:
-            // pick up there, from its start.
-            if let track {
-                let start = loadingURI ?? track.uri
-                resumePoint = if let context = upNext.contextURI {
-                    .init(contextURI: context, startURI: start, shuffle: shuffle)
-                } else {
-                    .init(trackURIs: [start] + upNext.rows.map(\.uri).filter { $0 != start }, startURI: start)
-                }
-            }
-            loadingURI = nil
-            isPlaying = false
-            isLoading = false
-            requestedURI = nil
-            position = position.continued(advancing: false)
+            // Our connection dropped; another one is on its way.
+            holdForNextPlay()
+        case .resumeFailed:
+            holdForNextPlay()
+            notices.report("Couldn't pick up where playback left off. Press Play to continue.")
         case .connected, .connectFailed:
             break
         }
+    }
+
+    /// Keeps the track, its context and the position, ready for the next
+    /// Play to load again. A drop during a track change leaves the next one
+    /// loading: pick up there, from its start.
+    private func holdForNextPlay() {
+        if let track {
+            let start = loadingURI ?? track.uri
+            resumePoint = if let context = upNext.contextURI {
+                .init(contextURI: context, startURI: start, shuffle: shuffle)
+            } else {
+                .init(trackURIs: [start] + upNext.rows.map(\.uri).filter { $0 != start }, startURI: start)
+            }
+        }
+        loadingURI = nil
+        isPlaying = false
+        isLoading = false
+        requestedURI = nil
+        position = position.continued(advancing: false)
     }
 }
 

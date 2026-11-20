@@ -7,7 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use librespot_connect::{ConnectConfig, PlaybackSnapshot, Spirc};
+use librespot_connect::{ConnectConfig, PlaybackSnapshot, RestoreOutcome, Spirc};
 use librespot_core::{
     Error, Session, SessionConfig, authentication::Credentials, cache::Cache, config::DeviceType,
     error::ErrorKind,
@@ -320,7 +320,7 @@ impl Engine {
             // Only now: until this session is up, the old one's drop still
             // explains the player's events.
             *deck.lock_route() = route();
-            carried.take_over(&session, &spirc);
+            carried.take_over(&session, &spirc, emit.clone());
         }
         Ok((
             Self {
@@ -356,8 +356,9 @@ impl Carried {
     /// Hands the deck to `session` (before its Spirc task runs, so whatever
     /// it loads comes through the new session) and restores the snapshot,
     /// once. A song the player still has is picked up where it has got to,
-    /// playing or paused as it is now, without loading it again.
-    fn take_over(self, session: &Session, spirc: &Spirc) {
+    /// playing or paused as it is now, without loading it again. When the
+    /// restore is refused or fails, the song stops and `emit` says why.
+    fn take_over(self, session: &Session, spirc: &Spirc, emit: Emit) {
         let Self {
             deck,
             snapshot,
@@ -386,9 +387,26 @@ impl Carried {
             snapshot.position_ms(),
             snapshot.is_playing()
         );
-        if let Err(error) = spirc.restore_playback(snapshot) {
-            log::warn!("unable to restore playback: {error}");
-        }
+        let outcome = match spirc.restore_playback_reporting(snapshot) {
+            Ok(outcome) => outcome,
+            Err(error) => return deck.resume_failed(error.to_string(), &emit),
+        };
+        tokio::spawn(async move {
+            // No answer: the session ended first, and says so itself.
+            let Ok(outcome) = outcome.await else {
+                return;
+            };
+            match outcome {
+                RestoreOutcome::Restored => log::info!("playback restored"),
+                RestoreOutcome::Superseded => log::info!("playback restore superseded"),
+                RestoreOutcome::ActiveElsewhere(device) => {
+                    log::info!("not restoring playback: device {device} is playing now");
+                    deck.player.stop();
+                    emit(Event::Deactivated);
+                }
+                RestoreOutcome::Failed(why) => deck.resume_failed(why, &emit),
+            }
+        });
     }
 }
 
@@ -465,6 +483,12 @@ impl Deck {
                 }
             }
         });
+    }
+
+    fn resume_failed(&self, why: String, emit: &Emit) {
+        log::warn!("unable to restore playback: {why}");
+        self.player.stop();
+        emit(Event::ResumeFailed);
     }
 
     fn lock_now(&self) -> std::sync::MutexGuard<'_, Now> {

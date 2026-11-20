@@ -8,6 +8,9 @@ enum CoreEvent: Decodable, Equatable {
     /// session picks it up, with its queue.
     case sessionEnded(resuming: Bool)
     case deactivated
+    /// The new session could not pick up the song a dropped one left
+    /// playing; it has stopped.
+    case resumeFailed
     case trackChanged(CoreTrack)
     case loading(uri: String, positionMs: Int)
     case playing(uri: String, positionMs: Int)
@@ -49,6 +52,7 @@ enum CoreEvent: Decodable, Equatable {
                 message: try c.decode(String.self, forKey: .message))
         case "session_ended": self = .sessionEnded(resuming: (try? c.decode(Bool.self, forKey: .resuming)) ?? false)
         case "deactivated": self = .deactivated
+        case "resume_failed": self = .resumeFailed
         case "track_changed": self = .trackChanged(try c.decode(CoreTrack.self, forKey: .track))
         case "loading": self = .loading(uri: try uri(), positionMs: try position())
         case "playing": self = .playing(uri: try uri(), positionMs: try position())

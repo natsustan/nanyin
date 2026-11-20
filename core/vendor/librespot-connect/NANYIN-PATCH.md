@@ -18,10 +18,15 @@ Code changes:
    commands only after its dealer connects, a second or two after
    `restore_playback` is called; a fixed position took the song back by
    that much.
+4. `Spirc::restore_playback_reporting` and `RestoreOutcome`: the restore
+   answers what became of it. Spirc notes the other device active when it
+   registers (`active_elsewhere`) and then does not restore: the listener
+   carried on there during the drop. Upstream's restore would take playback
+   back from it, and its failures were only logged at debug level.
 
 Why: on an unexpected disconnect the core keeps the `Player` playing what it
 has already fetched, hands it to the next session with `Player::set_session`
 and restores the snapshot there, as spotifast does.
 
 When moving librespot to a new rev: re-copy `connect/` from that rev,
-reapply #1765 (or drop it once merged) and changes 2 and 3.
+reapply #1765 (or drop it once merged) and changes 2 to 4.

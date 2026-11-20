@@ -42,7 +42,10 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use thiserror::Error;
-use tokio::{sync::mpsc, time::sleep};
+use tokio::{
+    sync::{mpsc, oneshot},
+    time::sleep,
+};
 
 #[derive(Debug, Error)]
 enum SpircError {
@@ -77,6 +80,8 @@ struct SpircTask {
     /// the state management object
     connect_state: ConnectState,
     connect_established: bool,
+    /// Nanyin: the other device active when this one registered, if any.
+    active_elsewhere: Option<String>,
 
     play_request_id: Option<u64>,
     play_status: SpircPlayStatus,
@@ -119,7 +124,10 @@ static SPIRC_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Debug)]
 enum SpircCommand {
-    Restore(Arc<PlaybackSnapshot>),
+    Restore(
+        Arc<PlaybackSnapshot>,
+        Option<oneshot::Sender<RestoreOutcome>>,
+    ),
     Play,
     PlayPause,
     Pause,
@@ -249,6 +257,20 @@ impl PlaybackSnapshot {
     }
 }
 
+/// What became of a restore. (Nanyin addition.)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RestoreOutcome {
+    /// Context, queue and position are back, and the track loaded.
+    Restored,
+    /// New playback on this device came first and stays.
+    Superseded,
+    /// When this device registered, another one was active: the listener
+    /// carried on there, so nothing is taken back from it.
+    ActiveElsewhere(String),
+    /// The snapshot could not be applied, for the reason given.
+    Failed(String),
+}
+
 impl std::fmt::Debug for PlaybackSnapshot {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PlaybackSnapshot")
@@ -272,7 +294,21 @@ impl Spirc {
     /// Restore a disconnected session on this device, retaining queue order.
     /// New playback already active on this device takes precedence.
     pub fn restore_playback(&self, snapshot: Arc<PlaybackSnapshot>) -> Result<(), Error> {
-        Ok(self.commands.send(SpircCommand::Restore(snapshot))?)
+        Ok(self.commands.send(SpircCommand::Restore(snapshot, None))?)
+    }
+
+    /// Like [`restore_playback`](Self::restore_playback), answering with
+    /// what became of it once Spirc has handled it, which is only after
+    /// the device has registered. The answer never comes when the session
+    /// ends first. (Nanyin addition.)
+    pub fn restore_playback_reporting(
+        &self,
+        snapshot: Arc<PlaybackSnapshot>,
+    ) -> Result<oneshot::Receiver<RestoreOutcome>, Error> {
+        let (reply, outcome) = oneshot::channel();
+        self.commands
+            .send(SpircCommand::Restore(snapshot, Some(reply)))?;
+        Ok(outcome)
     }
 
     /// Initializes a new spotify connect device
@@ -360,6 +396,7 @@ impl Spirc {
 
             connect_state,
             connect_established: false,
+            active_elsewhere: None,
 
             play_request_id: None,
             play_status: SpircPlayStatus::Stopped,
@@ -858,6 +895,28 @@ impl SpircTask {
         dur.as_millis() as i64 + 1000 * self.session.time_delta()
     }
 
+    fn handle_restore(&mut self, snapshot: &PlaybackSnapshot) -> RestoreOutcome {
+        if self.connect_state.is_active() && !matches!(self.play_status, SpircPlayStatus::Stopped)
+        {
+            return RestoreOutcome::Superseded;
+        }
+        if let Some(device) = &self.active_elsewhere {
+            return RestoreOutcome::ActiveElsewhere(device.clone());
+        }
+        if let Err(why) = snapshot.restore_into(
+            &self.session.username(),
+            &mut self.connect_state,
+            &mut self.context_resolver,
+        ) {
+            return RestoreOutcome::Failed(why.to_string());
+        }
+        self.handle_activate();
+        match self.load_track(snapshot.playing, snapshot.position_now()) {
+            Ok(()) => RestoreOutcome::Restored,
+            Err(why) => RestoreOutcome::Failed(why.to_string()),
+        }
+    }
+
     async fn handle_command(&mut self, cmd: SpircCommand) -> Result<(), Error> {
         trace!("Received SpircCommand::{cmd:?}");
         match cmd {
@@ -886,19 +945,20 @@ impl SpircTask {
             SpircCommand::Transfer(..) | SpircCommand::Activate => {
                 warn!("SpircCommand::{cmd:?} will be ignored while already active")
             }
-            SpircCommand::Restore(snapshot) => {
-                if self.connect_state.is_active()
-                    && !matches!(self.play_status, SpircPlayStatus::Stopped)
-                {
-                    return Ok(());
+            SpircCommand::Restore(snapshot, reply) => {
+                let outcome = self.handle_restore(&snapshot);
+                let result = match &outcome {
+                    RestoreOutcome::Restored => None,
+                    RestoreOutcome::Failed(why) => Some(Err(Error::failed_precondition(why.clone()))),
+                    // Nothing changed, so nothing to notify.
+                    _ => Some(Ok(())),
+                };
+                if let Some(reply) = reply {
+                    let _ = reply.send(outcome);
                 }
-                snapshot.restore_into(
-                    &self.session.username(),
-                    &mut self.connect_state,
-                    &mut self.context_resolver,
-                )?;
-                self.handle_activate();
-                self.load_track(snapshot.playing, snapshot.position_now())?;
+                if let Some(result) = result {
+                    return result;
+                }
             }
             _ if !self.connect_state.is_active() => {
                 warn!("SpircCommand::{cmd:?} will be ignored while Not Active")
@@ -1088,6 +1148,9 @@ impl SpircTask {
         );
 
         self.connect_established = true;
+        self.active_elsewhere = Some(&cluster.active_device_id)
+            .filter(|id| !id.is_empty() && **id != self.session.device_id())
+            .cloned();
 
         let same_session = cluster.player_state.session_id == self.session.session_id()
             || cluster.player_state.session_id.is_empty();
