@@ -38,9 +38,9 @@ Never edit `Nanyin.xcodeproj` by hand; it is generated and git-ignored.
 librespot comes from [natsustan/librespot](https://github.com/natsustan/librespot),
 branch `nanyin`: upstream `dev` plus one commit per change, listed in
 `core/Cargo.toml`. Change librespot there, never by copying its code here:
-commit on `nanyin` (formatted and clippy-clean, with a CHANGELOG line, ready
-to offer upstream), push, then move every librespot crate in
-`core/Cargo.toml` to the new rev together. To follow upstream, rebase
+commit on `nanyin` (formatted and clippy-clean), push, then move every
+librespot crate in `core/Cargo.toml` to the new rev together. The fork's
+changes are not being offered upstream for now. To follow upstream, rebase
 `nanyin` on `upstream/dev` and drop commits upstream has merged.
 `research-repos/librespot` stays a read-only reference.
 
