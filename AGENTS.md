@@ -22,6 +22,7 @@ Everything comes from mise (`mise install`): rust, xcodegen, xcbeautify.
 script/generate_project.sh   # after adding/removing files or editing project.yml
 script/build.sh              # build only (Debug = "Nanyin Dev", com.cosmoss.nanyin.dev)
 script/build_and_run.sh      # build, stop every running copy, launch; log in build/nanyin.log
+script/make_dmg.sh           # Release build packaged as build/Nanyin-<version>.dmg (not notarized)
 swift test --package-path Packages/NanyinKit
 (cd core && mise exec -- cargo test && mise exec -- cargo clippy --all-targets)
 ```
