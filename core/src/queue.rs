@@ -10,23 +10,19 @@ use std::{
     },
 };
 
+use futures_util::{StreamExt, stream};
 use librespot_core::{Session, SpotifyUri};
 use librespot_metadata::audio::AudioItem;
 use librespot_playback::player::QueueTrack;
-use serde::Serialize;
 
 use crate::events::{Event, Track};
 
-/// Enough for a page of upcoming tracks; the rest resolve as the queue moves.
-const SHOWN: usize = 30;
-
-#[derive(Debug, Serialize, PartialEq, Clone)]
-pub struct QueuedTrack {
-    #[serde(flatten)]
-    pub track: Track,
-    /// Added with "Add to Queue", rather than coming from the context.
-    pub queued: bool,
-}
+/// About a screenful of upcoming tracks; the rest resolve as the queue moves.
+const SHOWN: usize = 20;
+/// Lookups in flight at once.
+const PARALLEL: usize = 4;
+/// Tracks remembered; past this the memory starts over.
+const REMEMBERED: usize = 500;
 
 #[derive(Clone)]
 pub struct QueueResolver {
@@ -54,25 +50,22 @@ impl QueueResolver {
         emit: impl Fn(Event) + Send + 'static,
     ) {
         let generation = self.latest.fetch_add(1, Ordering::SeqCst) + 1;
+        let current = move |this: &Self| this.latest.load(Ordering::SeqCst) == generation;
         let this = self.clone();
+        let uris: Vec<SpotifyUri> = next
+            .iter()
+            .filter_map(|track| SpotifyUri::from_uri(&track.uri).ok())
+            .filter(SpotifyUri::is_playable)
+            .take(SHOWN)
+            .collect();
         tokio::spawn(async move {
-            let mut tracks = Vec::new();
-            for entry in next
-                .into_iter()
-                .filter(|t| is_playable_uri(&t.uri))
-                .take(SHOWN)
-            {
-                if this.latest.load(Ordering::SeqCst) != generation {
-                    return;
-                }
-                if let Some(track) = this.resolve(&entry.uri).await {
-                    tracks.push(QueuedTrack {
-                        track,
-                        queued: entry.provider == "queue",
-                    });
-                }
-            }
-            if this.latest.load(Ordering::SeqCst) == generation {
+            let tracks: Vec<Track> = stream::iter(uris)
+                .map(|uri| this.resolve(uri, current))
+                .buffered(PARALLEL)
+                .filter_map(|track| async { track })
+                .collect()
+                .await;
+            if current(&this) {
                 emit(Event::Queue {
                     context_uri,
                     tracks,
@@ -81,57 +74,21 @@ impl QueueResolver {
         });
     }
 
-    async fn resolve(&self, uri: &str) -> Option<Track> {
-        if let Some(track) = self.known.lock().ok()?.get(uri) {
+    /// The track at `uri`, unless the queue it was asked for is already stale.
+    async fn resolve(&self, uri: SpotifyUri, current: impl Fn(&Self) -> bool) -> Option<Track> {
+        let key = uri.to_uri();
+        if let Some(track) = self.known.lock().ok()?.get(&key) {
             return Some(track.clone());
         }
-        let item = AudioItem::get_file(&self.session, SpotifyUri::from_uri(uri).ok()?)
-            .await
-            .ok()?;
-        let track = Track::from_item(&item);
-        self.known
-            .lock()
-            .ok()?
-            .insert(uri.to_owned(), track.clone());
+        if !current(self) {
+            return None;
+        }
+        let track = Track::from_item(&AudioItem::get_file(&self.session, uri).await.ok()?);
+        let mut known = self.known.lock().ok()?;
+        if known.len() >= REMEMBERED {
+            known.clear();
+        }
+        known.insert(key, track.clone());
         Some(track)
-    }
-}
-
-/// Skips the delimiters and placeholders Spirc keeps in the list.
-fn is_playable_uri(uri: &str) -> bool {
-    uri.starts_with("spotify:track:") || uri.starts_with("spotify:episode:")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn queued_tracks_serialize_flat() {
-        let event = Event::Queue {
-            context_uri: "spotify:album:a".into(),
-            tracks: vec![QueuedTrack {
-                track: Track {
-                    uri: "spotify:track:t".into(),
-                    name: "T".into(),
-                    artists: Vec::new(),
-                    album: "A".into(),
-                    cover_url: None,
-                    duration_ms: 1,
-                    explicit: false,
-                },
-                queued: true,
-            }],
-        };
-        assert_eq!(
-            serde_json::to_string(&event).unwrap(),
-            r#"{"type":"queue","context_uri":"spotify:album:a","tracks":[{"uri":"spotify:track:t","name":"T","artists":[],"album":"A","cover_url":null,"duration_ms":1,"explicit":false,"queued":true}]}"#
-        );
-    }
-
-    #[test]
-    fn delimiters_are_skipped() {
-        assert!(is_playable_uri("spotify:track:x"));
-        assert!(!is_playable_uri("spotify:delimiter"));
     }
 }

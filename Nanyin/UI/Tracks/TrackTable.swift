@@ -10,8 +10,8 @@ struct TrackTable: NSViewRepresentable {
 
         static let standard: [Column] = [.indicator, .star, .track, .artist, .time, .popularity, .album]
 
-        var title: String { self == .indicator || self == .star ? "" : rawValue.capitalized }
         var isFixed: Bool { self == .indicator || self == .star }
+        var title: String { isFixed ? "" : rawValue.capitalized }
     }
 
     struct Actions {
@@ -84,9 +84,12 @@ struct TrackTable: NSViewRepresentable {
         coordinator.actions = actions
         guard let table = coordinator.table else { return }
         let old = coordinator.rows
+        let playingChanged = coordinator.playingURI != playingURI
+        let starsChanged = coordinator.starsVersion != starsVersion
+        coordinator.rows = rows
+        coordinator.playingURI = playingURI
+        coordinator.starsVersion = starsVersion
         if old != rows {
-            coordinator.rows = rows
-            coordinator.playingURI = playingURI
             if rows.count > old.count, rows.starts(with: old) {
                 // A page arrived: add its rows, leave the visible ones be.
                 table.insertRows(at: IndexSet(old.count ..< rows.count), withAnimation: [])
@@ -96,15 +99,8 @@ struct TrackTable: NSViewRepresentable {
         } else {
             // Only the speaker or the stars changed: redraw those columns for
             // the rows on screen.
-            var changed: [Column] = []
-            if coordinator.playingURI != playingURI {
-                coordinator.playingURI = playingURI
-                changed.append(.indicator)
-            }
-            if coordinator.starsVersion != starsVersion {
-                changed.append(.star)
-            }
-            let indexes = IndexSet(changed.compactMap { columns.firstIndex(of: $0) })
+            let changed = [playingChanged ? Column.indicator : nil, starsChanged ? .star : nil]
+            let indexes = IndexSet(changed.compactMap { $0.flatMap(columns.firstIndex(of:)) })
             if !indexes.isEmpty {
                 let visible = table.rows(in: table.visibleRect)
                 table.reloadData(
@@ -112,7 +108,6 @@ struct TrackTable: NSViewRepresentable {
                     columnIndexes: indexes)
             }
         }
-        coordinator.starsVersion = starsVersion
     }
 
     @MainActor

@@ -42,17 +42,9 @@ private struct RouteView: View {
         case (.queue, _):
             TrackListPage(title: "Play Queue", list: app.player.upNext, columns: [.indicator, .star, .track, .artist, .time, .album])
         case (.albums, .albums(let albums)?):
-            GridPage(title: "Albums", list: albums) { album in
-                Tile(title: album.name, subtitle: album.artists.names, image: album.images?.best(minimum: 200)) {
-                    app.navigator.go(to: .album(id: album.id))
-                }
-            }
+            GridPage(title: "Albums", pager: albums) { Tile(album: $0) }
         case (.artists, .artists(let artists)?):
-            GridPage(title: "Artists", list: artists) { artist in
-                Tile(title: artist.name, subtitle: "", image: artist.images?.best(minimum: 200)) {
-                    app.navigator.go(to: .artist(id: artist.id))
-                }
-            }
+            GridPage(title: "Artists", pager: artists) { Tile(artist: $0) }
         case (.whatsNew, .tracks(let list)?):
             TrackListPage(title: "What's New", subtitle: "Recently played", list: list,
                           columns: [.indicator, .star, .track, .artist, .time, .album])

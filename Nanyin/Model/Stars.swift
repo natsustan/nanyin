@@ -2,15 +2,18 @@ import Foundation
 import NanyinKit
 import Observation
 
-/// Which tracks the listener has starred (saved to Liked Songs), learned in
-/// batches for the rows on screen and changed optimistically on a click.
+/// Which tracks the listener has starred (saved to Liked Songs). Asking
+/// about an unknown track looks it up soon, batched with the other tracks
+/// drawn meanwhile; a toggle shows at once and reverts if Spotify refuses.
 @MainActor
 @Observable
 final class Stars {
     /// Bumped whenever any answer changes, so tables know to redraw stars.
     private(set) var version = 0
     @ObservationIgnored private var known: [String: Bool] = [:]
+    /// Asked about since the last lookup, oldest first.
     @ObservationIgnored private var wanted: [String] = []
+    @ObservationIgnored private var pending: Set<String> = []
     @ObservationIgnored private var flush: Task<Void, Never>?
     private let api: SpotifyWebAPI
 
@@ -21,41 +24,21 @@ final class Stars {
         self.api = api
     }
 
-    /// The answer if known; `hint` is what the row's source already says
-    /// (a Liked Songs row is starred).
-    func isStarred(_ uri: String, hint: Bool? = nil) -> Bool? {
-        known[uri] ?? hint
+    /// The answer if known; otherwise nil, and the answer is on its way.
+    func isStarred(_ uri: String) -> Bool? {
+        if let answer = known[uri] { return answer }
+        want(uri)
+        return nil
     }
 
-    /// Asks about `uri` soon, together with the other rows that appear
-    /// meanwhile, so scrolling costs one request per screenful at most.
-    func need(_ uri: String) {
-        guard known[uri] == nil, !wanted.contains(uri), uri.hasPrefix("spotify:track:") else { return }
-        wanted.append(uri)
-        guard flush == nil else { return }
-        flush = Task {
-            try? await Task.sleep(for: .milliseconds(300))
-            flush = nil
-            await lookUp()
-        }
+    /// Records answers that came with other data (Liked Songs rows).
+    func learn(_ uris: [String], starred: Bool) {
+        for uri in uris { known[uri] = starred }
+        version += 1
     }
 
-    private func lookUp() async {
-        while !wanted.isEmpty {
-            let uris = Array(wanted.prefix(Self.batch))
-            wanted.removeFirst(uris.count)
-            // On failure the rows just show no star; they are asked again
-            // when they next appear.
-            guard let answers = try? await api.libraryContains(uris), answers.count == uris.count else { continue }
-            for (uri, starred) in zip(uris, answers) where known[uri] == nil {
-                known[uri] = starred
-            }
-            version += 1
-        }
-    }
-
-    func toggle(_ uri: String, hint: Bool? = nil) {
-        let starred = !(isStarred(uri, hint: hint) ?? false)
+    func toggle(_ uri: String) {
+        let starred = !(known[uri] ?? false)
         known[uri] = starred
         version += 1
         Task {
@@ -73,6 +56,38 @@ final class Stars {
         flush = nil
         known = [:]
         wanted = []
+        pending = []
         version += 1
+    }
+
+    /// Waits for scrolling to settle, then asks only about the tracks drawn
+    /// last (what is on screen); the others are asked again if they return.
+    private func want(_ uri: String) {
+        guard uri.hasPrefix("spotify:track:"), pending.insert(uri).inserted else { return }
+        wanted.append(uri)
+        flush?.cancel()
+        flush = Task {
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            let uris = Array(wanted.suffix(Self.batch * 2))
+            pending.subtract(wanted.dropLast(uris.count))
+            wanted = []
+            await lookUp(uris)
+        }
+    }
+
+    private func lookUp(_ uris: [String]) async {
+        for start in stride(from: 0, to: uris.count, by: Self.batch) {
+            let batch = Array(uris[start ..< min(start + Self.batch, uris.count)])
+            let answers = try? await api.libraryContains(batch)
+            if let answers, answers.count == batch.count {
+                for (uri, starred) in zip(batch, answers) where known[uri] == nil {
+                    known[uri] = starred
+                }
+                version += 1
+            }
+        }
+        // Whatever was not answered may be asked again when drawn again.
+        pending.subtract(uris)
     }
 }

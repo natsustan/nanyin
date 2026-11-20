@@ -1,22 +1,18 @@
 import SwiftUI
 
 /// A title over a grid of tiles that loads more as it scrolls.
-struct GridPage<Item: Identifiable & Sendable, Cell: View>: View {
+struct GridPage<Item: Identifiable & Sendable, Cursor: Sendable, Cell: View>: View {
     let title: String
-    let list: ItemList<Item>
+    let pager: Pager<Item, Cursor>
     @ViewBuilder let cell: (Item) -> Cell
 
     var body: some View {
         VStack(spacing: 0) {
-            PageHeader(title: title, subtitle: list.error ?? (list.isLoading && list.items.isEmpty ? "Loading…" : "")) {
-                if list.error != nil {
-                    Button("Try Again", action: list.retry).buttonStyle(TexturedButtonStyle())
-                }
-            }
+            PagerHeader(title: title, pager: pager)
             ScrollView {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 18, alignment: .top)], spacing: 18) {
-                    ForEach(list.items) { item in
-                        cell(item).onAppear { list.itemAppeared(item) }
+                    ForEach(Array(pager.items.enumerated()), id: \.element.id) { index, item in
+                        cell(item).onAppear { pager.appeared(index) }
                     }
                 }
                 .padding(16)

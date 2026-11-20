@@ -15,8 +15,6 @@ struct TrackRow: Identifiable, Hashable, Sendable {
     let popularity: Int?
     let added: String
     let isPlayable: Bool
-    /// Starred as far as the source knows (rows of Liked Songs are).
-    var starred: Bool?
 
     init(index: Int, uri: String, name: String, artists: String, album: String, durationMs: Int,
          popularity: Int? = nil, addedAt: String? = nil, isPlayable: Bool = true) {
@@ -56,77 +54,36 @@ struct TrackRow: Identifiable, Hashable, Sendable {
     private nonisolated(unsafe) static let isoParser = ISO8601DateFormatter()
 }
 
-/// The rows of one page (a playlist, Liked Songs, an album), loaded from the
-/// Web API a page at a time as the table scrolls towards the end.
+/// The rows of one page (a playlist, Liked Songs, an album) and the context
+/// they play in.
 @MainActor
-@Observable
 final class TrackList {
-    /// A fetched page and the offset of the next one (nil at the end).
-    typealias Page = (rows: [TrackRow], total: Int?, next: Int?)
-
-    private(set) var rows: [TrackRow] = []
-    private(set) var total: Int?
-    private(set) var isLoading = false
-    private(set) var error: String?
-
+    let pages: Pager<TrackRow, Int>
     /// The context to play from: rows start playing within it.
     let contextURI: String?
-    private var nextOffset: Int?
-    private let fetch: (_ offset: Int) async throws -> Page
 
-    init(contextURI: String?, fetch: @escaping (_ offset: Int) async throws -> Page) {
+    init(contextURI: String?, fetch: @escaping (_ offset: Int) async throws -> Pager<TrackRow, Int>.Page) {
         self.contextURI = contextURI
-        self.fetch = fetch
-        nextOffset = 0
-        loadMore()
+        pages = Pager(first: 0, fetch: fetch)
     }
 
     /// A list whose rows are already known.
     init(rows: [TrackRow], contextURI: String? = nil) {
         self.contextURI = contextURI
-        self.rows = rows
-        total = rows.count
-        fetch = { _ in ([], nil, nil) }
+        pages = Pager(items: rows)
     }
 
-    /// Loads the next page unless one is loading, all are here, or the last
-    /// attempt failed (then only `retry` tries again).
-    private func loadMore() {
-        guard let offset = nextOffset, !isLoading, error == nil else { return }
-        isLoading = true
-        Task {
-            defer { isLoading = false }
-            do {
-                let page = try await fetch(offset)
-                rows += page.rows
-                total = page.total
-                nextOffset = page.next
-            } catch {
-                self.error = error.localizedDescription
-            }
-        }
-    }
-
-    func retry() {
-        error = nil
-        loadMore()
-    }
-
-    /// Called as rows appear: fetches more when the end is near.
-    func rowAppeared(_ index: Int) {
-        if index >= rows.count - 20 { loadMore() }
-    }
+    var rows: [TrackRow] { pages.items }
 }
 
 extension TrackList {
-    static func liked(api: SpotifyWebAPI, username: String) -> TrackList {
+    static func liked(api: SpotifyWebAPI, username: String, stars: Stars) -> TrackList {
         TrackList(contextURI: "spotify:user:\(username):collection") { offset in
             let page = try await api.savedTracks(offset: offset)
             let rows = page.items.enumerated().map {
-                var row = TrackRow(index: offset + $0.offset, track: $0.element.track, addedAt: $0.element.added_at)
-                row.starred = true
-                return row
+                TrackRow(index: offset + $0.offset, track: $0.element.track, addedAt: $0.element.added_at)
             }
+            stars.learn(rows.map(\.uri), starred: true)
             return (rows, page.total, page.next == nil ? nil : offset + page.items.count)
         }
     }

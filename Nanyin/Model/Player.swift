@@ -30,6 +30,11 @@ final class Player {
         func current(at now: Date = .now) -> Int {
             advancing ? ms + Int(now.timeIntervalSince(at) * 1000) : ms
         }
+
+        /// The same point in the track from now on, moving or not.
+        func continued(advancing: Bool) -> Position {
+            Position(ms: current(), at: .now, advancing: advancing)
+        }
     }
 
     private(set) var track: CoreTrack?
@@ -88,22 +93,14 @@ final class Player {
         playingElsewhere = false
     }
 
-    func resume() {
-        guard track != nil, !isPlaying, send(.play) else { return }
-        isPlaying = true
-        position = Position(ms: position.current(), at: .now, advancing: true)
-    }
+    func resume() { setPlaying(true, .play) }
+    func pause() { setPlaying(false, .pause) }
+    func togglePlayPause() { setPlaying(!isPlaying, .playPause) }
 
-    func pause() {
-        guard isPlaying, send(.pause) else { return }
-        isPlaying = false
-        position = Position(ms: position.current(), at: .now, advancing: false)
-    }
-
-    func togglePlayPause() {
-        guard track != nil, send(.playPause) else { return }
-        isPlaying.toggle()
-        position = Position(ms: position.current(), at: .now, advancing: isPlaying)
+    private func setPlaying(_ playing: Bool, _ command: CoreCommand) {
+        guard track != nil, playing != isPlaying, send(command) else { return }
+        isPlaying = playing
+        position = position.continued(advancing: playing)
     }
 
     func next() { send(.next) }
@@ -192,7 +189,7 @@ final class Player {
             isPlaying = false
             isLoading = false
             requestedURI = nil
-            position = Position(ms: position.current(), at: .now, advancing: false)
+            position = position.continued(advancing: false)
         case .unavailable(let uri):
             if requestedURI == uri { requestedURI = nil }
             lastError = "This song is not available."
@@ -208,14 +205,14 @@ final class Player {
             repeatMode = track ? .track : context ? .context : .off
         case .queue(let context, let tracks):
             upNext = TrackList(
-                rows: tracks.enumerated().map { TrackRow(index: $0.offset, track: $0.element.track) },
+                rows: tracks.enumerated().map { TrackRow(index: $0.offset, track: $0.element) },
                 contextURI: context.isEmpty ? nil : context)
         case .deactivated:
             upNext = TrackList(rows: [])
             isPlaying = false
             isLoading = false
             playingElsewhere = true
-            position = Position(ms: position.current(), at: .now, advancing: false)
+            position = position.continued(advancing: false)
         case .connected, .connectFailed, .sessionEnded:
             break
         }

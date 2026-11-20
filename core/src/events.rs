@@ -4,8 +4,6 @@ use librespot_metadata::audio::{AudioItem, UniqueFields};
 use librespot_playback::player::PlayerEvent;
 use serde::Serialize;
 
-use crate::queue::QueuedTrack;
-
 #[derive(Debug, Serialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
@@ -56,7 +54,7 @@ pub enum Event {
     /// The tracks after the current one, in play order.
     Queue {
         context_uri: String,
-        tracks: Vec<QueuedTrack>,
+        tracks: Vec<Track>,
     },
 }
 

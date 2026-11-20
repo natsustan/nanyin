@@ -10,20 +10,31 @@ struct TrackListPage: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            PageHeader(title: title, subtitle: status) {
-                if list.error != nil {
-                    Button("Try Again", action: list.retry).buttonStyle(TexturedButtonStyle())
-                }
-            }
+            PagerHeader(title: title, pager: list.pages, detail: subtitle ?? count)
             TrackListTable(list: list, columns: columns)
         }
     }
 
-    private var status: String {
-        if let error = list.error { return error }
-        if let subtitle { return subtitle }
-        guard let total = list.total else { return list.isLoading ? "Loading…" : "" }
+    private var count: String {
+        guard let total = list.pages.total else { return "" }
         return total == 1 ? "1 track" : "\(total) tracks"
+    }
+}
+
+/// A page header that reports a pager's loading and failure, with a way to
+/// try again.
+struct PagerHeader<Item: Sendable, Cursor: Sendable>: View {
+    let title: String
+    let pager: Pager<Item, Cursor>
+    var detail = ""
+
+    var body: some View {
+        let status = pager.error ?? (pager.isLoading && pager.items.isEmpty ? "Loading…" : detail)
+        PageHeader(title: title, subtitle: status) {
+            if pager.error != nil {
+                Button("Try Again", action: pager.retry).buttonStyle(TexturedButtonStyle())
+            }
+        }
     }
 }
 
@@ -45,14 +56,9 @@ struct TrackListTable: View {
                 play: { player.play($0, in: list) },
                 addToQueue: { player.addToQueue($0.uri) },
                 togglePlayPause: player.togglePlayPause,
-                rowAppeared: { index in
-                    list.rowAppeared(index)
-                    if list.rows.indices.contains(index), list.rows[index].starred == nil {
-                        stars.need(list.rows[index].uri)
-                    }
-                },
-                isStarred: { stars.isStarred($0.uri, hint: $0.starred) },
-                toggleStar: { stars.toggle($0.uri, hint: $0.starred) }))
+                rowAppeared: list.pages.appeared,
+                isStarred: { stars.isStarred($0.uri) },
+                toggleStar: { stars.toggle($0.uri) }))
     }
 }
 

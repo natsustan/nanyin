@@ -9,15 +9,21 @@ final class NowPlayingBridge {
     private let player: Player
     private var artworkURL: URL?
     private var artwork: MPMediaItemArtwork?
+    private var artworkTask: Task<Void, Never>?
 
     init(player: Player) {
         self.player = player
         let center = MPRemoteCommandCenter.shared()
-        center.playCommand.addTarget { [weak self] _ in self?.run { $0.resume() } ?? .commandFailed }
-        center.pauseCommand.addTarget { [weak self] _ in self?.run { $0.pause() } ?? .commandFailed }
-        center.togglePlayPauseCommand.addTarget { [weak self] _ in self?.run { $0.togglePlayPause() } ?? .commandFailed }
-        center.nextTrackCommand.addTarget { [weak self] _ in self?.run { $0.next() } ?? .commandFailed }
-        center.previousTrackCommand.addTarget { [weak self] _ in self?.run { $0.previous() } ?? .commandFailed }
+        let commands: [(MPRemoteCommand, (Player) -> Void)] = [
+            (center.playCommand, { $0.resume() }),
+            (center.pauseCommand, { $0.pause() }),
+            (center.togglePlayPauseCommand, { $0.togglePlayPause() }),
+            (center.nextTrackCommand, { $0.next() }),
+            (center.previousTrackCommand, { $0.previous() }),
+        ]
+        for (command, action) in commands {
+            command.addTarget { [weak self] _ in self?.run(action) ?? .commandFailed }
+        }
         center.changePlaybackPositionCommand.addTarget { [weak self] event in
             guard let event = event as? MPChangePlaybackPositionCommandEvent else { return .commandFailed }
             return self?.run { $0.seek(to: Int(event.positionTime * 1000)) } ?? .commandFailed
@@ -47,6 +53,7 @@ final class NowPlayingBridge {
             center.playbackState = .stopped
             return
         }
+        if track.coverURL != artworkURL { loadArtwork(track.coverURL) }
         let position = player.position
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: track.name,
@@ -56,27 +63,21 @@ final class NowPlayingBridge {
             MPNowPlayingInfoPropertyElapsedPlaybackTime: Double(position.current()) / 1000,
             MPNowPlayingInfoPropertyPlaybackRate: position.advancing ? 1.0 : 0.0,
         ]
-        if track.coverURL == artworkURL, let artwork {
-            info[MPMediaItemPropertyArtwork] = artwork
-        } else {
-            loadArtwork(track.coverURL)
-        }
+        info[MPMediaItemPropertyArtwork] = artwork
         center.nowPlayingInfo = info
         center.playbackState = player.isPlaying ? .playing : .paused
     }
 
+    /// Fetches the cover once per track change and adds it when it arrives.
     private func loadArtwork(_ url: URL?) {
+        artworkTask?.cancel()
         artworkURL = url
         artwork = nil
         guard let url else { return }
-        Task {
-            guard let (data, _) = try? await URLSession.shared.data(from: url),
-                  let image = NSImage(data: data), url == artworkURL
-            else { return }
+        artworkTask = Task {
+            guard let image = await ImageLoader.shared.image(url), !Task.isCancelled else { return }
             artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
-            var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
-            info[MPMediaItemPropertyArtwork] = artwork
-            MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+            MPNowPlayingInfoCenter.default().nowPlayingInfo?[MPMediaItemPropertyArtwork] = artwork
         }
     }
 }

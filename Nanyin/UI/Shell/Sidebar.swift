@@ -128,13 +128,9 @@ private struct NowPlayingCover: View {
                 .padding(.vertical, 5)
                 .background(Theme.graphite)
                 .hairline(.top, Theme.graphiteEdge)
-                AsyncImage(url: track.coverURL) { image in
-                    image.resizable().aspectRatio(1, contentMode: .fill)
-                } placeholder: {
-                    Theme.content
-                }
-                .aspectRatio(1, contentMode: .fit)
-                .clipped()
+                Artwork(url: track.coverURL, placeholder: Theme.content)
+                    .aspectRatio(1, contentMode: .fit)
+                    .clipped()
             }
         }
     }

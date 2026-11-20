@@ -52,11 +52,7 @@ struct ArtistPage: View {
                 GraphiteHeader { Text("Albums and Singles") }
                 ScrollView(.horizontal) {
                     LazyHStack(alignment: .top, spacing: 12) {
-                        ForEach(detail.albums) { album in
-                            Tile(title: album.name, subtitle: album.releaseYear ?? "", image: album.images?.best(minimum: 200), size: 110) {
-                                app.navigator.go(to: .album(id: album.id))
-                            }
-                        }
+                        ForEach(detail.albums) { Tile(album: $0, subtitle: $0.releaseYear ?? "", size: 110) }
                     }
                     .padding(10)
                 }
@@ -74,18 +70,19 @@ struct ArtistPage: View {
     }
 }
 
-/// A cover with a caption, for grids and shelves.
+/// A cover with a caption that opens a page, for grids and shelves.
 struct Tile: View {
+    @Environment(AppModel.self) private var app
     let title: String
-    let subtitle: String
-    let image: URL?
+    var subtitle = ""
+    let images: [SpotifyImage]?
+    let route: Route
     var size: CGFloat = 130
-    let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
+        Button { app.navigator.go(to: route) } label: {
             VStack(alignment: .leading, spacing: 3) {
-                CoverImage(url: image, size: size)
+                CoverImage(url: images?.best(minimum: 200), size: size)
                 Text(title)
                     .font(AquaFont.regular(11))
                     .foregroundStyle(Theme.text)
@@ -100,20 +97,52 @@ struct Tile: View {
     }
 }
 
+extension Tile {
+    init(album: AlbumSummary, subtitle: String, size: CGFloat = 130) {
+        self.init(title: album.name, subtitle: subtitle, images: album.images, route: .album(id: album.id), size: size)
+    }
+
+    init(album: Album) {
+        self.init(title: album.name, subtitle: album.artists.names, images: album.images, route: .album(id: album.id))
+    }
+
+    init(artist: Artist) {
+        self.init(title: artist.name, images: artist.images, route: .artist(id: artist.id))
+    }
+}
+
 /// Album art with a thin dark frame, the way the 2010 client framed covers.
 struct CoverImage: View {
     let url: URL?
     let size: CGFloat
 
     var body: some View {
-        AsyncImage(url: url) { image in
-            image.resizable().aspectRatio(contentMode: .fill)
-        } placeholder: {
-            Theme.hex(0x404040)
+        Artwork(url: url, placeholder: Theme.hex(0x404040))
+            .frame(width: size, height: size)
+            .clipped()
+            .overlay(Rectangle().strokeBorder(.black.opacity(0.6), lineWidth: 1))
+            .shadow(color: .black.opacity(0.5), radius: 2, y: 1)
+    }
+}
+
+/// An image from `ImageLoader`, filling its frame; shown at once when cached.
+struct Artwork: View {
+    let url: URL?
+    let placeholder: Color
+    @State private var loaded: (url: URL, image: NSImage)?
+
+    var body: some View {
+        let image = url.flatMap { url in loaded?.url == url ? loaded?.image : ImageLoader.shared.cached(url) }
+        Group {
+            if let image {
+                Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
+            } else {
+                placeholder
+            }
         }
-        .frame(width: size, height: size)
-        .clipped()
-        .overlay(Rectangle().strokeBorder(.black.opacity(0.6), lineWidth: 1))
-        .shadow(color: .black.opacity(0.5), radius: 2, y: 1)
+        .task(id: url) {
+            guard let url, ImageLoader.shared.cached(url) == nil, let image = await ImageLoader.shared.image(url) else { return }
+            loaded = (url, image)
+        }
     }
 }
