@@ -42,7 +42,12 @@ final class ArtistDetail {
             do { artist = try await api.artist(id) } catch { self.error = error.localizedDescription }
         }
         Task {
-            do { albums = try await api.artistAlbums(id).items } catch {}
+            do {
+                albums = try await api.artistAlbums(id).items
+            } catch {
+                // Shown in the header unless the artist read already failed.
+                self.error = self.error ?? error.localizedDescription
+            }
         }
         Task {
             do {

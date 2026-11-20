@@ -61,10 +61,10 @@ struct ArtistPage: View {
                 .background(Theme.content)
             }
             GraphiteHeader { Text("Popular") }
-            if let tracks = detail.topTracks {
+            if let tracks = detail.topTracks, !tracks.rows.isEmpty {
                 TrackListTable(list: tracks, columns: [.indicator, .star, .track, .time, .album])
             } else {
-                Text(detail.topTracksError ?? "Loading…")
+                Text(detail.topTracksError ?? (detail.topTracks == nil ? "Loading…" : "No popular songs."))
                     .font(AquaFont.regular(11))
                     .foregroundStyle(Theme.secondaryText)
                     .padding(12)

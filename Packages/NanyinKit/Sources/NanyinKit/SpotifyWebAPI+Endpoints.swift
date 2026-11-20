@@ -44,10 +44,8 @@ public extension SpotifyWebAPI {
         try await get("/artists/\(id)")
     }
 
-    func artistTopTracks(_ id: String) async throws -> [Track] {
-        struct Body: Decodable, Sendable { let tracks: [Track] }
-        return try await get("/artists/\(id)/top-tracks", as: Body.self).tracks
-    }
+    // An artist's top tracks: 403 for Development Mode apps; read through
+    // the session instead (`PlaybackSession.readTopTracks`).
 
     func artistAlbums(_ id: String) async throws -> Paging<AlbumSummary> {
         try await get("/artists/\(id)/albums", query: ["include_groups": "album,single", "limit": "10"])

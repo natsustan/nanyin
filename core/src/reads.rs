@@ -227,11 +227,14 @@ impl Reads {
 
 /// The first songs of the account's country's ranking, or of the worldwide
 /// one (`ZZ`; librespot's `for_country` falls back to an empty country,
-/// which Spotify does not send).
+/// which Spotify does not send). An empty ranking counts as none.
 fn top_track_uris(top: &CountryTopTracks, country: &str) -> Vec<SpotifyUri> {
-    top.iter()
-        .find(|ranking| ranking.country == country)
-        .or_else(|| top.iter().find(|ranking| ranking.country == "ZZ"))
+    let ranked = |code: &str| {
+        top.iter()
+            .find(|ranking| ranking.country == code && !ranking.tracks.is_empty())
+    };
+    ranked(country)
+        .or_else(|| ranked("ZZ"))
         .map(|ranking| ranking.tracks.iter().take(TOP).cloned().collect())
         .unwrap_or_default()
 }
@@ -257,9 +260,14 @@ mod tests {
 
     #[test]
     fn top_tracks_prefer_the_country_then_worldwide() {
-        let top = CountryTopTracks(vec![ranking("ZZ", &[1, 2]), ranking("SE", &[3])]);
+        let top = CountryTopTracks(vec![
+            ranking("ZZ", &[1, 2]),
+            ranking("SE", &[3]),
+            ranking("NO", &[]),
+        ]);
         assert_eq!(top_track_uris(&top, "SE").len(), 1);
         assert_eq!(top_track_uris(&top, "JP").len(), 2);
+        assert_eq!(top_track_uris(&top, "NO").len(), 2);
         assert!(top_track_uris(&CountryTopTracks::default(), "JP").is_empty());
         let many = CountryTopTracks(vec![ranking("ZZ", &(0..15).collect::<Vec<_>>())]);
         assert_eq!(top_track_uris(&many, "JP").len(), TOP);
