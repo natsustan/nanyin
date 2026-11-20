@@ -95,8 +95,14 @@ final class PlaybackSession {
 
     /// Sends a command to the session; returns why it could not, if it could not.
     func send(_ command: CoreCommand) -> String? {
-        guard isReady else { return "Set up playback on this Mac first." }
-        return engine.send(command) ? nil : "Playback stopped responding."
+        switch state {
+        case .ready:
+            return engine.send(command) ? nil : "Playback stopped responding."
+        case .connecting, .waiting:
+            return "Reconnecting to Spotify. Try again in a moment."
+        default:
+            return "Set up playback on this Mac first."
+        }
     }
 
     // MARK: Reads
@@ -195,7 +201,7 @@ final class PlaybackSession {
                 scheduleRetry(reason: message)
             }
         case .sessionEnded:
-            onPlayerEvent(.stopped)
+            onPlayerEvent(.sessionEnded)
             if !(policy.sessionDropped() && connectStored()) {
                 state = .failed("The connection to Spotify keeps dropping.")
             }

@@ -52,6 +52,10 @@ final class Player {
     private(set) var playingElsewhere = false
 
     private let session: PlaybackSession
+    /// What was playing when the session dropped. The new session has
+    /// nothing loaded and ignores Play, so the next Play loads this instead;
+    /// it is never replayed on its own.
+    @ObservationIgnored private var resumePoint: CoreCommand.Load?
     @ObservationIgnored private var volumeDrag: (lastSent: Date, pending: Task<Void, Never>?)?
 
     private static let volumeKey = "PlaybackVolume"
@@ -90,6 +94,7 @@ final class Player {
 
     private func start(_ load: CoreCommand.Load, uri: String?) {
         guard send(.load(load)) else { return }
+        resumePoint = nil
         requestedURI = uri
         isLoading = true
         playingElsewhere = false
@@ -100,7 +105,13 @@ final class Player {
     func togglePlayPause() { setPlaying(!isPlaying, .playPause) }
 
     private func setPlaying(_ playing: Bool, _ command: CoreCommand) {
-        guard track != nil, playing != isPlaying, send(command) else { return }
+        guard let track, playing != isPlaying else { return }
+        if playing, var resume = resumePoint {
+            resume.positionMs = position.current()
+            start(resume, uri: track.uri)
+            return
+        }
+        guard send(command) else { return }
         isPlaying = playing
         position = position.continued(advancing: playing)
     }
@@ -117,7 +128,9 @@ final class Player {
     }
 
     func seek(to ms: Int) {
-        guard track != nil, send(.seek(positionMs: ms)) else { return }
+        guard track != nil else { return }
+        // After a drop there is nothing to seek in yet: move the resume point.
+        guard resumePoint != nil || send(.seek(positionMs: ms)) else { return }
         position = Position(ms: ms, at: .now, advancing: isPlaying)
     }
 
@@ -179,6 +192,7 @@ final class Player {
             isLoading = true
             position = Position(ms: ms, at: .now, advancing: false)
         case .playing(let uri, let ms):
+            resumePoint = nil
             isPlaying = true
             isLoading = false
             playingElsewhere = false
@@ -211,12 +225,27 @@ final class Player {
                 rows: tracks.enumerated().map { TrackRow(index: $0.offset, track: $0.element) },
                 contextURI: context.isEmpty ? nil : context)
         case .deactivated:
+            resumePoint = nil
             upNext = TrackList(rows: [])
             isPlaying = false
             isLoading = false
             playingElsewhere = true
             position = position.continued(advancing: false)
-        case .connected, .connectFailed, .sessionEnded:
+        case .sessionEnded:
+            // Our connection dropped; another one is on its way. Keep the
+            // track, its context and the position, ready for the next Play.
+            if let track {
+                resumePoint = if let context = upNext.contextURI {
+                    .init(contextURI: context, startURI: track.uri, shuffle: shuffle)
+                } else {
+                    .init(trackURIs: [track.uri] + upNext.rows.map(\.uri), startURI: track.uri)
+                }
+            }
+            isPlaying = false
+            isLoading = false
+            requestedURI = nil
+            position = position.continued(advancing: false)
+        case .connected, .connectFailed:
             break
         }
     }

@@ -205,8 +205,18 @@ impl Engine {
         let queue = QueueResolver::new(reads.clone());
         tokio::spawn({
             let emit = emit.clone();
+            // Lives no longer than the player: the loop ends with its thread.
+            let session = session.clone();
             async move {
                 while let Some(event) = events.recv().await {
+                    if matches!(event, PlayerEvent::SessionDisconnected { .. })
+                        && session.is_invalid()
+                    {
+                        // Spirc says this when our own connection drops too;
+                        // that is not another device taking over, and
+                        // `SessionEnded` follows.
+                        continue;
+                    }
                     if let PlayerEvent::SetQueue {
                         context_uri,
                         next_tracks,
