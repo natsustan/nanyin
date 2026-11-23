@@ -13,7 +13,7 @@ struct OnboardingView: View {
             Text("Sign in to Spotify")
                 .font(AquaFont.bold(18))
             Text("Nanyin uses your own Spotify app registration, so its requests have a quota of their own. It takes about two minutes, with a Premium account:")
-                .font(AquaFont.regular(12))
+                .font(AquaFont.regular(13))
                 .foregroundStyle(Theme.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
             VStack(alignment: .leading, spacing: 6) {
@@ -46,12 +46,12 @@ struct OnboardingView: View {
                 note(message)
                 Button("Retry Saved Sign-In") { Task { await account.restore() } }
                     .buttonStyle(.link)
-                    .font(AquaFont.regular(11))
+                    .font(AquaFont.regular(12))
             default:
                 EmptyView()
             }
             Text("Nanyin is an unofficial client and is not affiliated with Spotify. Playback requires Spotify Premium.")
-                .font(AquaFont.regular(10))
+                .font(AquaFont.regular(11))
                 .foregroundStyle(Theme.secondaryText.opacity(0.8))
                 .padding(.top, 8)
         }
@@ -65,17 +65,17 @@ struct OnboardingView: View {
     private func step(_ number: Int, _ text: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text("\(number)")
-                .font(AquaFont.bold(10))
+                .font(AquaFont.bold(11))
                 .frame(width: 16, height: 16)
                 .background(Circle().fill(Theme.green))
                 .foregroundStyle(.black)
-            Text(text).font(AquaFont.regular(12))
+            Text(text).font(AquaFont.regular(13))
         }
     }
 
     private func note(_ text: String) -> some View {
         Text(text)
-            .font(AquaFont.regular(11))
+            .font(AquaFont.regular(12))
             .foregroundStyle(Theme.hex(0xE8C26A))
             .fixedSize(horizontal: false, vertical: true)
     }

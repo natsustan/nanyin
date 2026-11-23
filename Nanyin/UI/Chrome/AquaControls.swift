@@ -58,7 +58,7 @@ struct AquaSearchField: View {
             }
             TextField(prompt, text: $text)
                 .textFieldStyle(.plain)
-                .font(AquaFont.regular(11))
+                .font(AquaFont.regular(12))
                 .foregroundStyle(.black)
                 .focused($focused)
                 .onSubmit(onSubmit)
@@ -144,7 +144,7 @@ struct GraphiteHeader<Content: View>: View {
 
     var body: some View {
         HStack(spacing: 6) { content }
-            .font(AquaFont.bold(11))
+            .font(AquaFont.bold(12))
             .foregroundStyle(Theme.hex(0xE6E6E6))
             .engraved()
             .padding(.horizontal, 8)

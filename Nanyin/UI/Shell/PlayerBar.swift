@@ -102,11 +102,11 @@ private struct TimeLabel: View {
 
     var body: some View {
         Text(TrackRow.format(ms: ms))
-            .font(AquaFont.regular(10))
+            .font(AquaFont.regular(11))
             .monospacedDigit()
             .foregroundStyle(Theme.hex(0xD6D6D6))
             .engraved()
-            .frame(width: 34)
+            .frame(width: 38)
     }
 }
 

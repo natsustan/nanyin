@@ -29,7 +29,7 @@ struct Sidebar: View {
                     }
                     if let error = app.library.playlistsError {
                         Text(error)
-                            .font(AquaFont.regular(10))
+                            .font(AquaFont.regular(11))
                             .foregroundStyle(Theme.secondaryText)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 4)
@@ -63,7 +63,7 @@ private struct SidebarHeading: View {
 
     var body: some View {
         Text(title.uppercased())
-            .font(AquaFont.bold(10))
+            .font(AquaFont.bold(11))
             .foregroundStyle(Theme.sidebarHeading)
             .shadow(color: .black.opacity(0.5), radius: 0, y: 1)
             .padding(.horizontal, 10)
@@ -82,11 +82,11 @@ private struct SidebarRow: View {
         Button(action: action) {
             HStack(spacing: 6) {
                 Image(systemName: icon)
-                    .font(.system(size: 10))
+                    .font(.system(size: 11))
                     .frame(width: 14)
                     .foregroundStyle(isSelected ? .white : Theme.sidebarHeading)
                 Text(title)
-                    .font(isSelected ? AquaFont.bold(11) : AquaFont.regular(11))
+                    .font(isSelected ? AquaFont.bold(12) : AquaFont.regular(12))
                     .foregroundStyle(isSelected ? .white : Theme.sidebarText)
                     .lineLimit(1)
                 Spacer(minLength: 0)
@@ -129,14 +129,14 @@ private struct NowPlayingCover: View {
                     }
                     VStack(alignment: .leading, spacing: 1) {
                         LinkText(parts: [(track.name, track.albumURI.flatMap(Route.init(uri:)))], color: Theme.text)
-                            .font(AquaFont.bold(11))
+                            .font(AquaFont.bold(12))
                         if app.player.playingElsewhere {
                             Text("Playing on another device")
-                                .font(AquaFont.regular(10))
+                                .font(AquaFont.regular(11))
                                 .foregroundStyle(Theme.secondaryText)
                         } else {
                             LinkText(parts: track.artists.map { ($0.name, Route(uri: $0.uri)) }, color: Theme.secondaryText)
-                                .font(AquaFont.regular(10))
+                                .font(AquaFont.regular(11))
                         }
                     }
                     .lineLimit(1)

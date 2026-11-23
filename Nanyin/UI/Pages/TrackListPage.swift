@@ -124,7 +124,7 @@ struct LinkText: View {
         var text = AttributedString()
         if let label {
             text = AttributedString("\(label): ")
-            text.font = AquaFont.bold(11)
+            text.font = AquaFont.bold(12)
         }
         for (index, part) in parts.enumerated() {
             if index > 0 { text += AttributedString(", ") }
@@ -162,7 +162,7 @@ struct PageHeader<Artwork: View, Accessory: View>: View {
                     .foregroundStyle(Theme.text)
                 if !subtitle.isEmpty {
                     Text(subtitle)
-                        .font(AquaFont.regular(11))
+                        .font(AquaFont.regular(12))
                         .foregroundStyle(Theme.secondaryText)
                 }
             }
@@ -213,7 +213,7 @@ struct PlaceholderText: View {
     var body: some View {
         VStack(spacing: 8) {
             Text(message)
-                .font(AquaFont.regular(12))
+                .font(AquaFont.regular(13))
                 .foregroundStyle(Theme.secondaryText)
             if let retry {
                 Button("Try Again", action: retry).buttonStyle(TexturedButtonStyle())
