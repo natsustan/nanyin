@@ -18,6 +18,9 @@ enum PageContent {
 final class Library {
     private(set) var playlists: [Playlist] = []
     private(set) var playlistsError: String?
+    /// Every page has arrived. Until then each page replaces the list, so
+    /// it cannot be edited.
+    private(set) var playlistsLoaded = false
     /// Filled by `prepare` before a route is shown; views only read it.
     @ObservationIgnored private var pages: [Route: PageContent] = [:]
     private let api: SpotifyWebAPI
@@ -42,6 +45,7 @@ final class Library {
     func signedOut() {
         username = nil
         playlists = []
+        playlistsLoaded = false
         edit = nil
         pages = [:]
     }
@@ -49,6 +53,7 @@ final class Library {
     /// Shows each page of playlists as it arrives.
     func loadPlaylists() async {
         playlistsError = nil
+        playlistsLoaded = false
         var loaded: [Playlist] = []
         var offset = 0
         do {
@@ -59,6 +64,7 @@ final class Library {
                 offset += page.items.count
                 if page.next == nil || page.items.isEmpty { break }
             } while true
+            playlistsLoaded = true
         } catch {
             playlistsError = error.localizedDescription
         }
@@ -85,19 +91,23 @@ final class Library {
         case rename(id: String)
     }
 
+    /// Set through `begin`; the sidebar clears it when the field closes.
     var edit: PlaylistEdit?
     /// The name of a playlist Spotify is creating, shown until it answers.
     private(set) var creating: String?
 
-    func beginNewPlaylist() {
-        guard username != nil, creating == nil else { return }
-        edit = .new
+    var canEditPlaylists: Bool { playlistsLoaded && edit == nil && creating == nil }
+
+    /// One field at a time: a second request waits for the first to close.
+    func begin(_ edit: PlaylistEdit) {
+        guard canEditPlaylists else { return }
+        self.edit = edit
     }
 
     /// Creates a playlist and returns it, first in the list, once Spotify has.
     func createPlaylist(named name: String) async -> Playlist? {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty, creating == nil else { return nil }
+        guard !name.isEmpty, playlistsLoaded, creating == nil else { return nil }
         creating = name
         defer { creating = nil }
         do {
@@ -113,7 +123,7 @@ final class Library {
     /// Only the owner may rename a playlist.
     func rename(_ id: String, to name: String) {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let index = playlists.firstIndex(where: { $0.id == id }), isOwn(playlists[index]),
+        guard playlistsLoaded, let index = playlists.firstIndex(where: { $0.id == id }), isOwn(playlists[index]),
               !name.isEmpty, name != playlists[index].name else { return }
         let old = playlists[index].name
         playlists[index].name = name
@@ -121,7 +131,10 @@ final class Library {
             do {
                 try await api.renamePlaylist(id, to: name)
             } catch {
-                if let index = playlists.firstIndex(where: { $0.id == id }) { playlists[index].name = old }
+                // Unless a later rename has replaced this one.
+                if let index = playlists.firstIndex(where: { $0.id == id }), playlists[index].name == name {
+                    playlists[index].name = old
+                }
                 notices.report("Could not rename “\(old)”: \(error.localizedDescription)")
             }
         }
@@ -130,7 +143,7 @@ final class Library {
     /// Removes a playlist from the listener's library; for their own ones
     /// this is what Spotify calls deleting.
     func remove(_ playlist: Playlist) {
-        guard let index = playlists.firstIndex(where: { $0.id == playlist.id }) else { return }
+        guard playlistsLoaded, let index = playlists.firstIndex(where: { $0.id == playlist.id }) else { return }
         playlists.remove(at: index)
         if edit == .rename(id: playlist.id) { edit = nil }
         Task {

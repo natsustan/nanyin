@@ -83,6 +83,13 @@ final class Navigator {
         show(next)
     }
 
+    /// Drops a page that no longer exists from history, leaving it if shown.
+    func forget(_ route: Route) {
+        back.removeAll { $0 == route }
+        forward.removeAll { $0 == route }
+        if current == route { show(.whatsNew) }
+    }
+
     func reset() {
         back.removeAll()
         forward.removeAll()

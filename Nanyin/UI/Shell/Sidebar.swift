@@ -21,13 +21,16 @@ struct Sidebar: View {
                         }
                     }
                     SidebarHeading(title: "Playlists")
-                        .contextMenu { Button("New Playlist") { library.beginNewPlaylist() } }
+                        .contextMenu { newPlaylistButton }
                     if library.edit == .new {
                         SidebarNameField(initial: "New Playlist") { name in
                             library.edit = nil
                             guard let name else { return }
+                            let navigator = app.navigator
+                            let from = navigator.current
                             Task {
-                                if let playlist = await library.createPlaylist(named: name) {
+                                // Opened unless the listener has moved on meanwhile.
+                                if let playlist = await library.createPlaylist(named: name), navigator.current == from {
                                     go(.playlist(id: playlist.id), false)
                                 }
                             }
@@ -47,7 +50,7 @@ struct Sidebar: View {
                             SidebarRow(title: playlist.name, icon: "music.note.list", isSelected: current == route) {
                                 go(route, false)
                             }
-                            .contextMenu { playlistMenu(playlist, route: route) }
+                            .contextMenu { playlistMenu(playlist) }
                         }
                     }
                     if let error = app.library.playlistsError {
@@ -63,7 +66,7 @@ struct Sidebar: View {
             NowPlayingCover()
         }
         .background(Theme.sidebar)
-        .contextMenu { Button("New Playlist") { library.beginNewPlaylist() } }
+        .contextMenu { newPlaylistButton }
         .alert(
             "Delete “\(deleting?.name ?? "")”?",
             isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
@@ -80,29 +83,35 @@ struct Sidebar: View {
 
     private var library: Library { app.library }
 
-    @ViewBuilder private func playlistMenu(_ playlist: Playlist, route: Route) -> some View {
+    private var newPlaylistButton: some View {
+        Button("New Playlist") { library.begin(.new) }
+            .disabled(!library.canEditPlaylists)
+    }
+
+    @ViewBuilder private func playlistMenu(_ playlist: Playlist) -> some View {
         Button("Play") { app.player.play(contextURI: playlist.uri) }
         Divider()
-        if library.isOwn(playlist) {
-            Button("Rename") { library.edit = .rename(id: playlist.id) }
-            Button("Delete…") { deleting = playlist }
-        } else {
-            Button("Remove from Library") { remove(playlist) }
+        Group {
+            if library.isOwn(playlist) {
+                Button("Rename") { library.begin(.rename(id: playlist.id)) }
+                Button("Delete…") { deleting = playlist }
+            } else {
+                Button("Remove from Library") { remove(playlist) }
+            }
         }
+        .disabled(!library.canEditPlaylists)
         Divider()
         Button("Copy Spotify Link") {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(Route.webLink(for: playlist.uri), forType: .string)
         }
         Divider()
-        Button("New Playlist") { library.beginNewPlaylist() }
+        newPlaylistButton
     }
 
-    /// Leaves the playlist's page first if it is showing.
+    /// Its page goes from history too, and is left if showing.
     private func remove(_ playlist: Playlist) {
-        if app.navigator.current == .playlist(id: playlist.id) {
-            app.navigator.go(to: .whatsNew, replacing: true)
-        }
+        app.navigator.forget(.playlist(id: playlist.id))
         library.remove(playlist)
     }
 
@@ -124,9 +133,10 @@ struct Sidebar: View {
 
 /// A playlist's name being typed in place of its row: Return keeps it,
 /// Escape (or an empty name) gives up, clicking elsewhere keeps it.
+/// `Library` trims the name and ignores an empty one.
 private struct SidebarNameField: View {
     let initial: String
-    /// The name, or nil when editing was cancelled.
+    /// The typed name, or nil when editing was cancelled.
     let done: (String?) -> Void
     @State private var text = ""
     @State private var finished = false
@@ -163,8 +173,7 @@ private struct SidebarNameField: View {
     private func finish(_ name: String?) {
         guard !finished else { return }
         finished = true
-        let name = name?.trimmingCharacters(in: .whitespacesAndNewlines)
-        done(name?.isEmpty == false ? name : nil)
+        done(name)
     }
 }
 

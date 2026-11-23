@@ -35,8 +35,9 @@ struct NanyinApp: App {
                 }
             }
             CommandGroup(replacing: .newItem) {
-                Button("New Playlist") { app.library.beginNewPlaylist() }
+                Button("New Playlist") { app.library.begin(.new) }
                     .keyboardShortcut("n", modifiers: .command)
+                    .disabled(!app.library.canEditPlaylists)
             }
             CommandGroup(after: .textEditing) {
                 Button("Search") { app.navigator.focusSearch() }
