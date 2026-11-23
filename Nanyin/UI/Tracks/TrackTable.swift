@@ -39,7 +39,7 @@ struct TrackTable: NSViewRepresentable {
         let table = TrackTableView()
         table.headerView = GraphiteHeaderView()
         table.cornerView = GraphiteCornerView()
-        table.rowHeight = 19
+        table.rowHeight = 21
         table.intercellSpacing = NSSize(width: 0, height: 0)
         table.gridStyleMask = []
         table.backgroundColor = Theme.row(0)
@@ -448,7 +448,7 @@ private final class TextCell: NSView {
         }
     }
 
-    private static let font = AquaFont.ns(11)
+    private static let font = AquaFont.ns(12)
     private static let lineHeight = NSLayoutManager().defaultLineHeight(for: font)
     private static let inset: CGFloat = 7
     private static let ellipsis = NSAttributedString(string: "…", attributes: [.font: font]).size().width
@@ -611,7 +611,7 @@ final class GraphiteHeaderCell: NSTableHeaderCell {
         let shadow = NSShadow()
         shadow.shadowColor = .black.withAlphaComponent(0.6)
         shadow.shadowOffset = NSSize(width: 0, height: 1)
-        return [.font: AquaFont.ns(11, bold: true), .foregroundColor: Theme.ns(0xE0E0E0), .shadow: shadow]
+        return [.font: AquaFont.ns(12, bold: true), .foregroundColor: Theme.ns(0xE0E0E0), .shadow: shadow]
     }()
 
     static func drawBackground(in rect: NSRect) {

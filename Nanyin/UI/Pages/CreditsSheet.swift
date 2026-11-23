@@ -42,7 +42,7 @@ struct CreditsSheet: View {
                     }
                     if !found.sources.isEmpty {
                         Text("Source: \(found.sources.joined(separator: ", "))")
-                            .font(AquaFont.regular(10))
+                            .font(AquaFont.regular(11))
                             .foregroundStyle(Theme.secondaryText)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 8)
@@ -70,12 +70,12 @@ private struct CreditRow: View {
         let route = Route(uri: credit.uri)
         HStack(spacing: 8) {
             Text(credit.name)
-                .font(AquaFont.regular(11))
+                .font(AquaFont.regular(12))
                 .foregroundStyle(Theme.text)
                 .underline(hovered && route != nil)
             Spacer(minLength: 0)
             Text(credit.subroles.map(\.localizedCapitalized).joined(separator: ", "))
-                .font(AquaFont.regular(10))
+                .font(AquaFont.regular(11))
                 .foregroundStyle(Theme.secondaryText)
         }
         .lineLimit(1)

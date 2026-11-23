@@ -24,7 +24,7 @@ struct SearchPage: View {
                         }, color: Theme.text)
                     }
                 }
-                .font(AquaFont.regular(11))
+                .font(AquaFont.regular(12))
                 .lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 14)

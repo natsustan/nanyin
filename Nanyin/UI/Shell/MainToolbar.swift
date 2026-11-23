@@ -15,7 +15,7 @@ struct MainToolbar: View {
         ZStack(alignment: .top) {
             TitleBarDragArea()
             Text("Nanyin")
-                .font(AquaFont.regular(13))
+                .font(AquaFont.regular(14))
                 .foregroundStyle(Theme.metalText.opacity(appearsActive ? 1 : 0.5))
                 .embossed()
                 .padding(.top, 3)
@@ -63,7 +63,7 @@ struct MainToolbar: View {
             Button("Sign Out") { Task { await app.signOut() } }
         } label: {
             Text(app.account.profile?.name ?? "")
-                .font(AquaFont.regular(11))
+                .font(AquaFont.regular(12))
         }
         .menuStyle(.button)
         .buttonStyle(TexturedButtonStyle())

@@ -95,10 +95,10 @@ struct Tile: View {
             VStack(alignment: .leading, spacing: 3) {
                 CoverImage(url: images?.best(minimum: 200), size: size)
                 Text(title)
-                    .font(AquaFont.regular(11))
+                    .font(AquaFont.regular(12))
                     .foregroundStyle(Theme.text)
                 Text(subtitle)
-                    .font(AquaFont.regular(10))
+                    .font(AquaFont.regular(11))
                     .foregroundStyle(Theme.secondaryText)
             }
             .lineLimit(1)

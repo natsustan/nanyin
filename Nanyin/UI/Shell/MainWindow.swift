@@ -161,7 +161,7 @@ private struct PlaybackNotice: View {
             if let message {
                 HStack(spacing: 10) {
                     Text(message)
-                        .font(AquaFont.regular(11))
+                        .font(AquaFont.regular(12))
                         .foregroundStyle(Theme.metalText)
                         .lineLimit(2)
                     Spacer()
