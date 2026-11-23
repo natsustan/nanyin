@@ -99,7 +99,7 @@ struct Sidebar: View {
                 Button("Remove from Library") { remove(playlist) }
             }
         }
-        .disabled(!library.canEditPlaylists)
+        .disabled(!library.canEdit(playlist))
         Divider()
         Button("Copy Spotify Link") {
             NSPasteboard.general.clearContents()
@@ -111,6 +111,7 @@ struct Sidebar: View {
 
     /// Its page goes from history too, and is left if showing.
     private func remove(_ playlist: Playlist) {
+        guard library.canEdit(playlist) else { return }
         app.navigator.forget(.playlist(id: playlist.id))
         library.remove(playlist)
     }

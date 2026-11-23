@@ -47,7 +47,7 @@ final class Library {
 
     func signedOut() {
         account += 1
-        renames = [:]
+        busy = []
         username = nil
         playlists = []
         playlistsLoaded = false
@@ -127,50 +127,42 @@ final class Library {
         }
     }
 
-    /// Renames of one playlist still on their way, sent one after another
-    /// so Spotify ends with the last; `confirmed` is the name it last accepted.
-    private struct PendingRenames {
-        var confirmed: String
-        var last: Task<Void, Never>
-        var count: Int
-    }
+    /// Playlists with a rename or removal on its way: each takes one at a
+    /// time, so a failure has only one earlier state to return to.
+    private(set) var busy: Set<String> = []
 
-    @ObservationIgnored private var renames: [String: PendingRenames] = [:]
+    func canEdit(_ playlist: Playlist) -> Bool {
+        canEditPlaylists && !busy.contains(playlist.id)
+    }
 
     /// Only the owner may rename a playlist.
     func rename(_ id: String, to name: String) {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard playlistsLoaded, let index = playlists.firstIndex(where: { $0.id == id }), isOwn(playlists[index]),
-              !name.isEmpty, name != playlists[index].name else { return }
+        guard playlistsLoaded, !busy.contains(id), let index = playlists.firstIndex(where: { $0.id == id }),
+              isOwn(playlists[index]), !name.isEmpty, name != playlists[index].name else { return }
         let account = account
-        let previous = renames[id]
-        let confirmed = previous?.confirmed ?? playlists[index].name
+        let old = playlists[index].name
         playlists[index].name = name
-        let task = Task {
-            await previous?.last.value
-            guard account == self.account else { return }
+        busy.insert(id)
+        Task {
             do {
                 try await api.renamePlaylist(id, to: name)
-                renames[id]?.confirmed = name
             } catch {
-                notices.report("Could not rename “\(confirmed)”: \(error.localizedDescription)")
-                // Shown name stays if a later rename has replaced this one.
-                if let index = playlists.firstIndex(where: { $0.id == id }), playlists[index].name == name,
-                   let confirmed = renames[id]?.confirmed {
-                    playlists[index].name = confirmed
-                }
+                guard account == self.account else { return }
+                if let index = playlists.firstIndex(where: { $0.id == id }) { playlists[index].name = old }
+                notices.report("Could not rename “\(old)”: \(error.localizedDescription)")
             }
-            renames[id]?.count -= 1
-            if renames[id]?.count == 0 { renames[id] = nil }
+            if account == self.account { busy.remove(id) }
         }
-        renames[id] = PendingRenames(confirmed: confirmed, last: task, count: (previous?.count ?? 0) + 1)
     }
 
     /// Removes a playlist from the listener's library; for their own ones
     /// this is what Spotify calls deleting.
     func remove(_ playlist: Playlist) {
-        guard playlistsLoaded, let index = playlists.firstIndex(where: { $0.id == playlist.id }) else { return }
-        playlists.remove(at: index)
+        guard playlistsLoaded, !busy.contains(playlist.id),
+              let index = playlists.firstIndex(where: { $0.id == playlist.id }) else { return }
+        let playlist = playlists.remove(at: index)
+        busy.insert(playlist.id)
         if edit == .rename(id: playlist.id) { edit = nil }
         let account = account
         Task {
@@ -182,6 +174,7 @@ final class Library {
                 playlists.insert(playlist, at: min(index, playlists.count))
                 notices.report("Could not remove “\(playlist.name)”: \(error.localizedDescription)")
             }
+            if account == self.account { busy.remove(playlist.id) }
         }
     }
 
