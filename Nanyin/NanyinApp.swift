@@ -34,6 +34,10 @@ struct NanyinApp: App {
                     Button("Check for Updates…") { updater.checkForUpdates(nil) }
                 }
             }
+            CommandGroup(replacing: .newItem) {
+                Button("New Playlist") { app.library.beginNewPlaylist() }
+                    .keyboardShortcut("n", modifiers: .command)
+            }
             CommandGroup(after: .textEditing) {
                 Button("Search") { app.navigator.focusSearch() }
                     .keyboardShortcut("l", modifiers: .command)

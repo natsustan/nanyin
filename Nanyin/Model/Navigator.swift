@@ -8,7 +8,7 @@ enum Route: Hashable {
     case likedSongs
     case albums
     case artists
-    case playlist(id: String, name: String)
+    case playlist(id: String)
     case album(id: String)
     case artist(id: String)
     case search(String)

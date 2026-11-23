@@ -42,6 +42,7 @@ final class Library {
     func signedOut() {
         username = nil
         playlists = []
+        edit = nil
         pages = [:]
     }
 
@@ -68,8 +69,79 @@ final class Library {
         playlists.filter { isOwn($0) || $0.collaborative == true }
     }
 
-    private func isOwn(_ playlist: Playlist) -> Bool {
+    func isOwn(_ playlist: Playlist) -> Bool {
         playlist.owner.id == username
+    }
+
+    func playlist(_ id: String) -> Playlist? {
+        playlists.first { $0.id == id }
+    }
+
+    // MARK: Creating, renaming and removing playlists
+
+    /// The sidebar row being edited in place, if any.
+    enum PlaylistEdit: Equatable {
+        case new
+        case rename(id: String)
+    }
+
+    var edit: PlaylistEdit?
+    /// The name of a playlist Spotify is creating, shown until it answers.
+    private(set) var creating: String?
+
+    func beginNewPlaylist() {
+        guard username != nil, creating == nil else { return }
+        edit = .new
+    }
+
+    /// Creates a playlist and returns it, first in the list, once Spotify has.
+    func createPlaylist(named name: String) async -> Playlist? {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, creating == nil else { return nil }
+        creating = name
+        defer { creating = nil }
+        do {
+            let playlist = try await api.createPlaylist(name: name)
+            playlists.insert(playlist, at: 0)
+            return playlist
+        } catch {
+            notices.report("Could not create “\(name)”: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// Only the owner may rename a playlist.
+    func rename(_ id: String, to name: String) {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let index = playlists.firstIndex(where: { $0.id == id }), isOwn(playlists[index]),
+              !name.isEmpty, name != playlists[index].name else { return }
+        let old = playlists[index].name
+        playlists[index].name = name
+        Task {
+            do {
+                try await api.renamePlaylist(id, to: name)
+            } catch {
+                if let index = playlists.firstIndex(where: { $0.id == id }) { playlists[index].name = old }
+                notices.report("Could not rename “\(old)”: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// Removes a playlist from the listener's library; for their own ones
+    /// this is what Spotify calls deleting.
+    func remove(_ playlist: Playlist) {
+        guard let index = playlists.firstIndex(where: { $0.id == playlist.id }) else { return }
+        playlists.remove(at: index)
+        if edit == .rename(id: playlist.id) { edit = nil }
+        Task {
+            do {
+                try await api.remove([playlist.uri])
+                pages[.playlist(id: playlist.id)] = nil
+            } catch {
+                playlists.insert(playlist, at: min(index, playlists.count))
+                notices.report("Could not remove “\(playlist.name)”: \(error.localizedDescription)")
+            }
+        }
     }
 
     func add(_ uris: [String], to playlist: Playlist) {
@@ -77,9 +149,7 @@ final class Library {
             do {
                 try await api.addToPlaylist(playlist.id, uris: uris)
                 // Shown afresh next time it is opened.
-                pages = pages.filter { route, _ in
-                    if case .playlist(playlist.id, _) = route { false } else { true }
-                }
+                pages[.playlist(id: playlist.id)] = nil
             } catch {
                 notices.report("Could not add to “\(playlist.name)”: \(error.localizedDescription)")
             }
@@ -97,7 +167,7 @@ final class Library {
         switch route {
         case .whatsNew: content = .tracks(.recentlyPlayed(api: api))
         case .likedSongs: content = .tracks(.liked(api: api, username: username, stars: stars))
-        case .playlist(let id, _):
+        case .playlist(let id):
             // Development Mode grants read only the listener's own playlists;
             // the session reads any, so it takes every one not known as own.
             let owned = playlists.contains { $0.id == id && isOwn($0) }

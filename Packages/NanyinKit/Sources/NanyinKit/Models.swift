@@ -74,7 +74,7 @@ public struct PlaylistOwner: Codable, Sendable, Hashable {
 
 public struct Playlist: Codable, Sendable, Hashable, Identifiable {
     public let id: String
-    public let name: String
+    public var name: String
     public let uri: String
     public let description: String?
     public let images: [SpotifyImage]?

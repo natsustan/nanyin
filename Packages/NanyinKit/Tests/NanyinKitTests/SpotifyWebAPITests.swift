@@ -97,3 +97,54 @@ struct SpotifyWebAPITests {
         #expect(page.items.compactMap(\.playable?.name) == ["One", "Two"])
     }
 }
+
+struct PlaylistEditingTests {
+    @Test func createsAndRenamesPlaylists() async throws {
+        let seen = Requests()
+        let session = StubProtocol.session { request in
+            seen.append(request)
+            if request.httpMethod == "POST" {
+                return (201, [:], Data(#"{"id":"p1","name":"Mix","uri":"spotify:playlist:p1","owner":{"id":"u1"}}"#.utf8))
+            }
+            return (200, [:], Data())
+        }
+        let auth = WebAPIAuth(store: MemorySecretStore(), refresher: { _ in throw OAuthError.grantRevoked })
+        try await auth.signIn(with: OAuthToken(accessToken: "a1", refreshToken: "r", expiresAt: .now.addingTimeInterval(3600), scope: "", clientID: "c"))
+        let api = SpotifyWebAPI(auth: auth, session: session, cooldownStore: MemoryCooldown())
+
+        let created = try await api.createPlaylist(name: "Mix")
+        #expect(created.id == "p1" && created.name == "Mix")
+        try await api.renamePlaylist("p1", to: "Evening")
+
+        let requests = seen.all
+        #expect(requests.map(\.httpMethod) == ["POST", "PUT"])
+        #expect(requests.map { $0.url?.path } == ["/v1/me/playlists", "/v1/playlists/p1"])
+        let body = try #require(requests[1].bodyData)
+        #expect(String(decoding: body, as: UTF8.self) == #"{"name":"Evening"}"#)
+    }
+}
+
+final class Requests: @unchecked Sendable {
+    private var requests: [URLRequest] = []
+    private let lock = NSLock()
+    func append(_ request: URLRequest) { lock.withLock { requests.append(request) } }
+    var all: [URLRequest] { lock.withLock { requests } }
+}
+
+private extension URLRequest {
+    /// URLProtocol sees the body as a stream.
+    var bodyData: Data? {
+        if let httpBody { return httpBody }
+        guard let stream = httpBodyStream else { return nil }
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 1024)
+        while stream.hasBytesAvailable {
+            let count = stream.read(&buffer, maxLength: buffer.count)
+            if count <= 0 { break }
+            data.append(buffer, count: count)
+        }
+        return data
+    }
+}

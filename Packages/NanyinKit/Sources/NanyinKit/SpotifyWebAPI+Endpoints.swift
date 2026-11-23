@@ -62,6 +62,22 @@ public extension SpotifyWebAPI {
         }
     }
 
+    /// Creates a playlist owned by the listener (2026: `/me/playlists`).
+    func createPlaylist(name: String) async throws -> Playlist {
+        struct Body: Encodable, Sendable { let name: String }
+        let data = try await send("POST", "/me/playlists", body: Body(name: name))
+        do {
+            return try JSONDecoder().decode(Playlist.self, from: data)
+        } catch {
+            throw WebAPIError.decoding("/me/playlists: \(error)")
+        }
+    }
+
+    func renamePlaylist(_ id: String, to name: String) async throws {
+        struct Body: Encodable, Sendable { let name: String }
+        try await send("PUT", "/playlists/\(id)", body: Body(name: name))
+    }
+
     /// Saves tracks, albums, artists or playlists by URI (2026 unified library).
     func save(_ uris: [String]) async throws {
         try await send("PUT", "/me/library", query: ["uris": uris.joined(separator: ",")])
