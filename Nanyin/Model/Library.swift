@@ -18,6 +18,9 @@ enum PageContent {
 final class Library {
     private(set) var playlists: [Playlist] = []
     private(set) var playlistsError: String?
+    /// Every page has arrived. Until then each page replaces the list, so
+    /// it cannot be edited.
+    private(set) var playlistsLoaded = false
     /// Filled by `prepare` before a route is shown; views only read it.
     @ObservationIgnored private var pages: [Route: PageContent] = [:]
     private let api: SpotifyWebAPI
@@ -25,6 +28,9 @@ final class Library {
     private let session: PlaybackSession
     private let notices: Notices
     private var username: String?
+    /// Bumped at sign-out; a request's answer applies only to the account
+    /// that sent it.
+    @ObservationIgnored private var account = 0
 
     init(api: SpotifyWebAPI, stars: Stars, session: PlaybackSession, notices: Notices) {
         self.api = api
@@ -40,14 +46,19 @@ final class Library {
     }
 
     func signedOut() {
+        account += 1
+        busy = []
         username = nil
         playlists = []
+        playlistsLoaded = false
+        edit = nil
         pages = [:]
     }
 
     /// Shows each page of playlists as it arrives.
     func loadPlaylists() async {
         playlistsError = nil
+        playlistsLoaded = false
         var loaded: [Playlist] = []
         var offset = 0
         do {
@@ -58,6 +69,7 @@ final class Library {
                 offset += page.items.count
                 if page.next == nil || page.items.isEmpty { break }
             } while true
+            playlistsLoaded = true
         } catch {
             playlistsError = error.localizedDescription
         }
@@ -68,8 +80,102 @@ final class Library {
         playlists.filter { isOwn($0) || $0.collaborative == true }
     }
 
-    private func isOwn(_ playlist: Playlist) -> Bool {
+    func isOwn(_ playlist: Playlist) -> Bool {
         playlist.owner.id == username
+    }
+
+    func playlist(_ id: String) -> Playlist? {
+        playlists.first { $0.id == id }
+    }
+
+    // MARK: Creating, renaming and removing playlists
+
+    /// The sidebar row being edited in place, if any.
+    enum PlaylistEdit: Equatable {
+        case new
+        case rename(id: String)
+    }
+
+    /// Set through `begin`; the sidebar clears it when the field closes.
+    var edit: PlaylistEdit?
+    /// The name of a playlist Spotify is creating, shown until it answers.
+    private(set) var creating: String?
+
+    var canEditPlaylists: Bool { playlistsLoaded && edit == nil && creating == nil }
+
+    /// One field at a time: a second request waits for the first to close.
+    func begin(_ edit: PlaylistEdit) {
+        guard canEditPlaylists else { return }
+        self.edit = edit
+    }
+
+    /// Creates a playlist and returns it, first in the list, once Spotify has.
+    func createPlaylist(named name: String) async -> Playlist? {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, playlistsLoaded, creating == nil else { return nil }
+        let account = account
+        creating = name
+        defer { creating = nil }
+        do {
+            let playlist = try await api.createPlaylist(name: name)
+            guard account == self.account else { return nil }
+            playlists.insert(playlist, at: 0)
+            return playlist
+        } catch {
+            notices.report("Could not create “\(name)”: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// Playlists with a rename or removal on its way: each takes one at a
+    /// time, so a failure has only one earlier state to return to.
+    private(set) var busy: Set<String> = []
+
+    func canEdit(_ playlist: Playlist) -> Bool {
+        canEditPlaylists && !busy.contains(playlist.id)
+    }
+
+    /// Only the owner may rename a playlist.
+    func rename(_ id: String, to name: String) {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard playlistsLoaded, !busy.contains(id), let index = playlists.firstIndex(where: { $0.id == id }),
+              isOwn(playlists[index]), !name.isEmpty, name != playlists[index].name else { return }
+        let account = account
+        let old = playlists[index].name
+        playlists[index].name = name
+        busy.insert(id)
+        Task {
+            do {
+                try await api.renamePlaylist(id, to: name)
+            } catch {
+                guard account == self.account else { return }
+                if let index = playlists.firstIndex(where: { $0.id == id }) { playlists[index].name = old }
+                notices.report("Could not rename “\(old)”: \(error.localizedDescription)")
+            }
+            if account == self.account { busy.remove(id) }
+        }
+    }
+
+    /// Removes a playlist from the listener's library; for their own ones
+    /// this is what Spotify calls deleting.
+    func remove(_ playlist: Playlist) {
+        guard playlistsLoaded, !busy.contains(playlist.id),
+              let index = playlists.firstIndex(where: { $0.id == playlist.id }) else { return }
+        let playlist = playlists.remove(at: index)
+        busy.insert(playlist.id)
+        if edit == .rename(id: playlist.id) { edit = nil }
+        let account = account
+        Task {
+            do {
+                try await api.remove([playlist.uri])
+                pages[.playlist(id: playlist.id)] = nil
+            } catch {
+                guard account == self.account else { return }
+                playlists.insert(playlist, at: min(index, playlists.count))
+                notices.report("Could not remove “\(playlist.name)”: \(error.localizedDescription)")
+            }
+            if account == self.account { busy.remove(playlist.id) }
+        }
     }
 
     func add(_ uris: [String], to playlist: Playlist) {
@@ -77,9 +183,7 @@ final class Library {
             do {
                 try await api.addToPlaylist(playlist.id, uris: uris)
                 // Shown afresh next time it is opened.
-                pages = pages.filter { route, _ in
-                    if case .playlist(playlist.id, _) = route { false } else { true }
-                }
+                pages[.playlist(id: playlist.id)] = nil
             } catch {
                 notices.report("Could not add to “\(playlist.name)”: \(error.localizedDescription)")
             }
@@ -97,7 +201,7 @@ final class Library {
         switch route {
         case .whatsNew: content = .tracks(.recentlyPlayed(api: api))
         case .likedSongs: content = .tracks(.liked(api: api, username: username, stars: stars))
-        case .playlist(let id, _):
+        case .playlist(let id):
             // Development Mode grants read only the listener's own playlists;
             // the session reads any, so it takes every one not known as own.
             let owned = playlists.contains { $0.id == id && isOwn($0) }

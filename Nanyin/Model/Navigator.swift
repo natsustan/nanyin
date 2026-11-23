@@ -8,7 +8,7 @@ enum Route: Hashable {
     case likedSongs
     case albums
     case artists
-    case playlist(id: String, name: String)
+    case playlist(id: String)
     case album(id: String)
     case artist(id: String)
     case search(String)
@@ -81,6 +81,13 @@ final class Navigator {
         guard let next = forward.popLast() else { return }
         back.append(current)
         show(next)
+    }
+
+    /// Drops a page that no longer exists from history, leaving it if shown.
+    func forget(_ route: Route) {
+        back.removeAll { $0 == route }
+        forward.removeAll { $0 == route }
+        if current == route { show(.whatsNew) }
     }
 
     func reset() {
