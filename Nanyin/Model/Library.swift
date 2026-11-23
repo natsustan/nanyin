@@ -28,6 +28,9 @@ final class Library {
     private let session: PlaybackSession
     private let notices: Notices
     private var username: String?
+    /// Bumped at sign-out; a request's answer applies only to the account
+    /// that sent it.
+    @ObservationIgnored private var account = 0
 
     init(api: SpotifyWebAPI, stars: Stars, session: PlaybackSession, notices: Notices) {
         self.api = api
@@ -43,6 +46,8 @@ final class Library {
     }
 
     func signedOut() {
+        account += 1
+        renames = [:]
         username = nil
         playlists = []
         playlistsLoaded = false
@@ -108,10 +113,12 @@ final class Library {
     func createPlaylist(named name: String) async -> Playlist? {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, playlistsLoaded, creating == nil else { return nil }
+        let account = account
         creating = name
         defer { creating = nil }
         do {
             let playlist = try await api.createPlaylist(name: name)
+            guard account == self.account else { return nil }
             playlists.insert(playlist, at: 0)
             return playlist
         } catch {
@@ -120,24 +127,43 @@ final class Library {
         }
     }
 
+    /// Renames of one playlist still on their way, sent one after another
+    /// so Spotify ends with the last; `confirmed` is the name it last accepted.
+    private struct PendingRenames {
+        var confirmed: String
+        var last: Task<Void, Never>
+        var count: Int
+    }
+
+    @ObservationIgnored private var renames: [String: PendingRenames] = [:]
+
     /// Only the owner may rename a playlist.
     func rename(_ id: String, to name: String) {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard playlistsLoaded, let index = playlists.firstIndex(where: { $0.id == id }), isOwn(playlists[index]),
               !name.isEmpty, name != playlists[index].name else { return }
-        let old = playlists[index].name
+        let account = account
+        let previous = renames[id]
+        let confirmed = previous?.confirmed ?? playlists[index].name
         playlists[index].name = name
-        Task {
+        let task = Task {
+            await previous?.last.value
+            guard account == self.account else { return }
             do {
                 try await api.renamePlaylist(id, to: name)
+                renames[id]?.confirmed = name
             } catch {
-                // Unless a later rename has replaced this one.
-                if let index = playlists.firstIndex(where: { $0.id == id }), playlists[index].name == name {
-                    playlists[index].name = old
+                notices.report("Could not rename “\(confirmed)”: \(error.localizedDescription)")
+                // Shown name stays if a later rename has replaced this one.
+                if let index = playlists.firstIndex(where: { $0.id == id }), playlists[index].name == name,
+                   let confirmed = renames[id]?.confirmed {
+                    playlists[index].name = confirmed
                 }
-                notices.report("Could not rename “\(old)”: \(error.localizedDescription)")
             }
+            renames[id]?.count -= 1
+            if renames[id]?.count == 0 { renames[id] = nil }
         }
+        renames[id] = PendingRenames(confirmed: confirmed, last: task, count: (previous?.count ?? 0) + 1)
     }
 
     /// Removes a playlist from the listener's library; for their own ones
@@ -146,11 +172,13 @@ final class Library {
         guard playlistsLoaded, let index = playlists.firstIndex(where: { $0.id == playlist.id }) else { return }
         playlists.remove(at: index)
         if edit == .rename(id: playlist.id) { edit = nil }
+        let account = account
         Task {
             do {
                 try await api.remove([playlist.uri])
                 pages[.playlist(id: playlist.id)] = nil
             } catch {
+                guard account == self.account else { return }
                 playlists.insert(playlist, at: min(index, playlists.count))
                 notices.report("Could not remove “\(playlist.name)”: \(error.localizedDescription)")
             }
