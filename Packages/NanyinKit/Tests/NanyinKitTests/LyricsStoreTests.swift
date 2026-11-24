@@ -26,6 +26,13 @@ struct LyricsStoreTests {
         #expect(lyrics.activeLineIndex(at: 45000) == 3)
     }
 
+    @Test func rejectsMalformedLRCTimestampsWithoutCrashing() {
+        #expect(Lyrics.parseLRC("[00:.]bad") == nil)
+        #expect(Lyrics.parseLRC("[00:10.]bad") == nil)
+        #expect(Lyrics.parseLRC("[:10.00]bad") == nil)
+        #expect(Lyrics.parseLRC("[00:.50]bad") == nil)
+    }
+
     @Test func cleansEditionSuffixesForLookup() {
         #expect(LRCLIBClient.cleanTitle("Heroes (2017 Remaster)") == "Heroes")
         #expect(LRCLIBClient.cleanTitle("Dreams - Remastered 2004") == "Dreams")

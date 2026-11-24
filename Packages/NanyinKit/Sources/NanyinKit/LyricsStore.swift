@@ -82,10 +82,16 @@ public struct Lyrics: Codable, Sendable, Hashable {
     }
 
     private static func parseLRCTimestamp(_ tag: String) -> Int? {
-        let parts = tag.split(separator: ":", maxSplits: 1)
-        guard parts.count == 2, let minutes = Int(parts[0]), minutes >= 0 else { return nil }
-        let secParts = parts[1].split(separator: ".", maxSplits: 1)
-        guard let seconds = Int(secParts[0]), seconds >= 0, seconds < 60 else { return nil }
+        let parts = tag.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+        guard parts.count == 2,
+              !parts[0].isEmpty, parts[0].allSatisfy(\.isNumber),
+              let minutes = Int(parts[0]), minutes >= 0
+        else { return nil }
+        let secParts = parts[1].split(separator: ".", maxSplits: 1, omittingEmptySubsequences: false)
+        guard let secText = secParts.first,
+              !secText.isEmpty, secText.allSatisfy(\.isNumber),
+              let seconds = Int(secText), seconds >= 0, seconds < 60
+        else { return nil }
         var millis = 0
         if secParts.count == 2 {
             let frac = secParts[1]
