@@ -9,9 +9,11 @@ struct MainToolbar: View {
     @State private var debounce: Task<Void, Never>?
 
     static let height: CGFloat = 54
+    static let compactHeight: CGFloat = 26
 
     var body: some View {
         let navigator = app.navigator
+        let showFull = app.showsLibrary
         ZStack(alignment: .top) {
             TitleBarDragArea()
             Text("Nanyin")
@@ -23,32 +25,34 @@ struct MainToolbar: View {
             TrafficLights()
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.leading, 8)
-                .padding(.top, 2)
-            HStack(spacing: 10) {
-                HStack(spacing: -1) {
-                    Button(action: navigator.goBack) { Image(systemName: "chevron.left") }
-                        .buttonStyle(TexturedButtonStyle(width: 28))
-                        .disabled(!navigator.canGoBack)
-                        .keyboardShortcut("[", modifiers: .command)
-                    Button(action: navigator.goForward) { Image(systemName: "chevron.right") }
-                        .buttonStyle(TexturedButtonStyle(width: 28))
-                        .disabled(!navigator.canGoForward)
-                        .keyboardShortcut("]", modifiers: .command)
+                .padding(.top, showFull ? 2 : 5)
+            if showFull {
+                HStack(spacing: 10) {
+                    HStack(spacing: -1) {
+                        Button(action: navigator.goBack) { Image(systemName: "chevron.left") }
+                            .buttonStyle(TexturedButtonStyle(width: 28))
+                            .disabled(!navigator.canGoBack)
+                            .keyboardShortcut("[", modifiers: .command)
+                        Button(action: navigator.goForward) { Image(systemName: "chevron.right") }
+                            .buttonStyle(TexturedButtonStyle(width: 28))
+                            .disabled(!navigator.canGoForward)
+                            .keyboardShortcut("]", modifiers: .command)
+                    }
+                    AquaSearchField(text: $query, onSubmit: { search(replacing: false) }, focusRequest: navigator.searchFocusRequests)
+                        .frame(width: 220)
+                        .onChange(of: query) { scheduleSearch() }
+                    Spacer()
+                    if app.account.profile != nil {
+                        accountMenu
+                    }
                 }
-                AquaSearchField(text: $query, onSubmit: { search(replacing: false) }, focusRequest: navigator.searchFocusRequests)
-                    .frame(width: 220)
-                    .onChange(of: query) { scheduleSearch() }
-                Spacer()
-                if app.account.profile != nil {
-                    accountMenu
-                }
+                .padding(.horizontal, 10)
+                .frame(height: 32)
+                .frame(maxHeight: .infinity, alignment: .bottom)
+                .padding(.bottom, 1)
             }
-            .padding(.horizontal, 10)
-            .frame(height: 32)
-            .frame(maxHeight: .infinity, alignment: .bottom)
-            .padding(.bottom, 1)
         }
-        .frame(height: Self.height)
+        .frame(height: showFull ? Self.height : Self.compactHeight)
         .background(Theme.metal(active: appearsActive))
         .hairline(.top, .white.opacity(0.7))
         .hairline(.bottom, Theme.metalEdge)
@@ -59,6 +63,8 @@ struct MainToolbar: View {
             if let profile = app.account.profile {
                 Text(profile.isPremium ? "\(profile.name) · Premium" : profile.name)
             }
+            Divider()
+            Button("Proxy Settings…") { app.showProxySheet = true }
             Divider()
             Button("Sign Out") { Task { await app.signOut() } }
         } label: {

@@ -45,6 +45,9 @@ pub struct Config {
     pub expected_username: Option<String>,
     pub audio_cache_dir: Option<PathBuf>,
     pub audio_cache_limit: Option<u64>,
+    /// Optional HTTP proxy URL without credentials (e.g. `http://127.0.0.1:7890`).
+    #[serde(default)]
+    pub proxy: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -129,6 +132,7 @@ impl Carried {
     }
 }
 
+#[derive(Debug)]
 pub struct Failure {
     pub reason: FailureReason,
     pub message: String,
@@ -262,8 +266,10 @@ impl Engine {
         carried: Option<Carried>,
     ) -> Result<(Self, impl Future<Output = ()> + Send + 'static), Failure> {
         let credentials = config.credentials.into_credentials()?;
+        let proxy = parse_proxy(config.proxy.as_deref())?;
         let session_config = SessionConfig {
             device_id: config.device_id,
+            proxy,
             ..SessionConfig::default()
         };
         // Credentials stay in memory: Swift persists them in the Keychain.
@@ -616,6 +622,27 @@ impl Now {
     }
 }
 
+/// Parses an optional HTTP proxy URL for librespot. librespot's tunnel only
+/// speaks unauthenticated HTTP CONNECT, so anything else is rejected cleanly
+/// rather than silently bypassed.
+fn parse_proxy(raw: Option<&str>) -> Result<Option<url::Url>, Failure> {
+    let Some(raw) = raw.map(str::trim).filter(|s| !s.is_empty()) else {
+        return Ok(None);
+    };
+    let parsed = url::Url::parse(raw)
+        .map_err(|_| Failure::other("The configured playback proxy URL is invalid."))?;
+    if parsed.scheme() != "http"
+        || parsed.host_str().is_none()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+    {
+        return Err(Failure::other(
+            "Playback only supports HTTP proxies without a username or password.",
+        ));
+    }
+    Ok(Some(parsed))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -676,5 +703,18 @@ mod tests {
             track_id: track(),
         });
         assert_eq!(now.song(), None);
+    }
+
+    #[test]
+    fn parses_and_validates_playback_proxy() {
+        assert!(parse_proxy(None).unwrap().is_none());
+        assert!(parse_proxy(Some("   ")).unwrap().is_none());
+        let ok = parse_proxy(Some("http://127.0.0.1:7890"))
+            .unwrap()
+            .expect("parsed proxy");
+        assert_eq!(ok.as_str(), "http://127.0.0.1:7890/");
+        assert!(parse_proxy(Some("socks5://127.0.0.1:1080")).is_err());
+        assert!(parse_proxy(Some("http://user:pass@127.0.0.1:7890")).is_err());
+        assert!(parse_proxy(Some("not-a-url")).is_err());
     }
 }

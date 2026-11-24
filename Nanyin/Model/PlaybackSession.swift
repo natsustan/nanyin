@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import NanyinKit
 import Observation
@@ -28,17 +29,26 @@ final class PlaybackSession {
     }
 
     private(set) var state: State = .notSetUp {
-        didSet { if !readyWaiters.isEmpty { resumeReadyWaiters() } }
+        didSet {
+            if state == .ready, oldValue != .ready { onReady() }
+            if !readyWaiters.isEmpty { resumeReadyWaiters() }
+        }
     }
+    /// The active browser approval URL while `state == .authorizing`.
+    private(set) var authorizeURL: URL?
     var isReady: Bool { state == .ready }
+    var hasStoredCredentials: Bool { credentials != nil }
+    /// Fires when playback reaches `.ready`.
+    var onReady: () -> Void = {}
     /// Player events (everything but the session's own).
     var onPlayerEvent: (CoreEvent) -> Void = { _ in }
 
     private let secrets: any SecretStore
     private let engine = PlaybackEngine.shared
-    private let oauth = SpotifyOAuth()
+    private let oauth: SpotifyOAuth
     private var policy = ReconnectPolicy()
     private var expectedUsername: String?
+    private var proxyURL: String?
     private var retryTask: Task<Void, Never>?
     /// The core kept a dropped session's song playing for the next one.
     private var carrying = false
@@ -50,9 +60,33 @@ final class PlaybackSession {
     private static let credentialsKey = "playback-credentials"
     private static let deviceIDKey = "ConnectDeviceID"
 
-    init(secrets: any SecretStore) {
+    init(secrets: any SecretStore, transport: HTTPTransport = .shared, proxyURL: String? = nil) {
         self.secrets = secrets
+        self.oauth = SpotifyOAuth(transport: transport)
+        self.proxyURL = proxyURL
         engine.onEvent = { [weak self] event in self?.handle(event) }
+    }
+
+    /// Updates the optional unauthenticated HTTP proxy for librespot.
+    /// Reconnects only if a session was already active or trying to connect;
+    /// never opens a browser or starts an unrequested sign-in.
+    func updateProxy(_ newProxyURL: String?) {
+        guard proxyURL != newProxyURL else { return }
+        proxyURL = newProxyURL
+        guard expectedUsername != nil, credentials != nil else { return }
+        switch state {
+        case .ready:
+            // Replacing an active engine drops its loaded track and queue;
+            // let Player snapshot a resume point before connecting fresh.
+            onPlayerEvent(.sessionEnded(resuming: false))
+            policy.reset()
+            connectStored()
+        case .connecting, .waiting, .failed:
+            policy.reset()
+            connectStored()
+        case .notSetUp, .authorizing, .needsAuthorization:
+            break
+        }
     }
 
     /// Connects with the saved credential, if there is one. Called once the
@@ -68,16 +102,43 @@ final class PlaybackSession {
         guard expectedUsername != nil else { return }
         authorizeTask?.cancel()
         retryTask?.cancel()
+        authorizeURL = nil
         state = .authorizing
         authorizeTask = Task {
             do {
-                let token = try await oauth.authorizeInBrowser(.playback)
+                let token = try await oauth.authorizeInBrowser(.playback) { url in
+                    await MainActor.run {
+                        if !Task.isCancelled {
+                            self.authorizeURL = url
+                        }
+                    }
+                }
+                authorizeURL = nil
                 policy.reset()
                 connect(.accessToken(token.accessToken))
             } catch is CancellationError {
+                authorizeURL = nil
             } catch {
+                authorizeURL = nil
                 state = .needsAuthorization(error.localizedDescription)
             }
+        }
+    }
+
+    /// Re-opens the active playback approval page in the browser.
+    func reopenAuthorizeURL() {
+        if let authorizeURL {
+            _ = NSWorkspace.shared.open(authorizeURL)
+        }
+    }
+
+    /// Cancels an in-flight browser approval so the user is never stuck.
+    func cancelAuthorize() {
+        authorizeTask?.cancel()
+        authorizeTask = nil
+        authorizeURL = nil
+        if state == .authorizing {
+            state = .notSetUp
         }
     }
 
@@ -89,6 +150,8 @@ final class PlaybackSession {
 
     func signOut() {
         authorizeTask?.cancel()
+        authorizeTask = nil
+        authorizeURL = nil
         retryTask?.cancel()
         carrying = false
         engine.disconnect()
@@ -198,7 +261,8 @@ final class PlaybackSession {
             credentials: credentials,
             expectedUsername: expectedUsername,
             audioCacheDir: caches?.appending(path: Bundle.main.bundleIdentifier ?? "Nanyin").appending(path: "audio").path,
-            audioCacheLimit: 1 << 30
+            audioCacheLimit: 1 << 30,
+            proxy: proxyURL
         ))
     }
 

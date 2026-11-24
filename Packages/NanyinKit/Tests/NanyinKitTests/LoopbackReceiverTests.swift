@@ -28,4 +28,31 @@ struct LoopbackReceiverTests {
             _ = try await LoopbackReceiver.start(port: port, path: "/login")
         }
     }
+
+    @Test func ignoresMismatchedStateAndWaitsForRealCallback() async throws {
+        let port: UInt16 = 38_991
+        let receiver = try await LoopbackReceiver.start(port: port, path: "/login", expectedState: "good")
+        async let items = receiver.callback(timeout: .seconds(5))
+
+        let stale = try await URLSession.shared.data(from: URL(string: "http://127.0.0.1:\(port)/login?code=old&state=stale")!)
+        #expect((stale.1 as? HTTPURLResponse)?.statusCode == 400)
+
+        let strayError = try await URLSession.shared.data(from: URL(string: "http://127.0.0.1:\(port)/login?error=access_denied")!)
+        #expect((strayError.1 as? HTTPURLResponse)?.statusCode == 400)
+
+        let real = try await URLSession.shared.data(from: URL(string: "http://127.0.0.1:\(port)/login?code=fresh&state=good")!)
+        #expect((real.1 as? HTTPURLResponse)?.statusCode == 200)
+
+        let received = try await items
+        #expect(received.first { $0.name == "code" }?.value == "fresh")
+        #expect(received.first { $0.name == "state" }?.value == "good")
+    }
+
+    @Test func timesOutWhenNoRedirectArrives() async throws {
+        let port: UInt16 = 38_992
+        let receiver = try await LoopbackReceiver.start(port: port, path: "/login", expectedState: "s")
+        await #expect(throws: LoopbackReceiver.Failure.timedOut) {
+            _ = try await receiver.callback(timeout: .milliseconds(80))
+        }
+    }
 }

@@ -50,7 +50,7 @@ public actor SpotifyWebAPI {
     static let longestCooldown: TimeInterval = 24 * 3600
 
     private let auth: WebAPIAuth
-    private let session: URLSession
+    private let transport: HTTPTransport
     private let cooldownStore: any CooldownStore
     private let maxConcurrent: Int
     private var inFlight = 0
@@ -63,8 +63,22 @@ public actor SpotifyWebAPI {
         cooldownStore: any CooldownStore = DefaultsCooldownStore(),
         maxConcurrent: Int = 4
     ) {
+        self.init(
+            auth: auth,
+            transport: HTTPTransport(session: session),
+            cooldownStore: cooldownStore,
+            maxConcurrent: maxConcurrent
+        )
+    }
+
+    public init(
+        auth: WebAPIAuth,
+        transport: HTTPTransport,
+        cooldownStore: any CooldownStore = DefaultsCooldownStore(),
+        maxConcurrent: Int = 4
+    ) {
         self.auth = auth
-        self.session = session
+        self.transport = transport
         self.cooldownStore = cooldownStore
         self.maxConcurrent = maxConcurrent
         cooldownUntil = cooldownStore.load()
@@ -155,6 +169,7 @@ public actor SpotifyWebAPI {
     private func perform(_ request: URLRequest, token: String) async throws -> (Data, HTTPURLResponse) {
         var request = request
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let session = try transport.currentSession()
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw WebAPIError.http(0, "no HTTP response")
