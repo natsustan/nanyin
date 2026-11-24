@@ -110,14 +110,22 @@ final class Pager<Item: Sendable, Cursor: Sendable> {
         return Removal(entries: removed, generation: generation, pagesLoaded: pagesLoaded)
     }
 
-    func restore(_ removal: Removal) {
-        guard generation == removal.generation, !removal.entries.isEmpty else { return }
+    func restore(_ removal: Removal, where shouldRestore: (Item) -> Bool = { _ in true }) {
+        guard generation == removal.generation else { return }
+        var restored = 0
+        var skipped = 0
         for (index, item) in removal.entries {
-            items.insert(item, at: min(index, items.count))
+            if shouldRestore(item) {
+                items.insert(item, at: min(max(0, index - skipped), items.count))
+                restored += 1
+            } else {
+                skipped += 1
+            }
         }
+        guard restored > 0 else { return }
         if let total {
             self.total = pagesLoaded == removal.pagesLoaded
-                ? total + removal.entries.count
+                ? total + restored
                 : max(total, items.count)
         }
     }

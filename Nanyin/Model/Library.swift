@@ -251,15 +251,30 @@ final class Library {
         let removal = list.pages.remove { seen.contains($0.uri) }
         busy.insert(playlist.id)
         Task {
+            var removedAny = false
+            var remaining = Set(uris)
             do {
-                try await api.removeFromPlaylist(playlist.id, uris: uris)
+                for start in stride(from: 0, to: uris.count, by: 100) {
+                    let batch = Array(uris[start ..< min(start + 100, uris.count)])
+                    try await api.removeFromPlaylist(playlist.id, uris: batch)
+                    removedAny = true
+                    remaining.subtract(batch)
+                }
                 if account == self.account, hadMore {
                     // Server offsets shifted for pages beyond the first; reload cleanly.
                     list.pages.reload()
                 }
             } catch {
                 guard account == self.account else { return }
-                list.pages.restore(removal)
+                if removedAny {
+                    if hadMore {
+                        list.pages.reload()
+                    } else {
+                        list.pages.restore(removal) { remaining.contains($0.uri) }
+                    }
+                } else {
+                    list.pages.restore(removal)
+                }
                 notices.report("Could not remove tracks from “\(playlist.name)”: \(error.localizedDescription)")
             }
             if account == self.account { busy.remove(playlist.id) }

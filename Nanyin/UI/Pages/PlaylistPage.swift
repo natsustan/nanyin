@@ -55,6 +55,7 @@ struct PlaylistPage: View {
     let list: TrackList
 
     @State private var filter = ""
+    @State private var reachedFilteredEnd = false
     @State private var sort: PlaylistSort = .custom
     @State private var sortAscending = true
     @State private var editingDetails = false
@@ -65,6 +66,7 @@ struct PlaylistPage: View {
         let status = pages.error ?? (pages.isLoading && pages.items.isEmpty ? "Loading…" : detail)
         let displayed = displayedRows
         let uri = playlist?.uri ?? list.contextURI
+        let fetchFilteredMore = !trimmedFilter.isEmpty && pages.hasMore && (displayed.count < 20 || reachedFilteredEnd)
         VStack(spacing: 0) {
             PageHeader(
                 title: title,
@@ -84,9 +86,6 @@ struct PlaylistPage: View {
                         message: pages.error ?? "Searching more tracks…",
                         retry: pages.error != nil ? { pages.retry() } : nil
                     )
-                    .task(id: "\(trimmedFilter)|\(pages.items.count)") {
-                        pages.loadNext()
-                    }
                 } else {
                     PlaceholderText(message: "No matching tracks.")
                 }
@@ -98,11 +97,20 @@ struct PlaylistPage: View {
                         app.player.play(rows: displayed, start: row, contextURI: uri)
                     } : nil,
                     onRowAppeared: isCustomView ? { index in
-                        if index >= displayed.count - 20 { list.pages.loadNext() }
+                        if index >= displayed.count - 20 {
+                            if !trimmedFilter.isEmpty { reachedFilteredEnd = true }
+                            list.pages.loadNext()
+                        }
                     } : nil,
                     editablePlaylist: playlist.flatMap { app.library.canEditTracks($0) ? $0 : nil })
             }
         }
+        .task(id: fetchFilteredMore ? "\(trimmedFilter)|\(pages.items.count)" : "") {
+            guard fetchFilteredMore else { return }
+            pages.loadNext()
+        }
+        .onChange(of: trimmedFilter) { reachedFilteredEnd = false }
+        .onChange(of: displayed.count) { reachedFilteredEnd = false }
         .sheet(isPresented: $editingDetails) {
             if let playlist {
                 EditPlaylistSheet(playlist: playlist) { name, description in
