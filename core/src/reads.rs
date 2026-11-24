@@ -24,7 +24,10 @@ use librespot_protocol::{
 use protobuf::{EnumOrUnknown, Message};
 use serde::{Deserialize, Serialize};
 
-use crate::events::Track;
+use crate::{
+    events::Track,
+    pathfinder::{HomeShelves, Pathfinder, ReleaseAlbum},
+};
 
 /// Rows per page, as the Web API's limit.
 const PAGE: usize = 50;
@@ -90,6 +93,7 @@ type List = Vec<(SpotifyUri, Option<i64>)>;
 
 pub struct Reads {
     session: Session,
+    pathfinder: Pathfinder,
     /// Most recently read last.
     lists: Mutex<VecDeque<(String, Arc<List>)>>,
     known: Mutex<HashMap<String, Track>>,
@@ -97,11 +101,28 @@ pub struct Reads {
 
 impl Reads {
     pub fn new(session: Session) -> Self {
+        let pathfinder = Pathfinder::new(session.clone());
         Self {
             session,
+            pathfinder,
             lists: Mutex::default(),
             known: Mutex::default(),
         }
+    }
+
+    pub async fn new_releases(&self, force: bool) -> Result<Vec<ReleaseAlbum>, Error> {
+        self.pathfinder.new_releases(force).await
+    }
+
+    pub async fn made_for_you(
+        &self,
+        context_token: &str,
+        timezone: &str,
+        force: bool,
+    ) -> Result<HomeShelves, Error> {
+        self.pathfinder
+            .made_for_you(context_token, timezone, force)
+            .await
     }
 
     /// One page of a playlist's songs. The first page fetches the list afresh.
