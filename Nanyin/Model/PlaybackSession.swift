@@ -89,6 +89,17 @@ final class PlaybackSession {
         reconnectForConfigChange(dropCarried: true)
     }
 
+    /// Nudges a backed-off or failed session to reconnect promptly after Mac
+    /// wakes from sleep, without ever opening a browser.
+    func handleSystemWake() {
+        switch state {
+        case .waiting, .failed:
+            retry()
+        case .notSetUp, .authorizing, .connecting, .ready, .needsAuthorization:
+            break
+        }
+    }
+
     private func reconnectForConfigChange(dropCarried: Bool) {
         guard expectedUsername != nil, credentials != nil else { return }
         switch state {
@@ -292,6 +303,13 @@ final class PlaybackSession {
         ))
     }
 
+    /// Shuts down the librespot session cleanly before the app exits.
+    func disconnectForTermination() {
+        authorizeTask?.cancel()
+        retryTask?.cancel()
+        carrying = false
+        engine.disconnect()
+    }
 
     private func saveCredentials(_ value: String?) {
         guard value != credentials else { return }

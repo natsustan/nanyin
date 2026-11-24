@@ -6,6 +6,8 @@ import Observation
 @MainActor
 @Observable
 final class AppModel {
+    static weak var active: AppModel?
+
     let settings = PlaybackSettings()
     let proxy: ProxyManager
     let account: Account
@@ -41,8 +43,9 @@ final class AppModel {
         #else
         let demo = false
         #endif
+        let secondaryInstance = !demo && AppInstance.existingRunningInstance() != nil
         let bundleID = Bundle.main.bundleIdentifier ?? "com.cosmoss.nanyin"
-        let secrets: any SecretStore = demo
+        let secrets: any SecretStore = (demo || secondaryInstance)
             ? MemorySecretStore()
             : KeychainStore(service: bundleID + ".credentials")
         proxy = ProxyManager(secrets: secrets)
@@ -62,6 +65,8 @@ final class AppModel {
         navigator.willShow = { [library] route in library.prepare(route) }
         proxy.onPlaybackProxyChanged = { [session] url in session.updateProxy(url) }
         settings.onPlaybackConfigChanged = { [session] in session.applyPlaybackSettings() }
+        guard !secondaryInstance else { return }
+        Self.active = self
         #if DEBUG
         if demo {
             DemoContent.install(in: self)
@@ -96,6 +101,14 @@ final class AppModel {
         Task { [weak self, revocations = account.auth.revocations] in
             for await _ in revocations { await self?.signOut() }
         }
+    }
+
+    func handleSystemWake() {
+        session.handleSystemWake()
+    }
+
+    func prepareForTermination() {
+        session.disconnectForTermination()
     }
 
     func openSpotifyLink(_ target: SpotifyTarget) {
