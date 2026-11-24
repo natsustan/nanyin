@@ -240,6 +240,26 @@ final class Library {
         }
     }
 
+    /// Reorders one track inside an editable playlist optimistically, rolling
+    /// back if Spotify refuses the move.
+    func reorderTrack(from sourceIndex: Int, insertBefore: Int, in playlist: Playlist, list: TrackList) {
+        guard canEditTracks(playlist), !busy.contains(playlist.id),
+              let move = list.pages.move(from: sourceIndex, insertBefore: insertBefore)
+        else { return }
+        let account = account
+        busy.insert(playlist.id)
+        Task {
+            do {
+                try await api.reorderPlaylistItems(playlist.id, rangeStart: sourceIndex, insertBefore: insertBefore)
+            } catch {
+                guard account == self.account else { return }
+                list.pages.revert(move)
+                notices.report("Could not reorder “\(playlist.name)”: \(error.localizedDescription)")
+            }
+            if account == self.account { busy.remove(playlist.id) }
+        }
+    }
+
     /// Removes tracks from an editable playlist optimistically, rolling back on failure.
     func removeTracks(_ rows: [TrackRow], from playlist: Playlist, list: TrackList) {
         guard canEditTracks(playlist), !busy.contains(playlist.id) else { return }

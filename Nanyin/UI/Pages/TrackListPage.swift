@@ -47,6 +47,7 @@ struct TrackListTable: View {
     var playOverride: ((TrackRow) -> Void)? = nil
     var onRowAppeared: ((Int) -> Void)? = nil
     var editablePlaylist: Playlist? = nil
+    var onReorder: ((_ from: Int, _ insertBefore: Int) -> Void)? = nil
 
     var body: some View {
         let player = app.player
@@ -62,7 +63,8 @@ struct TrackListTable: View {
                 isStarred: { stars.isStarred($0.uri) },
                 toggleStar: { stars.toggle($0.uri) },
                 menu: menu,
-                open: { app.navigator.go(to: $0) }))
+                open: { app.navigator.go(to: $0) },
+                reorder: onReorder))
     }
 
     private func play(_ row: TrackRow) {

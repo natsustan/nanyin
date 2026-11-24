@@ -90,6 +90,7 @@ struct PlaylistPage: View {
                     PlaceholderText(message: "No matching tracks.")
                 }
             } else {
+                let editable = playlist.flatMap { app.library.canEditTracks($0) ? $0 : nil }
                 TrackListTable(
                     list: list,
                     rowsOverride: isCustomView ? displayed : nil,
@@ -102,7 +103,12 @@ struct PlaylistPage: View {
                             list.pages.loadNext()
                         }
                     } : nil,
-                    editablePlaylist: playlist.flatMap { app.library.canEditTracks($0) ? $0 : nil })
+                    editablePlaylist: editable,
+                    onReorder: (!isCustomView && editable != nil) ? { from, insertBefore in
+                        if let editable {
+                            app.library.reorderTrack(from: from, insertBefore: insertBefore, in: editable, list: list)
+                        }
+                    } : nil)
             }
         }
         .task(id: fetchFilteredMore ? "\(trimmedFilter)|\(pages.items.count)" : "") {

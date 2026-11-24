@@ -24,7 +24,11 @@ struct TrackTable: NSViewRepresentable {
         var menu: ([TrackRow]) -> [TrackMenuItem] = { _ in [] }
         /// Opens an artist's or album's page.
         var open: (Route) -> Void
+        /// Reorders one track from `from` to `insertBefore` when drag-reordering is enabled.
+        var reorder: ((_ from: Int, _ insertBefore: Int) -> Void)? = nil
     }
+
+    static let reorderPasteboardType = NSPasteboard.PasteboardType("com.cosmoss.nanyin.track-row")
 
     let rows: [TrackRow]
     let playingURI: String?
@@ -70,6 +74,9 @@ struct TrackTable: NSViewRepresentable {
         table.doubleAction = #selector(Coordinator.doubleClicked(_:))
         table.action = #selector(Coordinator.clicked(_:))
         table.menu = context.coordinator.makeMenu()
+        table.registerForDraggedTypes([Self.reorderPasteboardType])
+        table.setDraggingSourceOperationMask([.copy, .move], forLocal: true)
+        table.setDraggingSourceOperationMask(.copy, forLocal: false)
         context.coordinator.table = table
 
         let scroll = NSScrollView()
@@ -204,6 +211,51 @@ struct TrackTable: NSViewRepresentable {
             let row = sender.clickedRow
             guard rows.indices.contains(row) else { return }
             actions.play(rows[row])
+        }
+
+        // MARK: Drag & Drop
+
+        func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> (any NSPasteboardWriting)? {
+            guard rows.indices.contains(row) else { return nil }
+            let item = NSPasteboardItem()
+            item.setString(String(row), forType: TrackTable.reorderPasteboardType)
+            item.setString(Route.webLink(for: rows[row].uri), forType: .string)
+            return item
+        }
+
+        func tableView(
+            _ tableView: NSTableView,
+            validateDrop info: any NSDraggingInfo,
+            proposedRow row: Int,
+            proposedDropOperation dropOperation: NSTableView.DropOperation
+        ) -> NSDragOperation {
+            guard actions.reorder != nil,
+                  info.draggingSource as? NSTableView === tableView,
+                  info.draggingPasteboard.pasteboardItems?.count == 1,
+                  info.draggingPasteboard.string(forType: TrackTable.reorderPasteboardType) != nil
+            else { return [] }
+            if dropOperation == .on {
+                tableView.setDropRow(row, dropOperation: .above)
+            }
+            return .move
+        }
+
+        func tableView(
+            _ tableView: NSTableView,
+            acceptDrop info: any NSDraggingInfo,
+            row: Int,
+            dropOperation: NSTableView.DropOperation
+        ) -> Bool {
+            guard let reorder = actions.reorder,
+                  info.draggingSource as? NSTableView === tableView,
+                  info.draggingPasteboard.pasteboardItems?.count == 1,
+                  let raw = info.draggingPasteboard.string(forType: TrackTable.reorderPasteboardType),
+                  let from = Int(raw),
+                  rows.indices.contains(from),
+                  from != row, from + 1 != row
+            else { return false }
+            reorder(from, row)
+            return true
         }
 
         // MARK: Context menu

@@ -130,6 +130,20 @@ public extension SpotifyWebAPI {
         try await send("PUT", "/playlists/\(id)", body: Body(name: name, description: description))
     }
 
+    /// Reorders a contiguous range of items inside a playlist the listener may edit.
+    func reorderPlaylistItems(_ id: String, rangeStart: Int, insertBefore: Int, rangeLength: Int = 1) async throws {
+        struct Body: Encodable, Sendable {
+            let range_start: Int
+            let insert_before: Int
+            let range_length: Int
+        }
+        try await send(
+            "PUT",
+            "/playlists/\(id)/items",
+            body: Body(range_start: rangeStart, insert_before: insertBefore, range_length: rangeLength)
+        )
+    }
+
     /// Available Spotify Connect devices for the signed-in account.
     func devices() async throws -> [ConnectDevice] {
         struct Body: Decodable, Sendable { let devices: [ConnectDevice] }
