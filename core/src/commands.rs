@@ -30,6 +30,8 @@ pub enum Command {
     AddToQueue {
         uri: String,
     },
+    /// Clears manually queued tracks while keeping context tracks.
+    ClearQueue,
     /// Start playing a context (playlist, album, artist, Liked Songs) or an
     /// explicit list of tracks. Large lists belong in a context: Spotify
     /// resolves it server-side instead of this device uploading every URI.
@@ -89,6 +91,7 @@ impl Command {
                 spirc.repeat_track(track)
             }
             Self::AddToQueue { uri } => spirc.add_to_queue(SpotifyUri::from_uri(&uri)?),
+            Self::ClearQueue => spirc.clear_queue(),
             Self::Load(load) => {
                 // Commands are ignored while this device is not the active
                 // one; activating while already active is a no-op.
@@ -107,6 +110,10 @@ mod tests {
     fn decodes_commands() {
         let cmd: Command = serde_json::from_str(r#"{"cmd":"seek","position_ms":1200}"#).unwrap();
         assert_eq!(cmd, Command::Seek { position_ms: 1200 });
+        assert_eq!(
+            serde_json::from_str::<Command>(r#"{"cmd":"clear_queue"}"#).unwrap(),
+            Command::ClearQueue
+        );
         let cmd: Command = serde_json::from_str(
             r#"{"cmd":"load","context_uri":"spotify:playlist:abc","start_uri":"spotify:track:x"}"#,
         )

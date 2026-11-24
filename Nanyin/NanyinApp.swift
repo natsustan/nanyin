@@ -55,10 +55,20 @@ struct NanyinApp: App {
                 Button("Previous") { app.player.previous() }
                     .keyboardShortcut(.leftArrow, modifiers: .command)
                 Divider()
+                Button("Volume Up") { app.player.adjustVolume(byPercent: 5) }
+                    .keyboardShortcut(.upArrow, modifiers: .command)
+                Button("Volume Down") { app.player.adjustVolume(byPercent: -5) }
+                    .keyboardShortcut(.downArrow, modifiers: .command)
+                Button(app.player.isMuted ? "Unmute" : "Mute") { app.player.toggleMute() }
+                Divider()
                 Button("Shuffle") { app.player.toggleShuffle() }
                     .keyboardShortcut("s", modifiers: .command)
                 Button("Repeat") { app.player.cycleRepeat() }
                     .keyboardShortcut("r", modifiers: .command)
+                Divider()
+                Button("Show Current Song") { app.revealPlayingTrack() }
+                    .keyboardShortcut("j", modifiers: .command)
+                    .disabled(app.player.track == nil)
             }
         }
 

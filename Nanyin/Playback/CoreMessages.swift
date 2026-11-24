@@ -203,6 +203,7 @@ enum CoreCommand: Encodable, Equatable {
     case shuffle(Bool)
     case `repeat`(context: Bool, track: Bool)
     case addToQueue(uri: String)
+    case clearQueue
     case load(Load)
 
     struct Load: Encodable, Equatable {
@@ -252,6 +253,8 @@ enum CoreCommand: Encodable, Equatable {
         case .addToQueue(let uri):
             try c.encode("add_to_queue", forKey: .cmd)
             try c.encode(uri, forKey: .uri)
+        case .clearQueue:
+            try c.encode("clear_queue", forKey: .cmd)
         case .load(let load):
             try c.encode("load", forKey: .cmd)
             try load.encode(to: encoder)

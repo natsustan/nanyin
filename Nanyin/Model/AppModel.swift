@@ -152,6 +152,22 @@ final class AppModel {
         credits = TrackCredits(trackID: trackID, title: title, artists: artists, session: session)
     }
 
+    func revealPlayingTrack() {
+        if let contextURI = player.contextURI {
+            if contextURI.hasSuffix(":collection") {
+                navigator.go(to: .likedSongs)
+                return
+            }
+            if let route = Route(uri: contextURI) {
+                navigator.go(to: route)
+                return
+            }
+        }
+        if let albumURI = player.track?.albumURI, let route = Route(uri: albumURI) {
+            navigator.go(to: route)
+        }
+    }
+
     func signOut() async {
         linkLookupTask?.cancel()
         linkLookupTask = nil

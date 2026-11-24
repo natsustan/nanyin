@@ -51,6 +51,7 @@ final class Player {
     /// What plays after the current track, as the core last reported it.
     private(set) var upNext = TrackList(rows: [])
     private(set) var volume = Player.savedVolume
+    private(set) var isMuted = Player.savedVolume == 0
     /// Set when another device took playback over.
     private(set) var playingElsewhere = false
     /// Called once per play when the listener has heard enough of the track
@@ -65,6 +66,9 @@ final class Player {
     /// The track the core is loading; it becomes `track` only once loaded.
     @ObservationIgnored private var loadingURI: String?
     @ObservationIgnored private var volumeDrag: (lastSent: Date, pending: Task<Void, Never>?)?
+    @ObservationIgnored private var unmutedVolume: UInt16 = Player.savedVolume > 0
+        ? Player.savedVolume
+        : UInt16(Double(UInt16.max) * 0.7)
     @ObservationIgnored private var listen = ListenState()
 
     private static let volumeKey = "PlaybackVolume"
@@ -174,6 +178,12 @@ final class Player {
     /// most every 150 ms; the final value is always sent and saved.
     func setVolume(_ value: UInt16, final: Bool) {
         volume = value
+        if value > 0 {
+            isMuted = false
+            unmutedVolume = value
+        } else if final {
+            isMuted = true
+        }
         let now = Date.now
         var drag = volumeDrag ?? (lastSent: .distantPast, pending: nil)
         drag.pending?.cancel()
@@ -195,6 +205,25 @@ final class Player {
         }
     }
 
+    func toggleMute() {
+        if isMuted || volume == 0 {
+            let restored = unmutedVolume > 0 ? unmutedVolume : UInt16(Double(UInt16.max) * 0.5)
+            isMuted = false
+            setVolume(restored, final: true)
+        } else {
+            unmutedVolume = volume
+            isMuted = true
+            setVolume(0, final: true)
+        }
+    }
+
+    func adjustVolume(byPercent delta: Int) {
+        let step = Int((Double(UInt16.max) * Double(delta) / 100.0).rounded())
+        let base = isMuted ? 0 : Int(volume)
+        let target = UInt16(clamping: max(0, min(Int(UInt16.max), base + step)))
+        setVolume(target, final: true)
+    }
+
     func toggleShuffle() {
         guard send(.shuffle(!shuffle)) else { return }
         shuffle.toggle()
@@ -209,6 +238,11 @@ final class Player {
     func addToQueue(_ uri: String) {
         send(.addToQueue(uri: uri))
     }
+
+    func clearQueue() {
+        send(.clearQueue)
+    }
+
 
     func signOut() {
         resetListen()
@@ -274,6 +308,8 @@ final class Player {
             // The core echoes what a drag sent; the knob already shows it.
             if volumeDrag == nil {
                 volume = value
+                isMuted = value == 0
+                if value > 0 { unmutedVolume = value }
                 UserDefaults.standard.set(Int(value), forKey: Self.volumeKey)
             }
         case .shuffle(let on):

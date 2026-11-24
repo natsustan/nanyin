@@ -19,7 +19,7 @@ struct PlayerBar: View {
                     .buttonStyle(GlossyRoundButtonStyle(diameter: 24))
             }
             VolumeSlider()
-                .frame(width: 80)
+                .frame(width: 86)
             ProgressScrubber()
             HStack(spacing: 2) {
                 Button(action: player.toggleShuffle) { Image(systemName: "shuffle") }
@@ -114,15 +114,29 @@ private struct VolumeSlider: View {
     @Environment(AppModel.self) private var app
 
     var body: some View {
+        let player = app.player
+        let fraction = Double(player.volume) / Double(UInt16.max)
         HStack(spacing: 4) {
-            Image(systemName: "speaker.fill")
-                .font(.system(size: 9))
-                .foregroundStyle(Theme.hex(0xC8C8C8))
-            AquaTrack(fraction: Double(app.player.volume) / Double(UInt16.max), knob: true) { value, ended in
-                app.player.setVolume(UInt16(value * Double(UInt16.max)), final: ended)
+            Button(action: player.toggleMute) {
+                Image(systemName: speakerSymbol(muted: player.isMuted, fraction: fraction))
+                    .font(.system(size: 10))
+                    .foregroundStyle(player.isMuted ? Theme.secondaryText : Theme.hex(0xC8C8C8))
+                    .frame(width: 14, height: 14)
+            }
+            .buttonStyle(.plain)
+            .help(player.isMuted ? "Unmute" : "Mute")
+            AquaTrack(fraction: fraction, knob: true) { value, ended in
+                player.setVolume(UInt16(value * Double(UInt16.max)), final: ended)
             }
             .frame(height: 14)
         }
+    }
+
+    private func speakerSymbol(muted: Bool, fraction: Double) -> String {
+        if muted || fraction <= 0.001 { return "speaker.slash.fill" }
+        if fraction < 0.34 { return "speaker.wave.1.fill" }
+        if fraction < 0.67 { return "speaker.wave.2.fill" }
+        return "speaker.wave.3.fill"
     }
 }
 
