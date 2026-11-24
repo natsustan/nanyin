@@ -64,6 +64,7 @@ struct PlaylistPage: View {
         let pages = list.pages
         let status = pages.error ?? (pages.isLoading && pages.items.isEmpty ? "Loading…" : detail)
         let displayed = displayedRows
+        let uri = playlist?.uri ?? list.contextURI
         VStack(spacing: 0) {
             PageHeader(
                 title: title,
@@ -76,14 +77,26 @@ struct PlaylistPage: View {
                     Button("Try Again", action: pages.retry).buttonStyle(TexturedButtonStyle())
                 }
             }
-            actionBar(displayed: displayed)
+            actionBar(displayed: displayed, uri: uri)
             if !trimmedFilter.isEmpty && displayed.isEmpty {
-                PlaceholderText(message: "No matching tracks.")
+                if pages.hasMore {
+                    PlaceholderText(
+                        message: pages.error ?? "Searching more tracks…",
+                        retry: pages.error != nil ? { pages.retry() } : nil
+                    )
+                    .task(id: "\(trimmedFilter)|\(pages.items.count)") {
+                        pages.loadNext()
+                    }
+                } else {
+                    PlaceholderText(message: "No matching tracks.")
+                }
             } else {
                 TrackListTable(
                     list: list,
                     rowsOverride: isCustomView ? displayed : nil,
-                    playOverride: playDisplayed ? { row in app.player.play(rows: displayed, start: row) } : nil,
+                    playOverride: playDisplayed ? { row in
+                        app.player.play(rows: displayed, start: row, contextURI: uri)
+                    } : nil,
                     onRowAppeared: isCustomView ? { index in
                         if index >= displayed.count - 20 { list.pages.loadNext() }
                     } : nil,
@@ -112,10 +125,9 @@ struct PlaylistPage: View {
         }
     }
 
-    private func actionBar(displayed: [TrackRow]) -> some View {
+    private func actionBar(displayed: [TrackRow], uri: String?) -> some View {
         let player = app.player
         let library = app.library
-        let uri = playlist?.uri ?? list.contextURI
         let controlsCurrent = uri != nil && !isCustomView && player.contextURI == uri && player.track != nil
         let isPlayingHere = controlsCurrent && player.isPlaying
         let canPlay = playDisplayed ? !displayed.isEmpty : (!list.rows.isEmpty || (list.pages.total ?? 1) > 0)
@@ -125,7 +137,7 @@ struct PlaylistPage: View {
                 if controlsCurrent {
                     player.togglePlayPause()
                 } else if playDisplayed {
-                    player.play(rows: displayed)
+                    player.play(rows: displayed, contextURI: uri)
                 } else if let uri {
                     player.play(contextURI: uri)
                 }

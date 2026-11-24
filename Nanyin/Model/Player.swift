@@ -102,12 +102,23 @@ final class Player {
         if let shuffle { self.shuffle = shuffle }
     }
 
-    /// Plays a specific displayed slice (e.g. a filtered or sorted playlist).
+    /// Maximum number of tracks uploaded directly in a `Load` command;
+    /// larger lists always play by Spotify context URI.
+    static let maxDirectTrackLoad = 50
+
+    /// Plays a short displayed slice (e.g. a filtered or sorted playlist).
+    /// Falls back to `contextURI` when the slice exceeds `maxDirectTrackLoad`
+    /// so large playlists are never uploaded as track lists.
     func play(rows: [TrackRow], start row: TrackRow? = nil, contextURI: String? = nil) {
-        let uris = rows.map(\.uri)
-        guard !uris.isEmpty else { return }
-        let startURI = row?.uri ?? uris[0]
-        start(.init(trackURIs: uris, startURI: startURI), uri: startURI, contextURI: contextURI)
+        guard !rows.isEmpty else { return }
+        if rows.count > Self.maxDirectTrackLoad, let contextURI {
+            start(.init(contextURI: contextURI, startURI: row?.uri), uri: row?.uri, contextURI: contextURI)
+            return
+        }
+        let slice = rows.count > Self.maxDirectTrackLoad ? Array(rows.prefix(Self.maxDirectTrackLoad)) : rows
+        let uris = slice.map(\.uri)
+        let startURI = row.flatMap { uris.contains($0.uri) ? $0.uri : nil } ?? uris[0]
+        start(.init(trackURIs: uris, startURI: startURI), uri: startURI, contextURI: nil)
     }
 
     @discardableResult

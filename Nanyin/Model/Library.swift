@@ -247,18 +247,19 @@ final class Library {
         let uris = rows.map(\.uri).filter { seen.insert($0).inserted }
         guard !uris.isEmpty else { return }
         let account = account
-        let snapshot = list.pages.remove { seen.contains($0.uri) }
+        let hadMore = list.pages.hasMore
+        let removal = list.pages.remove { seen.contains($0.uri) }
         busy.insert(playlist.id)
         Task {
             do {
                 try await api.removeFromPlaylist(playlist.id, uris: uris)
-                if account == self.account, list.pages.hasMore {
-                    // Server offsets shifted for unloaded pages; reload cleanly.
+                if account == self.account, hadMore {
+                    // Server offsets shifted for pages beyond the first; reload cleanly.
                     list.pages.reload()
                 }
             } catch {
                 guard account == self.account else { return }
-                list.pages.restore(snapshot)
+                list.pages.restore(removal)
                 notices.report("Could not remove tracks from “\(playlist.name)”: \(error.localizedDescription)")
             }
             if account == self.account { busy.remove(playlist.id) }

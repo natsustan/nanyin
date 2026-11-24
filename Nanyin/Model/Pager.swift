@@ -17,6 +17,7 @@ final class Pager<Item: Sendable, Cursor: Sendable> {
     private let first: Cursor?
     private var next: Cursor?
     private var generation = 0
+    private var pagesLoaded = 0
     private let fetch: (Cursor) async throws -> Page
 
     var hasMore: Bool { next != nil }
@@ -49,6 +50,7 @@ final class Pager<Item: Sendable, Cursor: Sendable> {
                 items += page.items
                 total = page.total
                 next = page.next
+                pagesLoaded += 1
                 isLoading = false
                 // A page can come back empty yet not be the last (a Web API
                 // playlist page of removed songs); no row will appear to ask
@@ -71,6 +73,7 @@ final class Pager<Item: Sendable, Cursor: Sendable> {
     func reload() {
         guard let first else { return }
         generation += 1
+        pagesLoaded = 0
         items = []
         total = nil
         error = nil
@@ -83,26 +86,40 @@ final class Pager<Item: Sendable, Cursor: Sendable> {
         loadMore()
     }
 
-    struct Snapshot {
-        fileprivate let items: [Item]
-        fileprivate let total: Int?
+    struct Removal {
+        fileprivate let entries: [(index: Int, item: Item)]
         fileprivate let generation: Int
+        fileprivate let pagesLoaded: Int
     }
 
-    /// Optimistically removes matching items, returning a snapshot for rollback.
-    func remove(where shouldRemove: (Item) -> Bool) -> Snapshot {
-        let snapshot = Snapshot(items: items, total: total, generation: generation)
-        let before = items.count
-        items.removeAll(where: shouldRemove)
-        let removed = before - items.count
-        if let total { self.total = max(0, total - removed) }
-        return snapshot
+    /// Optimistically removes matching items, returning a rollback token that
+    /// reinserts only the removed entries so pages loaded meanwhile stay intact.
+    func remove(where shouldRemove: (Item) -> Bool) -> Removal {
+        var removed: [(Int, Item)] = []
+        var kept: [Item] = []
+        kept.reserveCapacity(items.count)
+        for (index, item) in items.enumerated() {
+            if shouldRemove(item) {
+                removed.append((index, item))
+            } else {
+                kept.append(item)
+            }
+        }
+        items = kept
+        if let total { self.total = max(0, total - removed.count) }
+        return Removal(entries: removed, generation: generation, pagesLoaded: pagesLoaded)
     }
 
-    func restore(_ snapshot: Snapshot) {
-        guard generation == snapshot.generation else { return }
-        items = snapshot.items
-        total = snapshot.total
+    func restore(_ removal: Removal) {
+        guard generation == removal.generation, !removal.entries.isEmpty else { return }
+        for (index, item) in removal.entries {
+            items.insert(item, at: min(index, items.count))
+        }
+        if let total {
+            self.total = pagesLoaded == removal.pagesLoaded
+                ? total + removal.entries.count
+                : max(total, items.count)
+        }
     }
 
     /// Called as items appear: fetches more when the end is near.
