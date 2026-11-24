@@ -189,7 +189,7 @@ private struct ConnectDevicesPopover: View {
                     subtitle: connect.localIsActive ? "Playing on this Mac" : "This Mac · Click to play here",
                     icon: "laptopcomputer",
                     isActive: connect.localIsActive,
-                    disabled: connect.isTransferring
+                    disabled: connect.localIsActive || connect.isTransferring
                 ) {
                     connect.transferToThisMac()
                     isPresented = false
@@ -204,7 +204,7 @@ private struct ConnectDevicesPopover: View {
                         : device.is_active ? "Active" : device.type,
                     icon: symbol(for: device.type),
                     isActive: device.is_active,
-                    disabled: device.is_restricted || connect.isTransferring
+                    disabled: device.is_active || device.is_restricted || connect.isTransferring
                 ) {
                     connect.transfer(to: device)
                     isPresented = false
@@ -275,7 +275,7 @@ private struct ConnectDevicesPopover: View {
         }
         .buttonStyle(.plain)
         .disabled(disabled)
-        .opacity(disabled ? 0.5 : 1)
+        .opacity(disabled && !isActive ? 0.5 : 1)
     }
 
     private func symbol(for deviceType: String) -> String {

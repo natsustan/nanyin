@@ -67,6 +67,7 @@ pub enum Event {
     Queue {
         context_uri: String,
         tracks: Vec<Track>,
+        has_manual: bool,
     },
     /// The answer to request `request`: `ok` or `error`.
     Reply {

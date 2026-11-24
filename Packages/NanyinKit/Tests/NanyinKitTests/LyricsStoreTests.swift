@@ -31,6 +31,7 @@ struct LyricsStoreTests {
         #expect(LRCLIBClient.cleanTitle("Dreams - Remastered 2004") == "Dreams")
         #expect(LRCLIBClient.cleanTitle("Bohemian Rhapsody [Deluxe Edition]") == "Bohemian Rhapsody")
         #expect(LRCLIBClient.cleanTitle("Time (Pink Floyd)") == "Time (Pink Floyd)")
+        #expect(LRCLIBClient.cleanTitle("(Live)") == "")
     }
 
     @Test func fetchesFromLRCLIBExactAndFallsBackToSearch() async throws {

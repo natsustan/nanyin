@@ -134,32 +134,22 @@ final class Pager<Item: Sendable, Cursor: Sendable> {
         }
     }
 
-    struct Move {
-        fileprivate let from: Int
-        fileprivate let destination: Int
+    struct Snapshot {
+        fileprivate let items: [Item]
         fileprivate let generation: Int
     }
 
-    /// Optimistically moves `items[from]` using Spotify's `insertBefore` index
-    /// semantics, returning a token that undoes the move on failure.
-    func move(from: Int, insertBefore: Int) -> Move? {
-        guard items.indices.contains(from),
-              insertBefore >= 0, insertBefore <= items.count,
-              from != insertBefore, from + 1 != insertBefore
-        else { return nil }
-        let destination = insertBefore > from ? insertBefore - 1 : insertBefore
-        let item = items.remove(at: from)
-        items.insert(item, at: destination)
-        return Move(from: from, destination: destination, generation: generation)
+    func snapshot() -> Snapshot {
+        Snapshot(items: items, generation: generation)
     }
 
-    func revert(_ move: Move) {
-        guard generation == move.generation,
-              items.indices.contains(move.destination),
-              move.from >= 0, move.from < items.count
-        else { return }
-        let item = items.remove(at: move.destination)
-        items.insert(item, at: move.from)
+    func replaceItems(_ updated: [Item]) {
+        items = updated
+    }
+
+    func restore(_ snapshot: Snapshot) {
+        guard generation == snapshot.generation else { return }
+        items = snapshot.items
     }
 
     /// Called as items appear: fetches more when the end is near.

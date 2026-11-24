@@ -119,6 +119,20 @@ public struct LyricsQuery: Sendable, Hashable {
     }
 }
 
+public enum LRCLIBError: Error, LocalizedError, Equatable {
+    case rateLimited
+    case serverError(Int)
+    case invalidURL
+
+    public var errorDescription: String? {
+        switch self {
+        case .rateLimited: "LRCLIB is temporarily busy. Try again in a moment."
+        case .serverError(let code): "LRCLIB answered HTTP \(code)."
+        case .invalidURL: "Could not build lyrics request URL."
+        }
+    }
+}
+
 /// Fetches synced or plain lyrics from [LRCLIB](https://lrclib.net) as a
 /// fallback when Spotify has no lyrics for a track.
 public struct LRCLIBClient: Sendable {
@@ -136,7 +150,9 @@ public struct LRCLIBClient: Sendable {
     }
 
     public func fetch(_ query: LyricsQuery) async throws -> Lyrics? {
-        let title = Self.cleanTitle(query.title)
+        let rawTitle = query.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleaned = Self.cleanTitle(rawTitle)
+        let title = cleaned.isEmpty ? rawTitle : cleaned
         let artist = query.artist.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty, !artist.isEmpty else { return nil }
 
@@ -162,20 +178,26 @@ public struct LRCLIBClient: Sendable {
             URLQueryItem(name: "track_name", value: title),
         ]
         let candidates: [Record] = (try await get("/search", queryItems: searchItems)) ?? []
-        return Self.pickBest(candidates, durationMs: query.durationMs)?.toLyrics()
+        return Self.pickBest(candidates, durationMs: query.durationMs)
     }
 
     private func get<T: Decodable>(_ path: String, queryItems: [URLQueryItem]) async throws -> T? {
-        var components = URLComponents(string: baseURL + path)!
+        guard var components = URLComponents(string: baseURL + path) else {
+            throw LRCLIBError.invalidURL
+        }
         components.queryItems = queryItems
-        var request = URLRequest(url: components.url!, timeoutInterval: 12)
+        guard let url = components.url else {
+            throw LRCLIBError.invalidURL
+        }
+        var request = URLRequest(url: url, timeoutInterval: 12)
         request.setValue("Nanyin/1.0 (https://github.com/natsustan/nanyin)", forHTTPHeaderField: "User-Agent")
         let session = try transport.currentSession()
         let (data, response) = try await session.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         if status == 404 { return nil }
+        if status == 429 { throw LRCLIBError.rateLimited }
         guard (200 ..< 300).contains(status) else {
-            throw URLError(.badServerResponse)
+            throw LRCLIBError.serverError(status)
         }
         return try JSONDecoder().decode(T.self, from: data)
     }
@@ -193,21 +215,21 @@ public struct LRCLIBClient: Sendable {
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private static func pickBest(_ candidates: [Record], durationMs: Int) -> Record? {
+    private static func pickBest(_ candidates: [Record], durationMs: Int) -> Lyrics? {
         let targetSec = Double(durationMs) / 1000.0
-        let eligible = candidates.filter { record in
-            guard record.toLyrics() != nil else { return false }
-            guard durationMs > 0, let dur = record.duration else { return true }
-            return abs(dur - targetSec) <= 8.0
+        let parsed: [(duration: Double?, lyrics: Lyrics)] = candidates.compactMap { record in
+            guard let lyrics = record.toLyrics() else { return nil }
+            if durationMs > 0, let dur = record.duration, abs(dur - targetSec) > 8.0 {
+                return nil
+            }
+            return (record.duration, lyrics)
         }
-        return eligible.sorted { lhs, rhs in
-            let lSynced = lhs.syncedLyrics?.isEmpty == false
-            let rSynced = rhs.syncedLyrics?.isEmpty == false
-            if lSynced != rSynced { return lSynced }
+        return parsed.sorted { lhs, rhs in
+            if lhs.lyrics.synced != rhs.lyrics.synced { return lhs.lyrics.synced }
             let lDiff = lhs.duration.map { abs($0 - targetSec) } ?? 999
             let rDiff = rhs.duration.map { abs($0 - targetSec) } ?? 999
             return lDiff < rDiff
-        }.first
+        }.first?.lyrics
     }
 
     private struct Record: Decodable {

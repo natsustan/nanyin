@@ -48,8 +48,7 @@ struct Sidebar: View {
                                 if let name { library.rename(playlist.id, to: name) }
                             }
                         } else {
-                            let droppable = library.canEditTracks(playlist)
-                            SidebarRow(
+                            let rowView = SidebarRow(
                                 title: playlist.name,
                                 icon: "music.note.list",
                                 isSelected: current == route,
@@ -58,21 +57,25 @@ struct Sidebar: View {
                                 go(route, false)
                             }
                             .contextMenu { playlistMenu(playlist) }
-                            .onDrop(
-                                of: [.utf8PlainText, .plainText, .url],
-                                isTargeted: Binding(
-                                    get: { dropTargetPlaylistID == playlist.id },
-                                    set: { targeted in
-                                        if targeted && droppable {
-                                            dropTargetPlaylistID = playlist.id
-                                        } else if !targeted && dropTargetPlaylistID == playlist.id {
-                                            dropTargetPlaylistID = nil
+
+                            if library.canEditTracks(playlist) {
+                                rowView.onDrop(
+                                    of: [.utf8PlainText, .plainText, .url],
+                                    isTargeted: Binding(
+                                        get: { dropTargetPlaylistID == playlist.id },
+                                        set: { targeted in
+                                            if targeted {
+                                                dropTargetPlaylistID = playlist.id
+                                            } else if dropTargetPlaylistID == playlist.id {
+                                                dropTargetPlaylistID = nil
+                                            }
                                         }
-                                    }
-                                )
-                            ) { providers in
-                                guard droppable else { return false }
-                                return handleTrackDrop(providers, onto: playlist)
+                                    )
+                                ) { providers in
+                                    handleTrackDrop(providers, onto: playlist)
+                                }
+                            } else {
+                                rowView
                             }
                         }
                     }
@@ -115,6 +118,7 @@ struct Sidebar: View {
         }
         guard !matching.isEmpty else { return false }
         let library = app.library
+        let expectedAccount = library.accountGeneration
         Task {
             var uris: [String] = []
             var seen = Set<String>()
@@ -129,7 +133,7 @@ struct Sidebar: View {
                 }
             }
             guard !uris.isEmpty else { return }
-            library.add(uris, to: playlist)
+            library.add(uris, to: playlist, expectedAccount: expectedAccount)
         }
         return true
     }

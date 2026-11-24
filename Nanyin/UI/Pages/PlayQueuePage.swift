@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Play Queue page: shows the currently playing song above the upcoming queue,
-/// with a button to clear manually queued tracks.
+/// with a button to clear manually queued tracks when any are present.
 struct PlayQueuePage: View {
     @Environment(AppModel.self) private var app
 
@@ -10,39 +10,63 @@ struct PlayQueuePage: View {
         let upNext = player.upNext
         VStack(spacing: 0) {
             PageHeader(title: "Play Queue", subtitle: subtitle) {
-                if !upNext.rows.isEmpty && !player.playingElsewhere {
+                if player.hasManualQueue && !player.playingElsewhere {
                     Button("Clear Queue") { player.clearQueue() }
                         .buttonStyle(TexturedButtonStyle())
                         .help("Remove manually added songs from the queue")
                 }
             }
 
-            if let track = player.track {
-                GraphiteHeader { Text("Now Playing") }
-                nowPlayingRow(track)
-            }
-
-            if upNext.rows.isEmpty {
-                if player.track != nil {
-                    GraphiteHeader { Text("Next Up") }
+            if player.playingElsewhere {
+                VStack(spacing: 10) {
+                    Text("Playing on another device.")
+                        .font(AquaFont.regular(13))
+                        .foregroundStyle(Theme.secondaryText)
+                    if app.session.isReady {
+                        Button("Play on This Mac") { app.connect.transferToThisMac() }
+                            .buttonStyle(TexturedButtonStyle())
+                    }
                 }
-                PlaceholderText(
-                    message: player.playingElsewhere
-                        ? "Playing on another device."
-                        : "Songs you add to the queue appear here."
-                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Theme.content)
             } else {
-                GraphiteHeader { Text("Next Up") }
-                TrackListTable(list: upNext, columns: [.star, .track, .artist, .time, .album])
+                if let track = player.track {
+                    GraphiteHeader { Text("Now Playing") }
+                    nowPlayingRow(track)
+                }
+
+                if upNext.rows.isEmpty {
+                    if player.track != nil {
+                        GraphiteHeader { Text("Next Up") }
+                    }
+                    PlaceholderText(message: "Songs you add to the queue appear here.")
+                } else {
+                    GraphiteHeader { Text("Next Up") }
+                    TrackListTable(
+                        list: upNext,
+                        columns: [.star, .track, .artist, .time, .album],
+                        playOverride: { row in
+                            // Play from the chosen queued track onward directly so
+                            // manually queued songs outside the active context still play.
+                            if let idx = upNext.rows.firstIndex(where: { $0.id == row.id }) {
+                                app.player.play(rows: Array(upNext.rows[idx...]), start: row)
+                            } else {
+                                app.player.play(trackURI: row.uri)
+                            }
+                        }
+                    )
+                }
             }
         }
         .background(Theme.content)
     }
 
     private var subtitle: String {
-        let count = app.player.upNext.rows.count
+        let player = app.player
+        if player.playingElsewhere { return "Playing elsewhere" }
+        let count = player.upNext.rows.count
         if count == 0 {
-            return app.player.track == nil ? "" : "Playing now"
+            return player.track == nil ? "" : "Playing now"
         }
         return count == 1 ? "1 track up next" : "\(count) tracks up next"
     }

@@ -5,7 +5,7 @@ import Observation
 /// On-demand lyrics loader for the currently playing song.
 ///
 /// Only fetches while the lyrics panel is open:
-/// 1. Checks the 30-day local disk cache (`LyricsDiskCache`).
+/// 1. Checks the 30-day local disk cache (`LyricsDiskCache`) off the main thread.
 /// 2. Queries Spotify's `color-lyrics` endpoint over the active playback session.
 /// 3. Falls back to [LRCLIB](https://lrclib.net) when Spotify has no lyrics.
 @MainActor
@@ -49,16 +49,8 @@ final class LyricsModel {
         generation += 1
         let currentGen = generation
         trackURI = track.uri
-
-        if !force, let cached = cache.load(trackURI: track.uri) {
-            switch cached {
-            case .found(let lyrics): state = .loaded(lyrics)
-            case .notFound: state = .empty
-            }
-            return
-        }
-
         state = .loading
+
         let trackID = Route.trackID(track.uri)
         let coverFileID = Self.extractCoverFileID(from: track.coverURL)
         let query = LyricsQuery(
@@ -69,15 +61,31 @@ final class LyricsModel {
             durationMs: track.durationMs
         )
         let sessionReady = session.isReady
+        let cache = self.cache
 
         loadTask = Task { [weak self] in
+            if !force {
+                let cached = await Task.detached(priority: .utility) {
+                    cache.load(trackURI: track.uri)
+                }.value
+                guard !Task.isCancelled, let self, self.generation == currentGen else { return }
+                if let cached {
+                    switch cached {
+                    case .found(let lyrics): self.state = .loaded(lyrics)
+                    case .notFound: self.state = .empty
+                    }
+                    return
+                }
+            }
+
             guard let self else { return }
+            let queriedSpotify = sessionReady && trackID != nil
             var spotifyError: Error?
-            if sessionReady, let trackID {
+            if queriedSpotify, let trackID {
                 do {
                     if let spotifyLyrics = try await session.readLyrics(trackID: trackID, coverFileID: coverFileID) {
                         guard !Task.isCancelled, self.generation == currentGen else { return }
-                        self.cache.save(trackURI: track.uri, lyrics: spotifyLyrics)
+                        Self.saveInBackground(cache: cache, trackURI: track.uri, lyrics: spotifyLyrics)
                         self.state = .loaded(spotifyLyrics)
                         return
                     }
@@ -91,20 +99,20 @@ final class LyricsModel {
             do {
                 if let fallback = try await lrclib.fetch(query) {
                     guard !Task.isCancelled, self.generation == currentGen else { return }
-                    self.cache.save(trackURI: track.uri, lyrics: fallback)
+                    Self.saveInBackground(cache: cache, trackURI: track.uri, lyrics: fallback)
                     self.state = .loaded(fallback)
                     return
                 }
                 guard !Task.isCancelled, self.generation == currentGen else { return }
-                if let spotifyError, !sessionReady {
+                if let spotifyError {
+                    // Spotify errored transiently and LRCLIB had no entry: surface the error without caching a miss.
                     self.state = .failed(spotifyError.localizedDescription)
-                } else if spotifyError == nil {
-                    // Both Spotify (when connected) and LRCLIB confirmed no lyrics.
-                    self.cache.save(trackURI: track.uri, lyrics: nil)
+                } else if queriedSpotify {
+                    // Both Spotify and LRCLIB confirmed no lyrics.
+                    Self.saveInBackground(cache: cache, trackURI: track.uri, lyrics: nil)
                     self.state = .empty
                 } else {
-                    // Spotify errored transiently and LRCLIB had no entry: show
-                    // empty without caching a miss so Retry can ask Spotify again.
+                    // Playback session was not connected yet, so don't cache a 24h miss.
                     self.state = .empty
                 }
             } catch is CancellationError {
@@ -116,7 +124,10 @@ final class LyricsModel {
     }
 
     func clearCache() {
-        cache.clear()
+        let cache = self.cache
+        Task.detached(priority: .utility) {
+            cache.clear()
+        }
     }
 
     func reset() {
@@ -129,6 +140,12 @@ final class LyricsModel {
         generation += 1
         loadTask?.cancel()
         loadTask = nil
+    }
+
+    private static func saveInBackground(cache: LyricsDiskCache, trackURI: String, lyrics: Lyrics?) {
+        Task.detached(priority: .utility) {
+            cache.save(trackURI: trackURI, lyrics: lyrics)
+        }
     }
 
     private static func extractCoverFileID(from url: URL?) -> String? {

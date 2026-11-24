@@ -38,6 +38,7 @@ impl QueueResolver {
     ) {
         let generation = self.latest.fetch_add(1, Ordering::SeqCst) + 1;
         let (reads, latest) = (self.reads.clone(), self.latest.clone());
+        let has_manual = next.iter().any(|track| track.provider == "queue");
         let uris: Vec<SpotifyUri> = next
             .iter()
             .filter_map(|track| SpotifyUri::from_uri(&track.uri).ok())
@@ -52,6 +53,7 @@ impl QueueResolver {
                 emit(Event::Queue {
                     context_uri,
                     tracks: tracks.into_iter().flatten().collect(),
+                    has_manual,
                 });
             }
         });

@@ -471,6 +471,10 @@ fn parse_spotify_lyrics(bytes: &[u8]) -> Option<Lyrics> {
         return None;
     }
     let synced = synced_flag && lines.iter().all(|line| line.start_time_ms.is_some());
+    let mut lines = lines;
+    if synced {
+        lines.sort_by_key(|line| line.start_time_ms.unwrap_or(0));
+    }
     Some(Lyrics {
         lines,
         synced,

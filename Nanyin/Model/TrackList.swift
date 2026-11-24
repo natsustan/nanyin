@@ -68,6 +68,16 @@ struct TrackRow: Identifiable, Hashable, Sendable {
 
     var artistNames: String { artists.map(\.name).joined(separator: ", ") }
 
+    func withID(_ newID: Int) -> TrackRow {
+        TrackRow(
+            index: newID, uri: uri, name: name, artists: artists, album: album,
+            durationMs: durationMs, popularity: popularity, added: addedDate,
+            isPlayable: isPlayable, albumURI: albumRoute.flatMap { route in
+                if case .album(let id) = route { "spotify:album:\(id)" } else { nil }
+            }
+        )
+    }
+
     /// "3:07".
     static func format(ms: Int) -> String {
         Duration.milliseconds(max(ms, 0)).formatted(.time(pattern: .minuteSecond))

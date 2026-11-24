@@ -25,7 +25,7 @@ struct TrackTable: NSViewRepresentable {
         /// Opens an artist's or album's page.
         var open: (Route) -> Void
         /// Reorders one track from `from` to `insertBefore` when drag-reordering is enabled.
-        var reorder: ((_ from: Int, _ insertBefore: Int) -> Void)? = nil
+        var reorder: ((_ from: Int, _ insertBefore: Int, _ uri: String) -> Void)? = nil
     }
 
     static let reorderPasteboardType = NSPasteboard.PasteboardType("com.cosmoss.nanyin.track-row")
@@ -218,7 +218,7 @@ struct TrackTable: NSViewRepresentable {
         func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> (any NSPasteboardWriting)? {
             guard rows.indices.contains(row) else { return nil }
             let item = NSPasteboardItem()
-            item.setString(String(row), forType: TrackTable.reorderPasteboardType)
+            item.setString("\(row)\n\(rows[row].uri)", forType: TrackTable.reorderPasteboardType)
             item.setString(Route.webLink(for: rows[row].uri), forType: .string)
             return item
         }
@@ -250,11 +250,13 @@ struct TrackTable: NSViewRepresentable {
                   info.draggingSource as? NSTableView === tableView,
                   info.draggingPasteboard.pasteboardItems?.count == 1,
                   let raw = info.draggingPasteboard.string(forType: TrackTable.reorderPasteboardType),
-                  let from = Int(raw),
-                  rows.indices.contains(from),
-                  from != row, from + 1 != row
+                  let newline = raw.firstIndex(of: "\n"),
+                  let from = Int(raw[..<newline]),
+                  rows.indices.contains(from)
             else { return false }
-            reorder(from, row)
+            let draggedURI = String(raw[raw.index(after: newline)...])
+            guard rows[from].uri == draggedURI, from != row, from + 1 != row else { return false }
+            reorder(from, row, draggedURI)
             return true
         }
 

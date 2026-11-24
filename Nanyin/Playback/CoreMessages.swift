@@ -22,7 +22,7 @@ enum CoreEvent: Decodable, Equatable {
     case volume(UInt16)
     case shuffle(Bool)
     case `repeat`(context: Bool, track: Bool)
-    case queue(contextURI: String, tracks: [CoreTrack])
+    case queue(contextURI: String, tracks: [CoreTrack], hasManual: Bool)
 
     enum FailureReason: String, Decodable {
         case authRejected = "auth_rejected"
@@ -36,6 +36,7 @@ enum CoreEvent: Decodable, Equatable {
         case positionMs = "position_ms"
         case volume, on, context, tracks
         case contextURI = "context_uri"
+        case hasManual = "has_manual"
     }
 
     init(from decoder: Decoder) throws {
@@ -69,7 +70,8 @@ enum CoreEvent: Decodable, Equatable {
         case "queue":
             self = .queue(
                 contextURI: try c.decode(String.self, forKey: .contextURI),
-                tracks: try c.decode([CoreTrack].self, forKey: .tracks))
+                tracks: try c.decode([CoreTrack].self, forKey: .tracks),
+                hasManual: (try? c.decode(Bool.self, forKey: .hasManual)) ?? false)
         default:
             throw DecodingError.dataCorruptedError(forKey: .type, in: c, debugDescription: "unknown event \(type)")
         }

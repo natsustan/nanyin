@@ -70,12 +70,12 @@ final class ConnectDevices {
     }
 
     func transferToThisMac() {
+        guard session.isReady else { return }
         player.transferToThisMac()
-        scheduleDelayedRefresh()
     }
 
     func transfer(to device: ConnectDevice) {
-        guard !device.is_restricted, let id = device.id, !isTransferring else { return }
+        guard !device.is_restricted, !device.is_active, let id = device.id, !isTransferring else { return }
         if id == session.localDeviceID {
             transferToThisMac()
             return
@@ -89,8 +89,6 @@ final class ConnectDevices {
             defer { if generation == currentGen { isTransferring = false } }
             do {
                 try await api.transferPlayback(deviceID: id, play: shouldPlay)
-                guard !Task.isCancelled, generation == currentGen else { return }
-                scheduleDelayedRefresh()
             } catch is CancellationError {
             } catch WebAPIError.http(403, _) {
                 guard generation == currentGen else { return }
@@ -113,14 +111,5 @@ final class ConnectDevices {
         isTransferring = false
         error = nil
         needsResignInForDevices = false
-    }
-
-    private func scheduleDelayedRefresh() {
-        let currentGen = generation
-        Task {
-            try? await Task.sleep(for: .milliseconds(700))
-            guard !Task.isCancelled, generation == currentGen else { return }
-            refresh()
-        }
     }
 }

@@ -50,6 +50,8 @@ final class Player {
     private(set) var repeatMode = Repeat.off
     /// What plays after the current track, as the core last reported it.
     private(set) var upNext = TrackList(rows: [])
+    /// Whether any tracks in the queue were manually added (`provider == "queue"`).
+    private(set) var hasManualQueue = false
     private(set) var volume = Player.savedVolume
     private(set) var isMuted = Player.savedVolume == 0
     /// Set when another device took playback over.
@@ -66,6 +68,8 @@ final class Player {
     /// The track the core is loading; it becomes `track` only once loaded.
     @ObservationIgnored private var loadingURI: String?
     @ObservationIgnored private var volumeDrag: (lastSent: Date, pending: Task<Void, Never>?)?
+    /// Suppresses late `.volume` echoes from earlier drag ticks right after a final value is sent.
+    @ObservationIgnored private var volumeEchoIgnoreUntil = Date.distantPast
     @ObservationIgnored private var unmutedVolume: UInt16 = Player.savedVolume > 0
         ? Player.savedVolume
         : UInt16(Double(UInt16.max) * 0.7)
@@ -177,10 +181,13 @@ final class Player {
     /// While a slider drags, the knob follows at once but the core hears at
     /// most every 150 ms; the final value is always sent and saved.
     func setVolume(_ value: UInt16, final: Bool) {
+        let minRemembered = UInt16(Double(UInt16.max) * 0.05)
         volume = value
         if value > 0 {
             isMuted = false
-            unmutedVolume = value
+            if final || value >= minRemembered {
+                unmutedVolume = value
+            }
         } else if final {
             isMuted = true
         }
@@ -189,17 +196,18 @@ final class Player {
         drag.pending?.cancel()
         if final {
             volumeDrag = nil
+            volumeEchoIgnoreUntil = now.addingTimeInterval(0.4)
             UserDefaults.standard.set(Int(value), forKey: Self.volumeKey)
             send(.volume(value))
         } else if now.timeIntervalSince(drag.lastSent) >= 0.15 {
             volumeDrag = (lastSent: now, pending: nil)
-            send(.volume(value))
+            _ = session.send(.volume(value))
         } else {
             drag.pending = Task { [weak self] in
                 try? await Task.sleep(for: .milliseconds(150))
                 guard !Task.isCancelled, let self, self.volumeDrag != nil else { return }
                 self.volumeDrag?.lastSent = .now
-                self.send(.volume(self.volume))
+                _ = self.session.send(.volume(self.volume))
             }
             volumeDrag = drag
         }
@@ -255,6 +263,7 @@ final class Player {
         contextURI = nil
         track = nil
         upNext = TrackList(rows: [])
+        hasManualQueue = false
         isPlaying = false
         isLoading = false
         playingElsewhere = false
@@ -309,7 +318,7 @@ final class Player {
             notices.report("This song is not available.")
         case .volume(let value):
             // The core echoes what a drag sent; the knob already shows it.
-            if volumeDrag == nil {
+            if volumeDrag == nil, Date.now >= volumeEchoIgnoreUntil {
                 volume = value
                 isMuted = value == 0
                 if value > 0 { unmutedVolume = value }
@@ -319,15 +328,17 @@ final class Player {
             shuffle = on
         case .repeat(let context, let track):
             repeatMode = track ? .track : context ? .context : .off
-        case .queue(let context, let tracks):
+        case .queue(let context, let tracks, let hasManual):
             let resolved = context.isEmpty ? nil : context
             contextURI = resolved
+            hasManualQueue = hasManual
             upNext = TrackList(
                 rows: tracks.enumerated().map { TrackRow(index: $0.offset, track: $0.element) },
                 contextURI: resolved)
         case .deactivated:
             resumePoint = nil
             contextURI = nil
+            hasManualQueue = false
             upNext = TrackList(rows: [])
             isPlaying = false
             isLoading = false

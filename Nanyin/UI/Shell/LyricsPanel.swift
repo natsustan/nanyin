@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Right-docked lyrics pane with live synced line highlighting, auto-scroll,
 /// and click-to-seek. Uses `TimelineView` over `Player.Position` so playback
-/// ticks stay local to this pane.
+/// ticks stay local to this pane and stop completely while paused.
 struct LyricsPanel: View {
     @Environment(AppModel.self) private var app
     static let width: CGFloat = 300
@@ -91,8 +91,10 @@ struct LyricsPanel: View {
                     PlaceholderText(message: "Instrumental")
                 case .loaded(let lyrics) where lyrics.synced:
                     SyncedLyricsScroll(lyrics: lyrics)
+                        .id(track.uri)
                 case .loaded(let lyrics):
                     PlainLyricsScroll(lyrics: lyrics)
+                        .id(track.uri)
                 }
             }
         } else {
@@ -104,11 +106,10 @@ struct LyricsPanel: View {
 private struct SyncedLyricsScroll: View {
     @Environment(AppModel.self) private var app
     let lyrics: Lyrics
-    @State private var lastScrolledIndex: Int?
 
     var body: some View {
         let position = app.player.position
-        TimelineView(.periodic(from: .now, by: position.advancing ? 0.25 : 60)) { context in
+        TimelineView(LyricsSchedule(position: position)) { context in
             let currentMs = position.current(at: context.date)
             let active = lyrics.activeLineIndex(at: currentMs)
             ScrollViewReader { proxy in
@@ -140,14 +141,30 @@ private struct SyncedLyricsScroll: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 16)
                 }
-                .onChange(of: active) { _, newIndex in
-                    guard let newIndex, newIndex != lastScrolledIndex else { return }
-                    lastScrolledIndex = newIndex
+                .onChange(of: active, initial: true) { _, newIndex in
+                    guard let newIndex else { return }
                     withAnimation(.easeInOut(duration: 0.22)) {
                         proxy.scrollTo(newIndex, anchor: .center)
                     }
                 }
             }
+        }
+    }
+}
+
+/// Ticks at 4 Hz while advancing, and stops completely while playback is paused.
+private struct LyricsSchedule: TimelineSchedule {
+    let position: Player.Position
+
+    func entries(from start: Date, mode: TimelineScheduleMode) -> AnyIterator<Date> {
+        guard position.advancing else {
+            var once = true
+            return AnyIterator { defer { once = false }; return once ? start : nil }
+        }
+        var current = start
+        return AnyIterator {
+            defer { current = current.addingTimeInterval(0.25) }
+            return current
         }
     }
 }
