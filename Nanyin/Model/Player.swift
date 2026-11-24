@@ -41,6 +41,8 @@ final class Player {
     private(set) var track: CoreTrack?
     /// The URI asked for, shown as playing until the core confirms.
     private(set) var requestedURI: String?
+    /// The Spotify context currently playing (playlist, album, artist, collection).
+    private(set) var contextURI: String?
     private(set) var isPlaying = false
     private(set) var isLoading = false
     private(set) var position = Position(ms: 0, at: .now, advancing: false)
@@ -92,19 +94,31 @@ final class Player {
         } else {
             .init(trackURIs: list.rows.map(\.uri), startURI: row.uri)
         }
-        start(load, uri: row.uri)
+        start(load, uri: row.uri, contextURI: list.contextURI)
     }
 
-    func play(contextURI: String) {
-        start(.init(contextURI: contextURI), uri: nil)
+    func play(contextURI: String, shuffle: Bool? = nil) {
+        guard start(.init(contextURI: contextURI, shuffle: shuffle), uri: nil, contextURI: contextURI) else { return }
+        if let shuffle { self.shuffle = shuffle }
     }
 
-    private func start(_ load: CoreCommand.Load, uri: String?) {
-        guard send(.load(load)) else { return }
+    /// Plays a specific displayed slice (e.g. a filtered or sorted playlist).
+    func play(rows: [TrackRow], start row: TrackRow? = nil, contextURI: String? = nil) {
+        let uris = rows.map(\.uri)
+        guard !uris.isEmpty else { return }
+        let startURI = row?.uri ?? uris[0]
+        start(.init(trackURIs: uris, startURI: startURI), uri: startURI, contextURI: contextURI)
+    }
+
+    @discardableResult
+    private func start(_ load: CoreCommand.Load, uri: String?, contextURI: String? = nil) -> Bool {
+        guard send(.load(load)) else { return false }
         resumePoint = nil
         requestedURI = uri
+        self.contextURI = contextURI
         isLoading = true
         playingElsewhere = false
+        return true
     }
 
     func resume() { setPlaying(true, .play) }
@@ -186,6 +200,7 @@ final class Player {
         resumePoint = nil
         loadingURI = nil
         requestedURI = nil
+        contextURI = nil
         track = nil
         upNext = TrackList(rows: [])
         isPlaying = false
@@ -234,6 +249,7 @@ final class Player {
             isPlaying = false
             isLoading = false
             requestedURI = nil
+            contextURI = nil
             position = position.continued(advancing: false)
             resetListen()
         case .unavailable(let uri):
@@ -250,11 +266,14 @@ final class Player {
         case .repeat(let context, let track):
             repeatMode = track ? .track : context ? .context : .off
         case .queue(let context, let tracks):
+            let resolved = context.isEmpty ? nil : context
+            contextURI = resolved
             upNext = TrackList(
                 rows: tracks.enumerated().map { TrackRow(index: $0.offset, track: $0.element) },
-                contextURI: context.isEmpty ? nil : context)
+                contextURI: resolved)
         case .deactivated:
             resumePoint = nil
+            contextURI = nil
             upNext = TrackList(rows: [])
             isPlaying = false
             isLoading = false
