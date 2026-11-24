@@ -36,6 +36,7 @@ final class Library {
     /// Bumped at sign-out; a request's answer applies only to the account
     /// that sent it.
     @ObservationIgnored private var account = 0
+    var accountGeneration: Int { account }
 
     init(api: SpotifyWebAPI, stars: Stars, session: PlaybackSession, history: PlayHistoryStore, notices: Notices) {
         self.api = api
@@ -240,6 +241,57 @@ final class Library {
         }
     }
 
+    /// Reorders one track inside an owned playlist optimistically using server
+    /// slot indices (`TrackRow.id`), rolling back if Spotify refuses the move.
+    func reorderTrack(from sourceIndex: Int, insertBefore: Int, uri: String, in playlist: Playlist, list: TrackList) {
+        let rows = list.rows
+        guard isOwn(playlist), !busy.contains(playlist.id),
+              rows.indices.contains(sourceIndex), rows[sourceIndex].uri == uri,
+              insertBefore >= 0, insertBefore <= rows.count,
+              sourceIndex != insertBefore, sourceIndex + 1 != insertBefore
+        else { return }
+
+        let rangeStart = rows[sourceIndex].id
+        let serverInsertBefore = insertBefore < rows.count
+            ? rows[insertBefore].id
+            : (rows.last?.id ?? -1) + 1
+        guard rangeStart != serverInsertBefore, rangeStart + 1 != serverInsertBefore else { return }
+
+        let snapshot = list.pages.snapshot()
+        var updated = rows
+        let moved = updated.remove(at: sourceIndex)
+        let arrayDestination = insertBefore > sourceIndex ? insertBefore - 1 : insertBefore
+        updated.insert(moved, at: arrayDestination)
+        // Keep each row's server slot index (`id`) in sync with Spotify's reorder semantics.
+        let movedServerID = serverInsertBefore > rangeStart ? serverInsertBefore - 1 : serverInsertBefore
+        updated = updated.enumerated().map { index, row in
+            if index == arrayDestination {
+                return row.withID(movedServerID)
+            }
+            if serverInsertBefore > rangeStart, row.id > rangeStart && row.id < serverInsertBefore {
+                return row.withID(row.id - 1)
+            }
+            if serverInsertBefore < rangeStart, row.id >= serverInsertBefore && row.id < rangeStart {
+                return row.withID(row.id + 1)
+            }
+            return row
+        }
+        list.pages.replaceItems(updated)
+
+        let account = account
+        busy.insert(playlist.id)
+        Task {
+            do {
+                try await api.reorderPlaylistItems(playlist.id, rangeStart: rangeStart, insertBefore: serverInsertBefore)
+            } catch {
+                guard account == self.account else { return }
+                list.pages.restore(snapshot)
+                notices.report("Could not reorder “\(playlist.name)”: \(error.localizedDescription)")
+            }
+            if account == self.account { busy.remove(playlist.id) }
+        }
+    }
+
     /// Removes tracks from an editable playlist optimistically, rolling back on failure.
     func removeTracks(_ rows: [TrackRow], from playlist: Playlist, list: TrackList) {
         guard canEditTracks(playlist), !busy.contains(playlist.id) else { return }
@@ -260,10 +312,15 @@ final class Library {
                     removedAny = true
                     remaining.subtract(batch)
                 }
-                if account == self.account, hadMore || list.pages.wasReloaded(since: removal) {
-                    // Server offsets shifted for unloaded pages, or a reload ran
-                    // while the delete was in flight; reconcile cleanly.
-                    list.pages.reload()
+                if account == self.account {
+                    if hadMore || list.pages.wasReloaded(since: removal) {
+                        // Server offsets shifted for unloaded pages, or a reload ran
+                        // while the delete was in flight; reconcile cleanly.
+                        list.pages.reload()
+                    } else {
+                        // Keep remaining rows' server slot IDs accurate for future reorders.
+                        Self.reindexAfterRemoval(in: list, removedIDs: removal.removedItems.map(\.id))
+                    }
                 }
             } catch {
                 guard account == self.account else { return }
@@ -272,6 +329,10 @@ final class Library {
                         list.pages.reload()
                     } else {
                         list.pages.restore(removal) { remaining.contains($0.uri) }
+                        let deletedIDs = removal.removedItems
+                            .filter { !remaining.contains($0.uri) }
+                            .map(\.id)
+                        Self.reindexAfterRemoval(in: list, removedIDs: deletedIDs)
                     }
                 } else {
                     list.pages.restore(removal)
@@ -280,6 +341,16 @@ final class Library {
             }
             if account == self.account { busy.remove(playlist.id) }
         }
+    }
+
+    private static func reindexAfterRemoval(in list: TrackList, removedIDs: [Int]) {
+        guard !removedIDs.isEmpty else { return }
+        let sortedRemoved = removedIDs.sorted()
+        let updated = list.rows.map { row in
+            let shift = sortedRemoved.prefix { $0 < row.id }.count
+            return shift > 0 ? row.withID(row.id - shift) : row
+        }
+        list.pages.replaceItems(updated)
     }
 
     /// Removes a playlist from the listener's library; for their own ones
@@ -304,15 +375,21 @@ final class Library {
         }
     }
 
-    func add(_ uris: [String], to playlist: Playlist) {
+    func add(_ uris: [String], to playlist: Playlist, expectedAccount: Int? = nil) {
+        guard !uris.isEmpty, username != nil,
+              expectedAccount == nil || expectedAccount == account,
+              playlists.contains(where: { $0.id == playlist.id && canEditTracks($0) })
+        else { return }
         let account = account
         let needsCover = playlist.images?.isEmpty ?? true
         Task {
             do {
                 try await api.addToPlaylist(playlist.id, uris: uris)
                 guard account == self.account else { return }
-                // Shown afresh next time it is opened.
-                pages[.playlist(id: playlist.id)] = nil
+                // Reload in place so an open playlist refreshes instead of going blank.
+                if case .tracks(let list)? = pages[.playlist(id: playlist.id)] {
+                    list.pages.reload()
+                }
                 if needsCover, let images = try? await api.playlistImages(playlist.id), !images.isEmpty,
                    account == self.account,
                    let index = playlists.firstIndex(where: { $0.id == playlist.id }) {

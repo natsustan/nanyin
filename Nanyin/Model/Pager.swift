@@ -90,6 +90,8 @@ final class Pager<Item: Sendable, Cursor: Sendable> {
         fileprivate let entries: [(index: Int, item: Item)]
         fileprivate let generation: Int
         fileprivate let pagesLoaded: Int
+
+        var removedItems: [Item] { entries.map(\.item) }
     }
 
     /// Optimistically removes matching items, returning a rollback token that
@@ -131,6 +133,33 @@ final class Pager<Item: Sendable, Cursor: Sendable> {
             self.total = pagesLoaded == removal.pagesLoaded
                 ? total + restored
                 : max(total, items.count)
+        }
+    }
+
+    struct Snapshot {
+        fileprivate let items: [Item]
+        fileprivate let generation: Int
+        fileprivate let pagesLoaded: Int
+    }
+
+    func snapshot() -> Snapshot {
+        Snapshot(items: items, generation: generation, pagesLoaded: pagesLoaded)
+    }
+
+    func replaceItems(_ updated: [Item]) {
+        items = updated
+    }
+
+    /// Restores the pre-move prefix while preserving any pages fetched while
+    /// the reorder request was in flight.
+    func restore(_ snapshot: Snapshot) {
+        guard generation == snapshot.generation else { return }
+        if pagesLoaded == snapshot.pagesLoaded {
+            items = snapshot.items
+        } else if items.count >= snapshot.items.count {
+            items = snapshot.items + items.dropFirst(snapshot.items.count)
+        } else {
+            reload()
         }
     }
 

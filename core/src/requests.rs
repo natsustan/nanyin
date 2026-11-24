@@ -23,6 +23,12 @@ pub enum Ask {
     TopTracks { id: String },
     /// A song's credits, read through the session.
     Credits { id: String },
+    /// A song's lyrics from Spotify's `color-lyrics` service, read through the session.
+    Lyrics {
+        id: String,
+        #[serde(default)]
+        cover_file_id: Option<String>,
+    },
     /// New releases from followed artists, read through Pathfinder.
     NewReleases {
         #[serde(default)]
@@ -51,6 +57,12 @@ impl Ask {
             Self::Credits { id } => {
                 serde_json::to_value(reads.credits(&id).await.map_err(|e| e.to_string())?)
             }
+            Self::Lyrics { id, cover_file_id } => serde_json::to_value(
+                reads
+                    .lyrics(&id, cover_file_id.as_deref())
+                    .await
+                    .map_err(|e| e.to_string())?,
+            ),
             Self::NewReleases { force } => {
                 serde_json::to_value(reads.new_releases(force).await.map_err(|e| e.to_string())?)
             }
@@ -90,6 +102,17 @@ mod tests {
         let request: Request =
             serde_json::from_str(r#"{"request":9,"ask":"credits","id":"abc"}"#).unwrap();
         assert_eq!(request.ask, Ask::Credits { id: "abc".into() });
+        let request: Request = serde_json::from_str(
+            r#"{"request":12,"ask":"lyrics","id":"abc","cover_file_id":"ab12"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            request.ask,
+            Ask::Lyrics {
+                id: "abc".into(),
+                cover_file_id: Some("ab12".into()),
+            }
+        );
         let request: Request =
             serde_json::from_str(r#"{"request":10,"ask":"new_releases","force":true}"#).unwrap();
         assert_eq!(request.ask, Ask::NewReleases { force: true });

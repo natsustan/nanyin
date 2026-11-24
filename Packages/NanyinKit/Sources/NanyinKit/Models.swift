@@ -292,3 +292,15 @@ public struct AlbumSummary: Codable, Sendable, Hashable, Identifiable {
 
     public var releaseYear: String? { release_date.map { String($0.prefix(4)) } }
 }
+
+/// A Spotify Connect device returned by `GET /me/player/devices`.
+public struct ConnectDevice: Codable, Sendable, Hashable, Identifiable {
+    public let id: String?
+    public let is_active: Bool
+    public let is_restricted: Bool
+    public let name: String
+    public let type: String
+    public let volume_percent: Int?
+
+    public var stableID: String { id ?? "\(type):\(name)" }
+}

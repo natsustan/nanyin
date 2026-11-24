@@ -38,6 +38,8 @@ final class PlaybackSession {
     private(set) var authorizeURL: URL?
     var isReady: Bool { state == .ready }
     var hasStoredCredentials: Bool { credentials != nil }
+    var localDeviceName: String { settings.effectiveDeviceName }
+    var localDeviceID: String { Self.deviceID }
     /// Fires when playback reaches `.ready`.
     var onReady: () -> Void = {}
     /// Player events (everything but the session's own).
@@ -252,6 +254,13 @@ final class PlaybackSession {
     /// read them (the Web API has none). Only ever asked for by the listener.
     func readCredits(trackID: String) async throws -> CoreCredits {
         try await request(.credits(trackID: trackID))
+    }
+
+    /// A song's lyrics from Spotify's `color-lyrics` service, asked only while
+    /// the lyrics panel is open. Returns `nil` when Spotify has no lyrics.
+    func readLyrics(trackID: String, coverFileID: String?) async throws -> Lyrics? {
+        let reply: CoreLyricsReply = try await request(.lyrics(trackID: trackID, coverFileID: coverFileID))
+        return reply.lyrics
     }
 
     /// Followed artists' new releases, read through Pathfinder on the session.

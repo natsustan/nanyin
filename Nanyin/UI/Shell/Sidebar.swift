@@ -1,5 +1,6 @@
 import NanyinKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The source list: fixed destinations, the library, the playlists, and the
 /// cover of what is playing at the bottom, as the 2010 client had it.
@@ -47,10 +48,35 @@ struct Sidebar: View {
                                 if let name { library.rename(playlist.id, to: name) }
                             }
                         } else {
-                            SidebarRow(title: playlist.name, icon: "music.note.list", isSelected: current == route) {
+                            let rowView = SidebarRow(
+                                title: playlist.name,
+                                icon: "music.note.list",
+                                isSelected: current == route,
+                                isDropTargeted: dropTargetPlaylistID == playlist.id
+                            ) {
                                 go(route, false)
                             }
                             .contextMenu { playlistMenu(playlist) }
+
+                            if library.canEditTracks(playlist) {
+                                rowView.onDrop(
+                                    of: [.utf8PlainText, .plainText, .url],
+                                    isTargeted: Binding(
+                                        get: { dropTargetPlaylistID == playlist.id },
+                                        set: { targeted in
+                                            if targeted {
+                                                dropTargetPlaylistID = playlist.id
+                                            } else if dropTargetPlaylistID == playlist.id {
+                                                dropTargetPlaylistID = nil
+                                            }
+                                        }
+                                    )
+                                ) { providers in
+                                    handleTrackDrop(providers, onto: playlist)
+                                }
+                            } else {
+                                rowView
+                            }
                         }
                     }
                     if let error = app.library.playlistsError {
@@ -80,8 +106,71 @@ struct Sidebar: View {
     }
 
     @State private var deleting: Playlist?
+    @State private var dropTargetPlaylistID: String?
 
     private var library: Library { app.library }
+
+    private func handleTrackDrop(_ providers: [NSItemProvider], onto playlist: Playlist) -> Bool {
+        let matching = providers.filter {
+            $0.hasItemConformingToTypeIdentifier(UTType.utf8PlainText.identifier)
+                || $0.hasItemConformingToTypeIdentifier(UTType.plainText.identifier)
+                || $0.hasItemConformingToTypeIdentifier(UTType.url.identifier)
+        }
+        guard !matching.isEmpty else { return false }
+        let library = app.library
+        let expectedAccount = library.accountGeneration
+        Task {
+            var uris: [String] = []
+            var seen = Set<String>()
+            for provider in matching {
+                if let text = await Self.loadDroppedString(from: provider) {
+                    for token in text.split(whereSeparator: \.isNewline) {
+                        if case .track(let id) = SpotifyLink.parse(String(token)) {
+                            let uri = "spotify:track:\(id)"
+                            if seen.insert(uri).inserted { uris.append(uri) }
+                        }
+                    }
+                }
+            }
+            guard !uris.isEmpty else { return }
+            library.add(uris, to: playlist, expectedAccount: expectedAccount)
+        }
+        return true
+    }
+
+    private static func loadDroppedString(from provider: NSItemProvider) async -> String? {
+        for type in [UTType.utf8PlainText, UTType.plainText, UTType.url]
+            where provider.hasItemConformingToTypeIdentifier(type.identifier)
+        {
+            let value: String? = await withCheckedContinuation { continuation in
+                Self.loadItemText(provider, typeIdentifier: type.identifier) { text in
+                    continuation.resume(returning: text)
+                }
+            }
+            if let value, !value.isEmpty { return value }
+        }
+        return nil
+    }
+
+    /// Invokes `NSItemProvider.loadItem` with a `nonisolated` completion handler
+    /// because AppKit delivers the loaded item on a background queue.
+    private nonisolated static func loadItemText(
+        _ provider: NSItemProvider,
+        typeIdentifier: String,
+        completion: @escaping @Sendable (String?) -> Void
+    ) {
+        provider.loadItem(forTypeIdentifier: typeIdentifier, options: nil) { item, _ in
+            if let string = item as? String {
+                completion(string)
+            } else if let data = item as? Data, let string = String(data: data, encoding: .utf8) {
+                completion(string)
+            } else if let url = item as? URL {
+                completion(url.absoluteString)
+            } else {
+                completion(nil)
+            }
+        }
+    }
 
     private var newPlaylistButton: some View {
         Button("New Playlist") { library.begin(.new) }
@@ -196,6 +285,7 @@ private struct SidebarRow: View {
     let title: String
     let icon: String
     let isSelected: Bool
+    var isDropTargeted = false
     let action: () -> Void
 
     var body: some View {
@@ -219,6 +309,13 @@ private struct SidebarRow: View {
                     Theme.selection
                         .hairline(.top, .white.opacity(0.18))
                         .hairline(.bottom, .black.opacity(0.4))
+                } else if isDropTargeted {
+                    Theme.green.opacity(0.22)
+                }
+            }
+            .overlay {
+                if isDropTargeted {
+                    Rectangle().strokeBorder(Theme.green, lineWidth: 1)
                 }
             }
             .contentShape(Rectangle())
@@ -251,9 +348,17 @@ private struct NowPlayingCover: View {
                         LinkText(parts: [(track.name, track.albumURI.flatMap(Route.init(uri:)))], color: Theme.text)
                             .font(AquaFont.bold(12))
                         if app.player.playingElsewhere {
-                            Text("Playing on another device")
-                                .font(AquaFont.regular(11))
-                                .foregroundStyle(Theme.secondaryText)
+                            HStack(spacing: 4) {
+                                Text("Playing elsewhere")
+                                    .font(AquaFont.regular(11))
+                                    .foregroundStyle(Theme.secondaryText)
+                                if app.session.isReady {
+                                    Button("Play Here") { app.connect.transferToThisMac() }
+                                        .buttonStyle(.link)
+                                        .font(AquaFont.bold(11))
+                                        .foregroundStyle(Theme.green)
+                                }
+                            }
                         } else {
                             LinkText(parts: track.artists.map { ($0.name, Route(uri: $0.uri)) }, color: Theme.secondaryText)
                                 .font(AquaFont.regular(11))

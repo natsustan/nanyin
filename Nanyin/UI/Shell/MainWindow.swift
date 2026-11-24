@@ -14,6 +14,9 @@ struct MainWindow: View {
                     RouteView(route: app.navigator.current)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .background(Theme.content)
+                    if app.showLyrics {
+                        LyricsPanel()
+                    }
                 }
                 PlaybackNotice()
                 PlayerBar()
@@ -94,10 +97,8 @@ private struct RouteView: View {
     var body: some View {
         let content = app.library.content(for: route)
         switch (route, content) {
-        case (.queue, _) where app.player.upNext.rows.isEmpty:
-            PagePlaceholder(title: "Play Queue", message: "Songs you add to the queue appear here.")
         case (.queue, _):
-            TrackListPage(title: "Play Queue", list: app.player.upNext, columns: [.star, .track, .artist, .time, .album])
+            PlayQueuePage()
         case (.albums, .albums(let albums)?):
             GridPage(title: "Albums", pager: albums) { Tile(album: $0) }
         case (.artists, .artists(let artists)?):
@@ -105,7 +106,7 @@ private struct RouteView: View {
         case (.whatsNew, .whatsNew(let model)?):
             WhatsNewPage(model: model)
         case (.likedSongs, .tracks(let list)?):
-            TrackListPage(title: "Starred", list: list, columns: [.star, .track, .artist, .time, .album, .added])
+            StarredPage(list: list)
         case (.playlist(let id), .tracks(let list)?):
             PlaylistPage(playlist: app.library.playlist(id), list: list)
                 .id(id)

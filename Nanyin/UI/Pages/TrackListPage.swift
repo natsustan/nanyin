@@ -1,23 +1,202 @@
 import NanyinKit
 import SwiftUI
 
-/// A page that is a title over a track table: Liked Songs, Play Queue.
-struct TrackListPage: View {
-    let title: String
-    var subtitle: String?
+/// Shared filterable/sortable track-list body with Play, Shuffle, Filter, and
+/// Sort controls, used by both `PlaylistPage` and `StarredPage`.
+struct FilterableTrackList<ExtraControls: View>: View {
+    @Environment(AppModel.self) private var app
     let list: TrackList
+    let contextURI: String?
     var columns = TrackTable.Column.standard
+    var editablePlaylist: Playlist? = nil
+    var allowReorder = false
+    @ViewBuilder var extraControls: () -> ExtraControls
+
+    @State private var filter = ""
+    @State private var activeFilter = ""
+    @State private var filterDebounce: Task<Void, Never>?
+    @State private var autoPagesFetched = 0
+    @State private var reachedFilteredEnd = false
+    @State private var sort: PlaylistSort = .custom
+    @State private var sortAscending = true
+
+    /// Caps automatic page fetches per filter session so a non-matching query
+    /// on a huge library cannot fire an unbounded burst of Web API calls.
+    private static var maxAutoFilterPages: Int { 8 }
 
     var body: some View {
+        let pages = list.pages
+        let displayed = displayedRows
+        let canAutoFetchMore = !activeFilter.isEmpty && pages.hasMore
+            && autoPagesFetched < Self.maxAutoFilterPages
+            && (displayed.count < 20 || reachedFilteredEnd)
+
         VStack(spacing: 0) {
-            PagerHeader(title: title, pager: list.pages, detail: subtitle ?? count)
-            TrackListTable(list: list, columns: columns)
+            actionBar(displayed: displayed)
+            if !activeFilter.isEmpty && displayed.isEmpty {
+                if canAutoFetchMore {
+                    PlaceholderText(
+                        message: pages.error ?? "Searching more tracks…",
+                        retry: pages.error != nil ? { pages.retry() } : nil
+                    )
+                } else if pages.hasMore {
+                    PlaceholderText(
+                        message: "No matches in the first \(list.rows.count) tracks.",
+                        retry: {
+                            autoPagesFetched = 0
+                            pages.loadNext()
+                        }
+                    )
+                } else {
+                    PlaceholderText(message: "No matching tracks.")
+                }
+            } else {
+                TrackListTable(
+                    list: list,
+                    columns: columns,
+                    rowsOverride: isCustomView ? displayed : nil,
+                    playOverride: playDisplayed ? { row in
+                        app.player.play(rows: displayed, start: row, contextURI: contextURI)
+                    } : nil,
+                    onRowAppeared: isCustomView ? { index in
+                        if index >= displayed.count - 20 {
+                            if !activeFilter.isEmpty { reachedFilteredEnd = true }
+                            list.pages.loadNext()
+                        }
+                    } : nil,
+                    editablePlaylist: editablePlaylist,
+                    onReorder: (allowReorder && !isCustomView && editablePlaylist != nil) ? { from, insertBefore, uri in
+                        if let editablePlaylist {
+                            app.library.reorderTrack(from: from, insertBefore: insertBefore, uri: uri, in: editablePlaylist, list: list)
+                        }
+                    } : nil
+                )
+            }
         }
+        .task(id: canAutoFetchMore ? "\(activeFilter)|\(pages.items.count)" : "") {
+            guard canAutoFetchMore else { return }
+            autoPagesFetched += 1
+            pages.loadNext()
+        }
+        .onChange(of: filter) { _, raw in
+            filterDebounce?.cancel()
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                activeFilter = ""
+                autoPagesFetched = 0
+                reachedFilteredEnd = false
+                return
+            }
+            filterDebounce = Task {
+                try? await Task.sleep(for: .milliseconds(250))
+                guard !Task.isCancelled else { return }
+                activeFilter = trimmed
+                autoPagesFetched = 0
+                reachedFilteredEnd = false
+            }
+        }
+        .onChange(of: displayed.count) { reachedFilteredEnd = false }
     }
 
-    private var count: String {
-        guard let total = list.pages.total else { return "" }
-        return total == 1 ? "1 track" : "\(total) tracks"
+    private func actionBar(displayed: [TrackRow]) -> some View {
+        let player = app.player
+        let controlsCurrent = contextURI != nil && !isCustomView && player.contextURI == contextURI && player.track != nil
+        let isPlayingHere = controlsCurrent && player.isPlaying
+        let canPlay = playDisplayed ? !displayed.isEmpty : (!list.rows.isEmpty || (list.pages.total ?? 1) > 0)
+
+        return HStack(spacing: 8) {
+            Button {
+                if controlsCurrent {
+                    player.togglePlayPause()
+                } else if playDisplayed {
+                    player.play(rows: displayed, contextURI: contextURI)
+                } else if let contextURI {
+                    player.play(contextURI: contextURI)
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: isPlayingHere ? "pause.fill" : "play.fill")
+                        .font(.system(size: 9, weight: .bold))
+                    Text(isPlayingHere ? "Pause" : "Play")
+                }
+            }
+            .buttonStyle(TexturedButtonStyle())
+            .disabled(contextURI == nil || (!controlsCurrent && !canPlay))
+
+            Button(action: player.toggleShuffle) {
+                Image(systemName: "shuffle")
+            }
+            .buttonStyle(GraphiteToggleStyle(isOn: player.shuffle))
+            .help(player.shuffle ? "Turn Shuffle Off" : "Turn Shuffle On")
+
+            extraControls()
+
+            Spacer(minLength: 8)
+
+            AquaSearchField(text: $filter, prompt: "Filter")
+                .frame(width: 170)
+
+            sortMenu
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 32)
+        .background(Theme.graphite)
+        .hairline(.top, Theme.graphiteHighlight)
+        .hairline(.bottom, Theme.graphiteEdge)
+    }
+
+    private var sortMenu: some View {
+        Menu {
+            ForEach(PlaylistSort.allCases, id: \.self) { option in
+                Button {
+                    if sort == option {
+                        if option != .custom { sortAscending.toggle() }
+                    } else {
+                        sort = option
+                        sortAscending = option.defaultAscending
+                    }
+                } label: {
+                    Text(sort == option ? "✓ \(option.buttonLabel(ascending: sortAscending))" : option.label)
+                }
+            }
+        } label: {
+            Text(sort.buttonLabel(ascending: sortAscending))
+                .font(AquaFont.regular(11))
+        }
+        .menuStyle(.button)
+        .buttonStyle(TexturedButtonStyle())
+        .fixedSize()
+    }
+
+    private var isCustomView: Bool {
+        !activeFilter.isEmpty || sort != .custom
+    }
+
+    private var playDisplayed: Bool {
+        !activeFilter.isEmpty || (sort != .custom && !app.player.shuffle)
+    }
+
+    private var displayedRows: [TrackRow] {
+        let filtered: [TrackRow] = if activeFilter.isEmpty {
+            list.rows
+        } else {
+            list.rows.filter { row in
+                row.name.localizedStandardContains(activeFilter)
+                    || row.artistNames.localizedStandardContains(activeFilter)
+                    || row.album.localizedStandardContains(activeFilter)
+            }
+        }
+        return sort.ordered(filtered, ascending: sortAscending)
+    }
+}
+
+extension FilterableTrackList where ExtraControls == EmptyView {
+    init(
+        list: TrackList,
+        contextURI: String?,
+        columns: [TrackTable.Column] = TrackTable.Column.standard
+    ) {
+        self.init(list: list, contextURI: contextURI, columns: columns, extraControls: { EmptyView() })
     }
 }
 
@@ -47,6 +226,7 @@ struct TrackListTable: View {
     var playOverride: ((TrackRow) -> Void)? = nil
     var onRowAppeared: ((Int) -> Void)? = nil
     var editablePlaylist: Playlist? = nil
+    var onReorder: ((_ from: Int, _ insertBefore: Int, _ uri: String) -> Void)? = nil
 
     var body: some View {
         let player = app.player
@@ -62,7 +242,8 @@ struct TrackListTable: View {
                 isStarred: { stars.isStarred($0.uri) },
                 toggleStar: { stars.toggle($0.uri) },
                 menu: menu,
-                open: { app.navigator.go(to: $0) }))
+                open: { app.navigator.go(to: $0) },
+                reorder: onReorder))
     }
 
     private func play(_ row: TrackRow) {

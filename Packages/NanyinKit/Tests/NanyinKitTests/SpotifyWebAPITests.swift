@@ -196,6 +196,30 @@ struct PlaylistEditingTests {
         let deleteBody = try #require(requests[1].bodyData)
         #expect(String(decoding: deleteBody, as: UTF8.self) == #"{"items":[{"uri":"spotify:track:t1"},{"uri":"spotify:track:t2"}]}"#)
     }
+
+    @Test func reordersPlaylistItemsAndControlsDevices() async throws {
+        let seen = Requests()
+        let session = StubProtocol.session { request in
+            seen.append(request)
+            if request.url?.path == "/v1/me/player/devices" {
+                return (200, [:], Data(#"{"devices":[{"id":"d1","is_active":true,"is_restricted":false,"name":"Living Room","type":"Speaker","volume_percent":65}]}"#.utf8))
+            }
+            return (200, [:], Data())
+        }
+        let auth = WebAPIAuth(store: MemorySecretStore(), refresher: { _ in throw OAuthError.grantRevoked })
+        try await auth.signIn(with: OAuthToken(accessToken: "a1", refreshToken: "r", expiresAt: .now.addingTimeInterval(3600), scope: "", clientID: "c"))
+        let api = SpotifyWebAPI(auth: auth, session: session, cooldownStore: MemoryCooldown())
+
+        try await api.reorderPlaylistItems("p1", rangeStart: 3, insertBefore: 1)
+        let devices = try await api.devices()
+        try await api.transferPlayback(deviceID: "d1", play: true)
+
+        #expect(devices.count == 1)
+        #expect(devices.first?.name == "Living Room")
+        let requests = seen.all
+        #expect(requests.map(\.httpMethod) == ["PUT", "GET", "PUT"])
+        #expect(requests.map { $0.url?.path } == ["/v1/playlists/p1/items", "/v1/me/player/devices", "/v1/me/player"])
+    }
 }
 
 final class Requests: @unchecked Sendable {

@@ -22,7 +22,7 @@ enum CoreEvent: Decodable, Equatable {
     case volume(UInt16)
     case shuffle(Bool)
     case `repeat`(context: Bool, track: Bool)
-    case queue(contextURI: String, tracks: [CoreTrack])
+    case queue(contextURI: String, tracks: [CoreTrack], manualCount: Int)
 
     enum FailureReason: String, Decodable {
         case authRejected = "auth_rejected"
@@ -36,6 +36,7 @@ enum CoreEvent: Decodable, Equatable {
         case positionMs = "position_ms"
         case volume, on, context, tracks
         case contextURI = "context_uri"
+        case manualCount = "manual_count"
     }
 
     init(from decoder: Decoder) throws {
@@ -69,7 +70,8 @@ enum CoreEvent: Decodable, Equatable {
         case "queue":
             self = .queue(
                 contextURI: try c.decode(String.self, forKey: .contextURI),
-                tracks: try c.decode([CoreTrack].self, forKey: .tracks))
+                tracks: try c.decode([CoreTrack].self, forKey: .tracks),
+                manualCount: (try? c.decode(Int.self, forKey: .manualCount)) ?? 0)
         default:
             throw DecodingError.dataCorruptedError(forKey: .type, in: c, debugDescription: "unknown event \(type)")
         }
@@ -143,6 +145,11 @@ struct CoreCredits: Decodable, Equatable, Sendable {
     let sources: [String]
 }
 
+/// Wrapped Spotify lyrics reply (`core/src/reads.rs`).
+struct CoreLyricsReply: Decodable, Equatable, Sendable {
+    let lyrics: Lyrics?
+}
+
 /// Personalized Home shelves read through Pathfinder (`core/src/pathfinder.rs`).
 struct CoreHomeShelves: Decodable, Equatable, Sendable {
     let madeForYou: [Playlist]
@@ -162,6 +169,8 @@ enum CoreAsk: Encodable, Sendable {
     case topTracks(artistID: String)
     /// Answered with `CoreCredits`.
     case credits(trackID: String)
+    /// Answered with `CoreLyricsReply`.
+    case lyrics(trackID: String, coverFileID: String?)
     /// Answered with `[AlbumSummary]`.
     case newReleases(force: Bool)
     /// Answered with `CoreHomeShelves`.
@@ -169,6 +178,7 @@ enum CoreAsk: Encodable, Sendable {
 
     private enum Key: String, CodingKey {
         case ask, id, offset, timezone, force
+        case coverFileID = "cover_file_id"
     }
 
     func encode(to encoder: Encoder) throws {
@@ -184,6 +194,10 @@ enum CoreAsk: Encodable, Sendable {
         case .credits(let trackID):
             try c.encode("credits", forKey: .ask)
             try c.encode(trackID, forKey: .id)
+        case .lyrics(let trackID, let coverFileID):
+            try c.encode("lyrics", forKey: .ask)
+            try c.encode(trackID, forKey: .id)
+            try c.encodeIfPresent(coverFileID, forKey: .coverFileID)
         case .newReleases(let force):
             try c.encode("new_releases", forKey: .ask)
             try c.encode(force, forKey: .force)
@@ -203,6 +217,8 @@ enum CoreCommand: Encodable, Equatable {
     case shuffle(Bool)
     case `repeat`(context: Bool, track: Bool)
     case addToQueue(uri: String)
+    case clearQueue
+    case transfer
     case load(Load)
 
     struct Load: Encodable, Equatable {
@@ -252,6 +268,10 @@ enum CoreCommand: Encodable, Equatable {
         case .addToQueue(let uri):
             try c.encode("add_to_queue", forKey: .cmd)
             try c.encode(uri, forKey: .uri)
+        case .clearQueue:
+            try c.encode("clear_queue", forKey: .cmd)
+        case .transfer:
+            try c.encode("transfer", forKey: .cmd)
         case .load(let load):
             try c.encode("load", forKey: .cmd)
             try load.encode(to: encoder)
