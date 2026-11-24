@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// Merges local playback history with Spotify's `/me/player/recently-played`.
@@ -106,9 +107,13 @@ public final class PlayHistoryStore {
         self.init(directory: base.appending(path: bundleID))
     }
 
+    public static func filename(for accountID: String) -> String {
+        let digest = SHA256.hash(data: Data(accountID.utf8)).map { String(format: "%02x", $0) }.joined()
+        return "history-\(digest).json"
+    }
+
     public func load(for accountID: String) {
-        let safe = accountID.unicodeScalars.map { CharacterSet.alphanumerics.contains($0) ? Character($0) : "_" }
-        let url = directory.appending(path: "history-\(String(safe)).json")
+        let url = directory.appending(path: Self.filename(for: accountID))
         fileURL = url
         guard let data = try? Data(contentsOf: url),
               let decoded = try? JSONDecoder().decode([PlayHistory].self, from: data)

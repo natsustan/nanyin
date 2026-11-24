@@ -81,7 +81,7 @@ struct PlayHistoryTests {
         #expect(reloaded.plays.count == PlayHistoryStore.maxEntries)
         #expect(reloaded.plays.first?.track.uri == store.plays.first?.track.uri)
 
-        let file = dir.appending(path: "history-alice_user.json")
+        let file = dir.appending(path: PlayHistoryStore.filename(for: "alice/user"))
         let attrs = try FileManager.default.attributesOfItem(atPath: file.path(percentEncoded: false))
         let perms = (attrs[.posixPermissions] as? Int ?? 0) & 0o777
         #expect(perms == 0o600)
@@ -89,5 +89,24 @@ struct PlayHistoryTests {
         reloaded.unload()
         reloaded.record(Track(name: "Ignored", uri: "spotify:track:ignored", duration_ms: 180_000, artists: []))
         #expect(reloaded.plays.isEmpty)
+    }
+
+    @Test @MainActor func storeIsolatesAccountsDifferingOnlyInPunctuation() {
+        let dir = FileManager.default.temporaryDirectory
+            .appending(path: "nanyin-history-isolation-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let store = PlayHistoryStore(directory: dir)
+        store.load(for: "alice-bob")
+        store.record(Track(name: "A", uri: "spotify:track:a", duration_ms: 180_000, artists: []))
+
+        store.load(for: "alice_bob")
+        #expect(store.plays.isEmpty)
+        store.record(Track(name: "B", uri: "spotify:track:b", duration_ms: 180_000, artists: []))
+
+        store.load(for: "alice-bob")
+        #expect(store.plays.map(\.track.uri) == ["spotify:track:a"])
+        store.load(for: "alice_bob")
+        #expect(store.plays.map(\.track.uri) == ["spotify:track:b"])
     }
 }
