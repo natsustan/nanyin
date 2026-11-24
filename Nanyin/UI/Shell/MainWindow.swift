@@ -108,7 +108,8 @@ private struct RouteView: View {
         case (.likedSongs, .tracks(let list)?):
             TrackListPage(title: "Starred", list: list, columns: [.star, .track, .artist, .time, .album, .added])
         case (.playlist(let id), .tracks(let list)?):
-            TrackListPage(title: app.library.playlist(id)?.name ?? "Playlist", list: list)
+            PlaylistPage(playlist: app.library.playlist(id), list: list)
+                .id(id)
         case (_, .album(let detail)?):
             AlbumPage(detail: detail)
         case (_, .artist(let detail)?):

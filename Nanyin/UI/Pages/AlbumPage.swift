@@ -126,13 +126,21 @@ extension Tile {
 struct CoverImage: View {
     let url: URL?
     let size: CGFloat
+    var fallbackSymbol: String?
 
     var body: some View {
-        Artwork(url: url, placeholder: Theme.hex(0x404040))
-            .frame(width: size, height: size)
-            .clipped()
-            .overlay(Rectangle().strokeBorder(.black.opacity(0.6), lineWidth: 1))
-            .shadow(color: .black.opacity(0.5), radius: 2, y: 1)
+        ZStack {
+            Artwork(url: url, placeholder: Theme.hex(0x404040))
+            if url == nil, let fallbackSymbol {
+                Image(systemName: fallbackSymbol)
+                    .font(.system(size: size * 0.34, weight: .light))
+                    .foregroundStyle(Theme.secondaryText.opacity(0.6))
+            }
+        }
+        .frame(width: size, height: size)
+        .clipped()
+        .overlay(Rectangle().strokeBorder(.black.opacity(0.6), lineWidth: 1))
+        .shadow(color: .black.opacity(0.5), radius: 2, y: 1)
     }
 }
 

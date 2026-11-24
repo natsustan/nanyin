@@ -118,6 +118,9 @@ struct SessionPlaylistPage: Decodable, Equatable, Sendable {
     let total: Int
     let rows: [Row]
     let next: Int?
+    let name: String?
+    let description: String?
+    let images: [SpotifyImage]?
 }
 
 /// A song's credits, read through the session (`core/src/reads.rs`).

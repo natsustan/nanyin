@@ -22,8 +22,10 @@ struct TrackRow: Identifiable, Hashable, Sendable {
     let name: String
     let artists: [Artist]
     let album: String
+    let durationMs: Int
     let duration: String
     let popularity: Int?
+    let addedDate: Date?
     let added: String
     let isPlayable: Bool
     /// For the album link and "Show Album".
@@ -37,8 +39,10 @@ struct TrackRow: Identifiable, Hashable, Sendable {
         self.name = name
         self.artists = artists
         self.album = album
+        self.durationMs = max(durationMs, 0)
         duration = Self.format(ms: durationMs)
         self.popularity = popularity
+        addedDate = added
         self.added = added?.formatted(date: .numeric, time: .omitted) ?? ""
         self.isPlayable = isPlayable
     }
@@ -67,6 +71,21 @@ struct TrackRow: Identifiable, Hashable, Sendable {
     /// "3:07".
     static func format(ms: Int) -> String {
         Duration.milliseconds(max(ms, 0)).formatted(.time(pattern: .minuteSecond))
+    }
+
+    /// "5 hr 3 min", "42 min", or "35 sec".
+    static func formatTotal(ms: Int) -> String {
+        let totalSeconds = max(ms, 0) / 1000
+        let totalMinutes = totalSeconds / 60
+        let hours = totalMinutes / 60
+        let minutes = totalMinutes % 60
+        if hours > 0 {
+            return minutes > 0 ? "\(hours) hr \(minutes) min" : "\(hours) hr"
+        }
+        if totalMinutes > 0 {
+            return "\(totalMinutes) min"
+        }
+        return "\(totalSeconds) sec"
     }
 
     private nonisolated(unsafe) static let isoParser = ISO8601DateFormatter()
@@ -130,9 +149,14 @@ extension TrackList {
 
     /// A playlist the Web API grant may not read (one the listener does not
     /// own), read through the playback session instead.
-    static func sessionPlaylist(session: PlaybackSession, id: String) -> TrackList {
+    static func sessionPlaylist(
+        session: PlaybackSession,
+        id: String,
+        onMetadata: @escaping @MainActor (SessionPlaylistPage) -> Void = { _ in }
+    ) -> TrackList {
         TrackList(contextURI: "spotify:playlist:\(id)") { offset in
             let page = try await session.readPlaylist(id: id, offset: offset)
+            if offset == 0 { onMetadata(page) }
             let rows = page.rows.map { row in
                 TrackRow(index: row.index, track: row.track,
                          added: row.addedAtMs.map { Date(timeIntervalSince1970: Double($0) / 1000) })

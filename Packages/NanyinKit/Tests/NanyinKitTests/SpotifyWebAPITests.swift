@@ -116,6 +116,40 @@ struct SpotifyWebAPITests {
             "https://api.spotify.com/v1/me/top/tracks?limit=50&time_range=long_term",
         ])
     }
+
+    @Test func picksBestImageIncludingUnsizedPlaylistCovers() {
+        let sized = [
+            SpotifyImage(url: URL(string: "https://i.scdn.co/640")!, width: 640),
+            SpotifyImage(url: URL(string: "https://i.scdn.co/300")!, width: 300),
+            SpotifyImage(url: URL(string: "https://i.scdn.co/60")!, width: 60),
+        ]
+        #expect(sized.best(minimum: 200)?.absoluteString == "https://i.scdn.co/300")
+        #expect(sized.best(minimum: 700)?.absoluteString == "https://i.scdn.co/640")
+
+        let unsized = [
+            SpotifyImage(url: URL(string: "https://i.scdn.co/large")!, width: nil),
+            SpotifyImage(url: URL(string: "https://i.scdn.co/small")!, width: nil),
+        ]
+        #expect(unsized.best(minimum: 200)?.absoluteString == "https://i.scdn.co/large")
+        #expect([SpotifyImage]().best(minimum: 200) == nil)
+    }
+
+    @Test func stripsHTMLAndDecodesEntitiesInPlaylistDescription() throws {
+        let json = #"{"id":"p1","name":"Mix","uri":"spotify:playlist:p1","description":"Cover: <a href=\"spotify:artist:1\">Artist</a> &amp; Friends &#x27;26 & B &amp;lt;3","owner":{"id":"u1","display_name":"Spike"}}"#
+        let playlist = try JSONDecoder().decode(Playlist.self, from: Data(json.utf8))
+        #expect(playlist.plainDescription == "Cover: Artist & Friends '26 & B &lt;3")
+        #expect(playlist.ownerName == "Spike")
+    }
+
+    @Test func fetchesPlaylistImages() async throws {
+        let session = StubProtocol.session { request in
+            #expect(request.url?.path == "/v1/playlists/p1/images")
+            return (200, [:], Data(#"[{"url":"https://mosaic.scdn.co/640/abc","width":null}]"#.utf8))
+        }
+        let api = SpotifyWebAPI(auth: try await signedIn(), session: session, cooldownStore: MemoryCooldown())
+        let images = try await api.playlistImages("p1")
+        #expect(images.best(minimum: 200)?.absoluteString == "https://mosaic.scdn.co/640/abc")
+    }
 }
 
 struct PlaylistEditingTests {
@@ -141,6 +175,26 @@ struct PlaylistEditingTests {
         #expect(requests.map { $0.url?.path } == ["/v1/me/playlists", "/v1/playlists/p1"])
         let body = try #require(requests[1].bodyData)
         #expect(String(decoding: body, as: UTF8.self) == #"{"name":"Evening"}"#)
+    }
+
+    @Test func updatesDetailsAndRemovesItems() async throws {
+        let seen = Requests()
+        let session = StubProtocol.session { request in
+            seen.append(request)
+            return (200, [:], Data())
+        }
+        let auth = WebAPIAuth(store: MemorySecretStore(), refresher: { _ in throw OAuthError.grantRevoked })
+        try await auth.signIn(with: OAuthToken(accessToken: "a1", refreshToken: "r", expiresAt: .now.addingTimeInterval(3600), scope: "", clientID: "c"))
+        let api = SpotifyWebAPI(auth: auth, session: session, cooldownStore: MemoryCooldown())
+
+        try await api.updatePlaylist("p1", name: "Night", description: "Quiet songs")
+        try await api.removeFromPlaylist("p1", uris: ["spotify:track:t1", "spotify:track:t2"])
+
+        let requests = seen.all
+        #expect(requests.map(\.httpMethod) == ["PUT", "DELETE"])
+        #expect(requests.map { $0.url?.path } == ["/v1/playlists/p1", "/v1/playlists/p1/items"])
+        let deleteBody = try #require(requests[1].bodyData)
+        #expect(String(decoding: deleteBody, as: UTF8.self) == #"{"items":[{"uri":"spotify:track:t1"},{"uri":"spotify:track:t2"}]}"#)
     }
 }
 

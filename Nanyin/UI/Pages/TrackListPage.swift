@@ -1,7 +1,7 @@
 import NanyinKit
 import SwiftUI
 
-/// A page that is a title over a track table: Liked Songs, a playlist.
+/// A page that is a title over a track table: Liked Songs, Play Queue.
 struct TrackListPage: View {
     let title: String
     var subtitle: String?
@@ -43,29 +43,41 @@ struct TrackListTable: View {
     @Environment(AppModel.self) private var app
     let list: TrackList
     var columns = TrackTable.Column.standard
+    var rowsOverride: [TrackRow]? = nil
+    var playOverride: ((TrackRow) -> Void)? = nil
+    var onRowAppeared: ((Int) -> Void)? = nil
+    var editablePlaylist: Playlist? = nil
 
     var body: some View {
         let player = app.player
         let stars = app.stars
         TrackTable(
-            rows: list.rows,
+            rows: rowsOverride ?? list.rows,
             playingURI: player.playingURI,
             starsVersion: stars.version,
             columns: columns,
             actions: .init(
-                play: { player.play($0, in: list) },
-                rowAppeared: list.pages.appeared,
+                play: play,
+                rowAppeared: onRowAppeared ?? list.pages.appeared,
                 isStarred: { stars.isStarred($0.uri) },
                 toggleStar: { stars.toggle($0.uri) },
                 menu: menu,
                 open: { app.navigator.go(to: $0) }))
     }
 
+    private func play(_ row: TrackRow) {
+        if let playOverride {
+            playOverride(row)
+        } else {
+            app.player.play(row, in: list)
+        }
+    }
+
     private func menu(for rows: [TrackRow]) -> [TrackMenuItem] {
         guard let first = rows.first else { return [] }
         let (player, library) = (app.player, app.library)
         var items = [
-            TrackMenuItem(title: "Play") { player.play(first, in: list) },
+            TrackMenuItem(title: "Play") { play(first) },
             TrackMenuItem(title: "Add to Play Queue") { rows.forEach { player.addToQueue($0.uri) } },
         ]
         let playlists = library.editablePlaylists
@@ -73,6 +85,11 @@ struct TrackListTable: View {
             items.append(TrackMenuItem(title: "Add to Playlist", children: playlists.map { playlist in
                 TrackMenuItem(title: playlist.name) { library.add(rows.map(\.uri), to: playlist) }
             }))
+        }
+        if let editablePlaylist {
+            items.append(TrackMenuItem(title: "Remove from This Playlist") {
+                library.removeTracks(rows, from: editablePlaylist, list: list)
+            })
         }
         items.append(.separator)
         items += app.songMenu(uri: first.uri, name: first.name, album: first.albumRoute, artists: first.artists)
@@ -150,6 +167,7 @@ struct LinkText: View {
 struct PageHeader<Artwork: View, Accessory: View>: View {
     let title: String
     var subtitle = ""
+    var description = ""
     @ViewBuilder var artwork: Artwork
     @ViewBuilder var accessory: Accessory
 
@@ -160,13 +178,21 @@ struct PageHeader<Artwork: View, Accessory: View>: View {
                 Text(title)
                     .font(AquaFont.bold(18))
                     .foregroundStyle(Theme.text)
+                    .lineLimit(1)
                 if !subtitle.isEmpty {
                     Text(subtitle)
                         .font(AquaFont.regular(12))
                         .foregroundStyle(Theme.secondaryText)
+                        .lineLimit(1)
+                }
+                if !description.isEmpty {
+                    Text(description)
+                        .font(AquaFont.regular(11))
+                        .foregroundStyle(Theme.secondaryText)
+                        .lineLimit(2)
+                        .padding(.top, 2)
                 }
             }
-            .lineLimit(1)
             .engraved()
             Spacer(minLength: 0)
             accessory

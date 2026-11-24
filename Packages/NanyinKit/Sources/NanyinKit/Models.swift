@@ -10,9 +10,14 @@ public struct SpotifyImage: Codable, Sendable, Hashable {
 
 extension [SpotifyImage] {
     /// The smallest image at least `minimum` pixels wide, else the largest.
+    /// Spotify orders images widest-first and omits `width` on many playlist
+    /// covers, so unsized lists fall back to the first entry.
     public func best(minimum: Int) -> URL? {
-        let sorted = self.sorted { ($0.width ?? 0) < ($1.width ?? 0) }
-        return (sorted.first { ($0.width ?? 0) >= minimum } ?? sorted.last)?.url
+        let sized = filter { ($0.width ?? 0) > 0 }.sorted { ($0.width ?? 0) < ($1.width ?? 0) }
+        if let match = sized.first(where: { ($0.width ?? 0) >= minimum }) ?? sized.last {
+            return match.url
+        }
+        return first?.url
     }
 }
 
@@ -107,10 +112,71 @@ public struct Playlist: Codable, Sendable, Hashable, Identifiable {
     public let id: String
     public var name: String
     public let uri: String
-    public let description: String?
-    public let images: [SpotifyImage]?
+    public var description: String?
+    public var images: [SpotifyImage]?
     public let owner: PlaylistOwner
     public let collaborative: Bool?
+
+    public var ownerName: String? {
+        if let display = owner.display_name, !display.isEmpty { return display }
+        return owner.id.isEmpty ? nil : owner.id
+    }
+
+    /// Plain-text description with Spotify's HTML tags and common entities
+    /// stripped, or `nil` when blank.
+    public var plainDescription: String? {
+        guard let description else { return nil }
+        let plain = Self.stripHTML(description).trimmingCharacters(in: .whitespacesAndNewlines)
+        return plain.isEmpty ? nil : plain
+    }
+
+    private static func stripHTML(_ text: String) -> String {
+        let withoutTags = text.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+        return decodeHTMLEntities(withoutTags)
+    }
+
+    private static func decodeHTMLEntities(_ text: String) -> String {
+        guard text.contains("&") else { return text }
+        var out = ""
+        out.reserveCapacity(text.count)
+        var i = text.startIndex
+        while i < text.endIndex {
+            if text[i] == "&", let semi = text[i...].firstIndex(of: ";") {
+                let entity = text[text.index(after: i) ..< semi]
+                if let decoded = decodeEntity(entity) {
+                    out.append(decoded)
+                    i = text.index(after: semi)
+                    continue
+                }
+            }
+            out.append(text[i])
+            i = text.index(after: i)
+        }
+        return out
+    }
+
+    private static func decodeEntity(_ entity: Substring) -> String? {
+        switch entity {
+        case "amp": "&"
+        case "lt": "<"
+        case "gt": ">"
+        case "quot": "\""
+        case "apos": "'"
+        case "nbsp": " "
+        default:
+            if entity.hasPrefix("#x") || entity.hasPrefix("#X"),
+               let value = UInt32(entity.dropFirst(2), radix: 16),
+               let scalar = Unicode.Scalar(value) {
+                String(scalar)
+            } else if entity.hasPrefix("#"),
+                      let value = UInt32(entity.dropFirst(1), radix: 10),
+                      let scalar = Unicode.Scalar(value) {
+                String(scalar)
+            } else {
+                nil
+            }
+        }
+    }
 }
 
 public struct Album: Codable, Sendable, Hashable, Identifiable {

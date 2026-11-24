@@ -32,6 +32,10 @@ public extension SpotifyWebAPI {
         ])
     }
 
+    func playlistImages(_ id: String) async throws -> [SpotifyImage] {
+        try await get("/playlists/\(id)/images")
+    }
+
     func savedTracks(offset: Int = 0) async throws -> Paging<SavedTrack> {
         try await get("/me/tracks", query: ["limit": "50", "offset": "\(offset)"])
     }
@@ -87,6 +91,17 @@ public extension SpotifyWebAPI {
         }
     }
 
+    /// Removes every occurrence of `uris` from a playlist the listener may
+    /// edit, at most 100 per request as the endpoint allows.
+    func removeFromPlaylist(_ id: String, uris: [String]) async throws {
+        struct Item: Encodable, Sendable { let uri: String }
+        struct Body: Encodable, Sendable { let items: [Item] }
+        for start in stride(from: 0, to: uris.count, by: 100) {
+            let batch = uris[start ..< min(start + 100, uris.count)].map(Item.init)
+            try await send("DELETE", "/playlists/\(id)/items", body: Body(items: batch))
+        }
+    }
+
     /// Creates a playlist owned by the listener (2026: `/me/playlists`).
     func createPlaylist(name: String) async throws -> Playlist {
         struct Body: Encodable, Sendable { let name: String }
@@ -101,6 +116,14 @@ public extension SpotifyWebAPI {
     func renamePlaylist(_ id: String, to name: String) async throws {
         struct Body: Encodable, Sendable { let name: String }
         try await send("PUT", "/playlists/\(id)", body: Body(name: name))
+    }
+
+    func updatePlaylist(_ id: String, name: String, description: String) async throws {
+        struct Body: Encodable, Sendable {
+            let name: String
+            let description: String
+        }
+        try await send("PUT", "/playlists/\(id)", body: Body(name: name, description: description))
     }
 
     /// Saves tracks, albums, artists or playlists by URI (2026 unified library).
