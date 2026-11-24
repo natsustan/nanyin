@@ -1,5 +1,20 @@
 import Foundation
 
+/// Time window for `/me/top/artists` and `/me/top/tracks`.
+public enum TopTimeRange: String, CaseIterable, Sendable, Hashable {
+    case shortTerm = "short_term"
+    case mediumTerm = "medium_term"
+    case longTerm = "long_term"
+
+    public var label: String {
+        switch self {
+        case .shortTerm: "4 Weeks"
+        case .mediumTerm: "6 Months"
+        case .longTerm: "All Time"
+        }
+    }
+}
+
 /// Typed endpoints. Page sizes stay at 50 or below (Development Mode rejects
 /// larger pages; search is limited to 10 per type).
 public extension SpotifyWebAPI {
@@ -34,6 +49,16 @@ public extension SpotifyWebAPI {
 
     func recentlyPlayed() async throws -> [PlayHistory] {
         try await get("/me/player/recently-played", query: ["limit": "50"], as: Paging<PlayHistory>.self).items
+    }
+
+    func topArtists(timeRange: TopTimeRange = .shortTerm, limit: Int = 20) async throws -> Paging<Artist> {
+        let clamped = min(max(limit, 1), 50)
+        return try await get("/me/top/artists", query: ["time_range": timeRange.rawValue, "limit": "\(clamped)"])
+    }
+
+    func topTracks(timeRange: TopTimeRange = .shortTerm, limit: Int = 20) async throws -> Paging<Track> {
+        let clamped = min(max(limit, 1), 50)
+        return try await get("/me/top/tracks", query: ["time_range": timeRange.rawValue, "limit": "\(clamped)"])
     }
 
     func album(_ id: String) async throws -> Album {
