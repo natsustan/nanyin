@@ -52,7 +52,7 @@ private struct SidebarDivider: View {
                 Color.clear
                     .frame(width: 7)
                     .contentShape(Rectangle())
-                    .pointerStyle(.columnResize)
+                    .columnResizePointer()
                     .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
                         .onChanged { drag in
                             let origin = start ?? width

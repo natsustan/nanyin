@@ -8,7 +8,7 @@ cd "$ROOT_DIR/core"
 export PATH="$HOME/.local/share/mise/shims:/opt/homebrew/bin:$HOME/.cargo/bin:$PATH"
 # Xcode exports SDK settings that confuse cc-rs when building C dependencies.
 unset SDKROOT MACOSX_DEPLOYMENT_TARGET_SETTING_NAME
-export MACOSX_DEPLOYMENT_TARGET=26.0
+export MACOSX_DEPLOYMENT_TARGET=14.0
 if [[ "${CONFIGURATION:-Debug}" == "Release" ]]; then
     exec mise exec -- cargo build --release
 else

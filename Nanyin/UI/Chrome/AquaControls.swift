@@ -297,3 +297,23 @@ struct DarkSegmentButtonStyle: ButtonStyle {
             .contentShape(shape)
     }
 }
+
+extension View {
+    /// Applies `.pointerStyle(.columnResize)` on macOS 15+, falling back cleanly on macOS 14.
+    @ViewBuilder func columnResizePointer() -> some View {
+        if #available(macOS 15.0, *) {
+            pointerStyle(.columnResize)
+        } else {
+            self
+        }
+    }
+
+    /// Applies `.pointerStyle(.link)` when `active` on macOS 15+, falling back cleanly on macOS 14.
+    @ViewBuilder func linkPointer(_ active: Bool) -> some View {
+        if #available(macOS 15.0, *) {
+            pointerStyle(active ? .link : nil)
+        } else {
+            self
+        }
+    }
+}

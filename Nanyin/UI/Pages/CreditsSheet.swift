@@ -84,7 +84,7 @@ private struct CreditRow: View {
         .background(Color(nsColor: Theme.row(index)))
         .contentShape(Rectangle())
         .onHover { hovered = $0 }
-        .pointerStyle(route == nil ? nil : .link)
+        .linkPointer(route != nil)
         .onTapGesture { route.map(open) }
     }
 }
