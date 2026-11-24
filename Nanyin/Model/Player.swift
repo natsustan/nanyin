@@ -213,7 +213,7 @@ final class Player {
             loadingURI = uri
             isLoading = true
             position = Position(ms: ms, at: .now, advancing: false)
-            noteNotPlaying()
+            resetListen()
         case .playing(let uri, let ms):
             resumePoint = nil
             loadingURI = nil
@@ -310,15 +310,10 @@ final class Player {
     }
 
     private func noteTrackChanged(_ track: CoreTrack) {
-        if listen.uri != track.uri || listen.recorded {
-            listen.timer?.cancel()
-            listen = ListenState(uri: track.uri)
-            if isPlaying {
-                listen.startedAt = .now
-                scheduleCountTimer(for: track)
-            }
-        } else if isPlaying && listen.timer == nil {
-            if listen.startedAt == nil { listen.startedAt = .now }
+        listen.timer?.cancel()
+        listen = ListenState(uri: track.uri)
+        if isPlaying && !isLoading {
+            listen.startedAt = .now
             scheduleCountTimer(for: track)
         }
     }
@@ -332,7 +327,7 @@ final class Player {
         if listen.startedAt == nil {
             listen.startedAt = .now
         }
-        if let track, track.uri == uri {
+        if let track, track.uri == uri, listen.timer == nil {
             scheduleCountTimer(for: track)
         }
     }
