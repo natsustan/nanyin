@@ -65,6 +65,10 @@ public extension SpotifyWebAPI {
         return try await get("/me/top/tracks", query: ["time_range": timeRange.rawValue, "limit": "\(clamped)"])
     }
 
+    func track(_ id: String) async throws -> Track {
+        try await get("/tracks/\(id)")
+    }
+
     func album(_ id: String) async throws -> Album {
         try await get("/albums/\(id)")
     }
@@ -77,7 +81,7 @@ public extension SpotifyWebAPI {
         try await get("/artists/\(id)/albums", query: ["include_groups": "album,single", "limit": "10"])
     }
 
-    func search(_ text: String, types: [String] = ["track", "artist", "album"]) async throws -> SearchResults {
+    func search(_ text: String, types: [String] = ["track", "artist", "album", "playlist"]) async throws -> SearchResults {
         try await get("/search", query: ["q": text, "type": types.joined(separator: ","), "limit": "10"])
     }
 

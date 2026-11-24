@@ -248,6 +248,13 @@ public struct SearchResults: Codable, Sendable, Hashable {
     public let tracks: Paging<Track>?
     public let artists: Paging<Artist>?
     public let albums: Paging<AlbumSummary>?
+    /// Spotify's playlist search can include `null` slots for removed or
+    /// inaccessible playlists; decode optionals and read `compactPlaylists`.
+    public let playlists: Paging<Playlist?>?
+
+    public var compactPlaylists: [Playlist] {
+        playlists?.items.compactMap { $0 } ?? []
+    }
 }
 
 /// Search and artist pages list albums without their tracks.

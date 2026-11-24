@@ -11,8 +11,21 @@ struct AlbumPage: View {
                 PageHeader(title: album.name, subtitle: subtitle(album)) {
                     CoverImage(url: album.images?.best(minimum: 200), size: 96)
                 } accessory: {
-                    Button("Play") { app.player.play(contextURI: album.uri) }
-                        .buttonStyle(TexturedButtonStyle())
+                    HStack(spacing: 6) {
+                        if let isSaved = detail.isSaved {
+                            Button { detail.toggleSave() } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: isSaved ? "checkmark" : "plus")
+                                        .font(.system(size: 9, weight: .bold))
+                                    Text(isSaved ? "Saved" : "Save")
+                                }
+                            }
+                            .buttonStyle(TexturedButtonStyle())
+                            .disabled(detail.isSaving)
+                        }
+                        Button("Play") { app.player.play(contextURI: album.uri) }
+                            .buttonStyle(TexturedButtonStyle())
+                    }
                 }
             } else {
                 PageHeader(title: "Album", subtitle: detail.error ?? "Loading…")
@@ -44,8 +57,21 @@ struct ArtistPage: View {
                 CoverImage(url: detail.artist?.images?.best(minimum: 200), size: 72)
             } accessory: {
                 if let artist = detail.artist {
-                    Button("Play") { app.player.play(contextURI: artist.uri) }
-                        .buttonStyle(TexturedButtonStyle())
+                    HStack(spacing: 6) {
+                        if let isFollowing = detail.isFollowing {
+                            Button { detail.toggleFollow() } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: isFollowing ? "checkmark" : "plus")
+                                        .font(.system(size: 9, weight: .bold))
+                                    Text(isFollowing ? "Following" : "Follow")
+                                }
+                            }
+                            .buttonStyle(TexturedButtonStyle())
+                            .disabled(detail.isUpdatingFollow)
+                        }
+                        Button("Play") { app.player.play(contextURI: artist.uri) }
+                            .buttonStyle(TexturedButtonStyle())
+                    }
                 }
             }
             if let message = detail.albumsError {

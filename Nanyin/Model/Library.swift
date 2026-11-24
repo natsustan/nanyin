@@ -355,6 +355,10 @@ final class Library {
         pages[route]
     }
 
+    func invalidate(_ route: Route) {
+        pages[route] = nil
+    }
+
     /// Creates the content for `route` the first time it is shown.
     func prepare(_ route: Route) {
         guard pages[route] == nil, let username else { return }
@@ -374,9 +378,18 @@ final class Library {
                     guard let self, self.account == account else { return }
                     self.applySessionMetadata(id: id, page: page)
                 })
-        case .album(let id): content = .album(AlbumDetail(id: id, api: api))
-        case .artist(let id): content = .artist(ArtistDetail(id: id, api: api, session: session))
-        case .search(let query): content = .search(SearchResultsModel(query: query, api: api))
+        case .album(let id):
+            content = .album(AlbumDetail(id: id, api: api, notices: notices) { [weak self] in
+                self?.invalidate(.albums)
+            })
+        case .artist(let id):
+            content = .artist(ArtistDetail(id: id, api: api, session: session, notices: notices) { [weak self] in
+                self?.invalidate(.artists)
+            })
+        case .search(let query):
+            content = .search(SearchResultsModel(query: query, api: api) { [weak self] in
+                self?.remember($0)
+            })
         case .albums: content = .albums(.savedAlbums(api: api))
         case .artists: content = .artists(.followedArtists(api: api))
         case .queue: return

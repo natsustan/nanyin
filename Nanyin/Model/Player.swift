@@ -102,6 +102,10 @@ final class Player {
         if let shuffle { self.shuffle = shuffle }
     }
 
+    func play(trackURI: String) {
+        start(.init(trackURIs: [trackURI], startURI: trackURI), uri: trackURI, contextURI: nil)
+    }
+
     /// Maximum number of tracks uploaded directly in a `Load` command;
     /// larger lists always play by Spotify context URI.
     static let maxDirectTrackLoad = 50

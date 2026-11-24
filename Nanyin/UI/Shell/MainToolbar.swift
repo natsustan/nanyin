@@ -1,3 +1,4 @@
+import NanyinKit
 import SwiftUI
 
 /// The unified metal title bar and toolbar: traffic lights and the window
@@ -40,6 +41,7 @@ struct MainToolbar: View {
                     }
                     AquaSearchField(text: $query, onSubmit: { search(replacing: false) }, focusRequest: navigator.searchFocusRequests)
                         .frame(width: 220)
+                        .help("Search songs, artists, albums, playlists, or paste a Spotify link")
                         .onChange(of: query) { scheduleSearch() }
                     Spacer()
                     if app.account.profile != nil {
@@ -77,9 +79,18 @@ struct MainToolbar: View {
     }
 
     /// Typing searches after a pause, refining the current search page
-    /// instead of adding a history entry per pause.
+    /// instead of adding a history entry per pause. Pasting a Spotify link
+    /// opens it directly instead of searching the URL text.
     private func scheduleSearch() {
         debounce?.cancel()
+        let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let target = SpotifyLink.parse(text) {
+            if shouldAutoOpen(text) {
+                query = ""
+                app.openSpotifyLink(target)
+            }
+            return
+        }
         debounce = Task {
             try? await Task.sleep(for: .milliseconds(450))
             guard !Task.isCancelled else { return }
@@ -89,12 +100,28 @@ struct MainToolbar: View {
 
     private func search(replacing: Bool) {
         debounce?.cancel()
-        let text = query.trimmingCharacters(in: .whitespaces)
+        let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
+        if let target = SpotifyLink.parse(text) {
+            query = ""
+            app.openSpotifyLink(target)
+            return
+        }
         if case .search = app.navigator.current {
             app.navigator.go(to: .search(text), replacing: replacing)
         } else {
             app.navigator.go(to: .search(text))
         }
+    }
+
+    /// Auto-opens pasted Spotify web URLs and full 22-character URIs; shorter
+    /// URIs being typed manually wait for Return.
+    private func shouldAutoOpen(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        if lower.contains("spotify.com/") { return true }
+        if lower.hasPrefix("spotify:"), let last = text.split(separator: ":").last {
+            return last.count >= 22
+        }
+        return false
     }
 }

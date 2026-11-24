@@ -12,7 +12,7 @@ struct SearchPage: View {
             PageHeader(
                 title: "Search",
                 subtitle: results.error ?? (results.tracks == nil ? "Searching for “\(query)”…" : "Results for “\(query)”"))
-            if !results.artists.isEmpty || !results.albums.isEmpty {
+            if !results.artists.isEmpty || !results.albums.isEmpty || !results.playlists.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     if !results.artists.isEmpty {
                         LinkText(label: "Artists", parts: results.artists.map { ($0.name, .artist(id: $0.id)) },
@@ -21,6 +21,11 @@ struct SearchPage: View {
                     if !results.albums.isEmpty {
                         LinkText(label: "Albums", parts: results.albums.map {
                             ("\($0.name) by \($0.artists.first?.name ?? "")", .album(id: $0.id))
+                        }, color: Theme.text)
+                    }
+                    if !results.playlists.isEmpty {
+                        LinkText(label: "Playlists", parts: results.playlists.map {
+                            ($0.name, .playlist(id: $0.id))
                         }, color: Theme.text)
                     }
                 }

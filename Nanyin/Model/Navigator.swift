@@ -15,12 +15,13 @@ enum Route: Hashable {
 }
 
 extension Route {
-    /// The page a `spotify:album:…` or `spotify:artist:…` URI opens.
+    /// The page a `spotify:album:…`, `spotify:artist:…` or `spotify:playlist:…` URI opens.
     init?(uri: String) {
         guard let (kind, id) = Self.parse(uri) else { return nil }
         switch kind {
         case "album": self = .album(id: id)
         case "artist": self = .artist(id: id)
+        case "playlist": self = .playlist(id: id)
         default: return nil
         }
     }

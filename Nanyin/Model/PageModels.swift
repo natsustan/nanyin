@@ -9,8 +9,17 @@ final class AlbumDetail {
     private(set) var album: Album?
     private(set) var tracks: TrackList?
     private(set) var error: String?
+    private(set) var isSaved: Bool?
+    private(set) var isSaving = false
 
-    init(id: String, api: SpotifyWebAPI) {
+    @ObservationIgnored private let api: SpotifyWebAPI
+    @ObservationIgnored private let notices: Notices
+    @ObservationIgnored private let onLibraryChanged: () -> Void
+
+    init(id: String, api: SpotifyWebAPI, notices: Notices, onLibraryChanged: @escaping () -> Void = {}) {
+        self.api = api
+        self.notices = notices
+        self.onLibraryChanged = onLibraryChanged
         Task {
             do {
                 let album = try await api.album(id)
@@ -19,8 +28,32 @@ final class AlbumDetail {
                     TrackRow(index: $0.offset, track: $0.element, album: album)
                 }
                 tracks = TrackList(rows: rows, contextURI: album.uri)
+                if let saved = try? await api.libraryContains([album.uri]).first {
+                    isSaved = saved
+                }
             } catch {
                 self.error = error.localizedDescription
+            }
+        }
+    }
+
+    func toggleSave() {
+        guard let album, let current = isSaved, !isSaving else { return }
+        let target = !current
+        isSaved = target
+        isSaving = true
+        Task {
+            defer { isSaving = false }
+            do {
+                if target {
+                    try await api.save([album.uri])
+                } else {
+                    try await api.remove([album.uri])
+                }
+                onLibraryChanged()
+            } catch {
+                isSaved = current
+                notices.report("Could not \(target ? "save" : "remove") “\(album.name)”: \(error.localizedDescription)")
             }
         }
     }
@@ -35,15 +68,59 @@ final class ArtistDetail {
     private(set) var error: String?
     private(set) var albums: [AlbumSummary] = []
     private(set) var albumsError: String?
+    private(set) var isFollowing: Bool?
+    private(set) var isUpdatingFollow = false
     let topTracks: TrackList
 
-    init(id: String, api: SpotifyWebAPI, session: PlaybackSession) {
+    @ObservationIgnored private let api: SpotifyWebAPI
+    @ObservationIgnored private let notices: Notices
+    @ObservationIgnored private let onLibraryChanged: () -> Void
+
+    init(
+        id: String,
+        api: SpotifyWebAPI,
+        session: PlaybackSession,
+        notices: Notices,
+        onLibraryChanged: @escaping () -> Void = {}
+    ) {
+        self.api = api
+        self.notices = notices
+        self.onLibraryChanged = onLibraryChanged
         topTracks = .topTracks(session: session, artistID: id)
         Task {
-            do { artist = try await api.artist(id) } catch { self.error = error.localizedDescription }
+            do {
+                let artist = try await api.artist(id)
+                self.artist = artist
+                if let following = try? await api.libraryContains([artist.uri]).first {
+                    isFollowing = following
+                }
+            } catch {
+                self.error = error.localizedDescription
+            }
         }
         Task {
             do { albums = try await api.artistAlbums(id).items } catch { albumsError = error.localizedDescription }
+        }
+    }
+
+    func toggleFollow() {
+        guard let artist, let current = isFollowing, !isUpdatingFollow else { return }
+        let target = !current
+        isFollowing = target
+        isUpdatingFollow = true
+        Task {
+            defer { isUpdatingFollow = false }
+            do {
+                if target {
+                    try await api.save([artist.uri])
+                } else {
+                    try await api.remove([artist.uri])
+                }
+                onLibraryChanged()
+            } catch {
+                isFollowing = current
+                notices.report("Could not \(target ? "follow" : "unfollow") \(artist.name): \(error.localizedDescription)")
+            }
         }
     }
 }
@@ -75,21 +152,24 @@ final class TrackCredits: Identifiable {
     }
 }
 
-/// One search: matching artists and albums, and the matching tracks.
+/// One search: matching artists, albums, playlists, and tracks.
 @MainActor
 @Observable
 final class SearchResultsModel {
     private(set) var artists: [Artist] = []
     private(set) var albums: [AlbumSummary] = []
+    private(set) var playlists: [Playlist] = []
     private(set) var tracks: TrackList?
     private(set) var error: String?
 
-    init(query: String, api: SpotifyWebAPI) {
+    init(query: String, api: SpotifyWebAPI, onPlaylists: @escaping ([Playlist]) -> Void = { _ in }) {
         Task {
             do {
                 let found = try await api.search(query)
                 artists = found.artists?.items ?? []
                 albums = found.albums?.items ?? []
+                playlists = found.compactPlaylists
+                onPlaylists(playlists)
                 let rows = (found.tracks?.items ?? []).enumerated().map { TrackRow(index: $0.offset, track: $0.element) }
                 tracks = TrackList(rows: rows)
             } catch {

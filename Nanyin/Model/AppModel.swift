@@ -93,6 +93,27 @@ final class AppModel {
         }
     }
 
+    func openSpotifyLink(_ target: SpotifyTarget) {
+        switch target {
+        case .album(let id):
+            navigator.go(to: .album(id: id))
+        case .artist(let id):
+            navigator.go(to: .artist(id: id))
+        case .playlist(let id):
+            navigator.go(to: .playlist(id: id))
+        case .track(let id):
+            player.play(trackURI: target.uri)
+            let api = account.api
+            Task { [weak self] in
+                guard let track = try? await api.track(id),
+                      let albumURI = track.album?.uri,
+                      let route = Route(uri: albumURI)
+                else { return }
+                self?.navigator.go(to: route)
+            }
+        }
+    }
+
     func skipPlaybackSetup() {
         session.cancelAuthorize()
         showPlaybackOnboarding = false
