@@ -2,6 +2,13 @@ import Foundation
 import NanyinKit
 import Observation
 
+/// Saved/followed state of an album or artist on its detail page.
+enum LibraryStatus: Equatable {
+    case loading
+    case known(Bool)
+    case failed(String)
+}
+
 /// An album page: the album and its tracks, in one request.
 @MainActor
 @Observable
@@ -9,7 +16,7 @@ final class AlbumDetail {
     private(set) var album: Album?
     private(set) var tracks: TrackList?
     private(set) var error: String?
-    private(set) var isSaved: Bool?
+    private(set) var libraryStatus: LibraryStatus = .loading
     private(set) var isSaving = false
 
     @ObservationIgnored private let api: SpotifyWebAPI
@@ -37,9 +44,7 @@ final class AlbumDetail {
                     TrackRow(index: $0.offset, track: $0.element, album: album)
                 }
                 tracks = TrackList(rows: rows, contextURI: album.uri)
-                if let saved = try? await api.libraryContains([album.uri]).first, isCurrentAccount() {
-                    isSaved = saved
-                }
+                await checkLibraryStatus(for: album)
             } catch {
                 guard isCurrentAccount() else { return }
                 self.error = error.localizedDescription
@@ -47,10 +52,31 @@ final class AlbumDetail {
         }
     }
 
+    func retryLibraryStatus() {
+        guard let album, case .failed = libraryStatus else { return }
+        libraryStatus = .loading
+        Task { await checkLibraryStatus(for: album) }
+    }
+
+    private func checkLibraryStatus(for album: Album) async {
+        do {
+            let saved = try await api.libraryContains([album.uri]).first
+            guard isCurrentAccount() else { return }
+            if let saved {
+                libraryStatus = .known(saved)
+            } else {
+                libraryStatus = .failed("Spotify did not return library status.")
+            }
+        } catch {
+            guard isCurrentAccount() else { return }
+            libraryStatus = .failed(error.localizedDescription)
+        }
+    }
+
     func toggleSave() {
-        guard let album, let current = isSaved, !isSaving else { return }
+        guard let album, case .known(let current) = libraryStatus, !isSaving else { return }
         let target = !current
-        isSaved = target
+        libraryStatus = .known(target)
         isSaving = true
         Task {
             defer { isSaving = false }
@@ -64,7 +90,7 @@ final class AlbumDetail {
                 onLibraryChanged()
             } catch {
                 guard isCurrentAccount() else { return }
-                isSaved = current
+                libraryStatus = .known(current)
                 notices.report("Could not \(target ? "save" : "remove") “\(album.name)”: \(error.localizedDescription)")
             }
         }
@@ -80,7 +106,7 @@ final class ArtistDetail {
     private(set) var error: String?
     private(set) var albums: [AlbumSummary] = []
     private(set) var albumsError: String?
-    private(set) var isFollowing: Bool?
+    private(set) var libraryStatus: LibraryStatus = .loading
     private(set) var isUpdatingFollow = false
     let topTracks: TrackList
 
@@ -107,9 +133,7 @@ final class ArtistDetail {
                 let artist = try await api.artist(id)
                 guard isCurrentAccount() else { return }
                 self.artist = artist
-                if let following = try? await api.libraryContains([artist.uri]).first, isCurrentAccount() {
-                    isFollowing = following
-                }
+                await checkLibraryStatus(for: artist)
             } catch {
                 guard isCurrentAccount() else { return }
                 self.error = error.localizedDescription
@@ -127,10 +151,31 @@ final class ArtistDetail {
         }
     }
 
+    func retryLibraryStatus() {
+        guard let artist, case .failed = libraryStatus else { return }
+        libraryStatus = .loading
+        Task { await checkLibraryStatus(for: artist) }
+    }
+
+    private func checkLibraryStatus(for artist: Artist) async {
+        do {
+            let following = try await api.libraryContains([artist.uri]).first
+            guard isCurrentAccount() else { return }
+            if let following {
+                libraryStatus = .known(following)
+            } else {
+                libraryStatus = .failed("Spotify did not return follow status.")
+            }
+        } catch {
+            guard isCurrentAccount() else { return }
+            libraryStatus = .failed(error.localizedDescription)
+        }
+    }
+
     func toggleFollow() {
-        guard let artist, let current = isFollowing, !isUpdatingFollow else { return }
+        guard let artist, case .known(let current) = libraryStatus, !isUpdatingFollow else { return }
         let target = !current
-        isFollowing = target
+        libraryStatus = .known(target)
         isUpdatingFollow = true
         Task {
             defer { isUpdatingFollow = false }
@@ -144,7 +189,7 @@ final class ArtistDetail {
                 onLibraryChanged()
             } catch {
                 guard isCurrentAccount() else { return }
-                isFollowing = current
+                libraryStatus = .known(current)
                 notices.report("Could not \(target ? "follow" : "unfollow") \(artist.name): \(error.localizedDescription)")
             }
         }
