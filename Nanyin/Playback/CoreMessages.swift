@@ -288,6 +288,7 @@ struct CoreConfig: Encodable {
     let expectedUsername: String?
     let audioCacheDir: String?
     let audioCacheLimit: UInt64?
+    let proxy: String?
 
     enum CodingKeys: String, CodingKey {
         case deviceID = "device_id"
@@ -297,5 +298,6 @@ struct CoreConfig: Encodable {
         case expectedUsername = "expected_username"
         case audioCacheDir = "audio_cache_dir"
         case audioCacheLimit = "audio_cache_limit"
+        case proxy
     }
 }
