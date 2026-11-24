@@ -223,6 +223,8 @@ final class Player {
             if requestedURI == uri { requestedURI = nil }
             position = Position(ms: ms, at: .now, advancing: true)
             notePlaying(uri: uri)
+        case .position(_, let ms):
+            position = Position(ms: ms, at: .now, advancing: isPlaying)
         case .paused(_, let ms):
             isPlaying = false
             isLoading = false
