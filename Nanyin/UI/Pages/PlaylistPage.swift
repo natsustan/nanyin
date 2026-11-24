@@ -214,10 +214,11 @@ struct PlaylistPage: View {
                 }
                 Divider()
             }
+            let playlistBusy = playlist.map { library.busy.contains($0.id) } ?? false
             Button(list.pages.isLoading ? "Refreshing…" : "Refresh") {
                 list.pages.reload()
             }
-            .disabled(list.pages.isLoading)
+            .disabled(list.pages.isLoading || playlistBusy)
             Button("Copy Spotify Link") {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(Route.webLink(for: uri), forType: .string)

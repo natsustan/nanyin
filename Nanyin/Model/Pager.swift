@@ -110,6 +110,10 @@ final class Pager<Item: Sendable, Cursor: Sendable> {
         return Removal(entries: removed, generation: generation, pagesLoaded: pagesLoaded)
     }
 
+    func wasReloaded(since removal: Removal) -> Bool {
+        generation != removal.generation
+    }
+
     func restore(_ removal: Removal, where shouldRestore: (Item) -> Bool = { _ in true }) {
         guard generation == removal.generation else { return }
         var restored = 0

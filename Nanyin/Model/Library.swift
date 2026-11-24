@@ -260,14 +260,15 @@ final class Library {
                     removedAny = true
                     remaining.subtract(batch)
                 }
-                if account == self.account, hadMore {
-                    // Server offsets shifted for pages beyond the first; reload cleanly.
+                if account == self.account, hadMore || list.pages.wasReloaded(since: removal) {
+                    // Server offsets shifted for unloaded pages, or a reload ran
+                    // while the delete was in flight; reconcile cleanly.
                     list.pages.reload()
                 }
             } catch {
                 guard account == self.account else { return }
                 if removedAny {
-                    if hadMore {
+                    if hadMore || list.pages.wasReloaded(since: removal) {
                         list.pages.reload()
                     } else {
                         list.pages.restore(removal) { remaining.contains($0.uri) }
