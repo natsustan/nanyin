@@ -75,13 +75,6 @@ public actor SpotifyWebAPI {
         return cooldownUntil
     }
 
-    /// Returns the verified Web API access token for the signed-in account,
-    /// renewing only if near expiry. Used as the `sp_t` context token for
-    /// personalized Home shelves read over the playback session.
-    public func currentAccessToken() async throws -> String {
-        try await accessToken()
-    }
-
     public func get<T: Decodable & Sendable>(
         _ path: String,
         query: [String: String] = [:],

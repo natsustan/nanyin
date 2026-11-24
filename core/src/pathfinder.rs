@@ -152,12 +152,7 @@ impl Pathfinder {
     }
 
     /// Personalized Home shelves (`Made for you` and `Your top mixes`).
-    pub async fn made_for_you(
-        &self,
-        context_token: &str,
-        timezone: &str,
-        force: bool,
-    ) -> Result<HomeShelves, Error> {
+    pub async fn made_for_you(&self, timezone: &str, force: bool) -> Result<HomeShelves, Error> {
         let mut cached = self.home_shelves.lock().await;
         if !force
             && let Some((at, shelves)) = cached.as_ref()
@@ -170,8 +165,8 @@ impl Pathfinder {
         }
         let country = self.session.country();
         let (made_for_you, top_mixes) = tokio::join!(
-            self.read_home_section(MADE_FOR_YOU_SECTION, &country, timezone, context_token),
-            self.read_home_section(TOP_MIXES_SECTION, &country, timezone, context_token),
+            self.read_home_section(MADE_FOR_YOU_SECTION, &country, timezone),
+            self.read_home_section(TOP_MIXES_SECTION, &country, timezone),
         );
         if [&made_for_you, &top_mixes]
             .iter()
@@ -220,19 +215,15 @@ impl Pathfinder {
         section: &str,
         country: &str,
         timezone: &str,
-        context_token: &str,
     ) -> Result<Vec<ShelfPlaylist>, Error> {
         let mut playlists = Vec::new();
         let mut seen = HashSet::new();
+        let sp_t = self.session.device_id();
         for page in 0..HOME_MAX_PAGES {
             let offset = page * HOME_PAGE_SIZE;
             let body = self
                 .post(&home_section_query(
-                    section,
-                    country,
-                    timezone,
-                    context_token,
-                    offset,
+                    section, country, timezone, sp_t, offset,
                 ))
                 .await?;
             let parsed = parse_home_section_page(&body)?;

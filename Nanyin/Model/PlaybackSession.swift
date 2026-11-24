@@ -149,11 +149,11 @@ final class PlaybackSession {
     }
 
     /// Personalized Home shelves (Made for you and Your top mixes), read
-    /// through Pathfinder with the session and the verified Web API token.
-    func readMadeForYou(contextToken: String, force: Bool = false) async throws -> CoreHomeShelves {
+    /// through Pathfinder over the playback session.
+    func readMadeForYou(force: Bool = false) async throws -> CoreHomeShelves {
         try await untilReady()
         return try await engine.request(
-            .madeForYou(contextToken: contextToken, timezone: TimeZone.current.identifier, force: force))
+            .madeForYou(timezone: TimeZone.current.identifier, force: force))
     }
 
     /// Waits out a connection in progress (just after launch, or a

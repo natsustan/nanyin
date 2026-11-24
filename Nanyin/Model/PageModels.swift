@@ -238,12 +238,7 @@ final class WhatsNewModel {
 
         madeForYouLoading = true
         let homeTask = Task { [weak self] in
-            let shelves: CoreHomeShelves?
-            if let token = try? await api.currentAccessToken() {
-                shelves = try? await session.readMadeForYou(contextToken: token, force: force)
-            } else {
-                shelves = nil
-            }
+            let shelves = try? await session.readMadeForYou(force: force)
             guard !Task.isCancelled, let self else { return }
             self.madeForYouLoading = false
             if let shelves {

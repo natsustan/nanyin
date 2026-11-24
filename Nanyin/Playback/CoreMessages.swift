@@ -15,6 +15,7 @@ enum CoreEvent: Decodable, Equatable {
     case trackChanged(CoreTrack)
     case loading(uri: String, positionMs: Int)
     case playing(uri: String, positionMs: Int)
+    case position(uri: String, positionMs: Int)
     case paused(uri: String, positionMs: Int)
     case stopped
     case unavailable(uri: String)
@@ -57,6 +58,7 @@ enum CoreEvent: Decodable, Equatable {
         case "track_changed": self = .trackChanged(try c.decode(CoreTrack.self, forKey: .track))
         case "loading": self = .loading(uri: try uri(), positionMs: try position())
         case "playing": self = .playing(uri: try uri(), positionMs: try position())
+        case "position": self = .position(uri: try uri(), positionMs: try position())
         case "paused": self = .paused(uri: try uri(), positionMs: try position())
         case "stopped": self = .stopped
         case "unavailable": self = .unavailable(uri: try uri())
@@ -160,11 +162,10 @@ enum CoreAsk: Encodable, Sendable {
     /// Answered with `[AlbumSummary]`.
     case newReleases(force: Bool)
     /// Answered with `CoreHomeShelves`.
-    case madeForYou(contextToken: String, timezone: String, force: Bool)
+    case madeForYou(timezone: String, force: Bool)
 
     private enum Key: String, CodingKey {
         case ask, id, offset, timezone, force
-        case contextToken = "context_token"
     }
 
     func encode(to encoder: Encoder) throws {
@@ -183,9 +184,8 @@ enum CoreAsk: Encodable, Sendable {
         case .newReleases(let force):
             try c.encode("new_releases", forKey: .ask)
             try c.encode(force, forKey: .force)
-        case .madeForYou(let contextToken, let timezone, let force):
+        case .madeForYou(let timezone, let force):
             try c.encode("made_for_you", forKey: .ask)
-            try c.encode(contextToken, forKey: .contextToken)
             try c.encode(timezone, forKey: .timezone)
             try c.encode(force, forKey: .force)
         }

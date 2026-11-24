@@ -30,7 +30,6 @@ pub enum Ask {
     },
     /// Personalized Home shelves (Made for you and Your top mixes).
     MadeForYou {
-        context_token: String,
         timezone: String,
         #[serde(default)]
         force: bool,
@@ -55,13 +54,9 @@ impl Ask {
             Self::NewReleases { force } => {
                 serde_json::to_value(reads.new_releases(force).await.map_err(|e| e.to_string())?)
             }
-            Self::MadeForYou {
-                context_token,
-                timezone,
-                force,
-            } => serde_json::to_value(
+            Self::MadeForYou { timezone, force } => serde_json::to_value(
                 reads
-                    .made_for_you(&context_token, &timezone, force)
+                    .made_for_you(&timezone, force)
                     .await
                     .map_err(|e| e.to_string())?,
             ),
@@ -99,13 +94,12 @@ mod tests {
             serde_json::from_str(r#"{"request":10,"ask":"new_releases","force":true}"#).unwrap();
         assert_eq!(request.ask, Ask::NewReleases { force: true });
         let request: Request = serde_json::from_str(
-            r#"{"request":11,"ask":"made_for_you","context_token":"tok","timezone":"Asia/Shanghai"}"#,
+            r#"{"request":11,"ask":"made_for_you","timezone":"Asia/Shanghai"}"#,
         )
         .unwrap();
         assert_eq!(
             request.ask,
             Ask::MadeForYou {
-                context_token: "tok".into(),
                 timezone: "Asia/Shanghai".into(),
                 force: false
             }

@@ -114,15 +114,8 @@ impl Reads {
         self.pathfinder.new_releases(force).await
     }
 
-    pub async fn made_for_you(
-        &self,
-        context_token: &str,
-        timezone: &str,
-        force: bool,
-    ) -> Result<HomeShelves, Error> {
-        self.pathfinder
-            .made_for_you(context_token, timezone, force)
-            .await
+    pub async fn made_for_you(&self, timezone: &str, force: bool) -> Result<HomeShelves, Error> {
+        self.pathfinder.made_for_you(timezone, force).await
     }
 
     /// One page of a playlist's songs. The first page fetches the list afresh.
