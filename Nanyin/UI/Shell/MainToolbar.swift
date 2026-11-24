@@ -6,6 +6,7 @@ import SwiftUI
 struct MainToolbar: View {
     @Environment(AppModel.self) private var app
     @Environment(\.appearsActive) private var appearsActive
+    @Environment(\.openSettings) private var openSettings
     @State private var query = ""
     @State private var debounce: Task<Void, Never>?
 
@@ -66,7 +67,7 @@ struct MainToolbar: View {
                 Text(profile.isPremium ? "\(profile.name) · Premium" : profile.name)
             }
             Divider()
-            Button("Proxy Settings…") { app.showProxySheet = true }
+            Button("Settings…") { openSettings() }
             Divider()
             Button("Sign Out") { Task { await app.signOut() } }
         } label: {

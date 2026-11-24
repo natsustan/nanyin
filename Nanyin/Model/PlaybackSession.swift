@@ -44,6 +44,7 @@ final class PlaybackSession {
     var onPlayerEvent: (CoreEvent) -> Void = { _ in }
 
     private let secrets: any SecretStore
+    private let settings: PlaybackSettings
     private let engine = PlaybackEngine.shared
     private let oauth: SpotifyOAuth
     private var policy = ReconnectPolicy()
@@ -60,8 +61,14 @@ final class PlaybackSession {
     private static let credentialsKey = "playback-credentials"
     private static let deviceIDKey = "ConnectDeviceID"
 
-    init(secrets: any SecretStore, transport: HTTPTransport = .shared, proxyURL: String? = nil) {
+    init(
+        secrets: any SecretStore,
+        settings: PlaybackSettings,
+        transport: HTTPTransport = .shared,
+        proxyURL: String? = nil
+    ) {
         self.secrets = secrets
+        self.settings = settings
         self.oauth = SpotifyOAuth(transport: transport)
         self.proxyURL = proxyURL
         engine.onEvent = { [weak self] event in self?.handle(event) }
@@ -73,15 +80,33 @@ final class PlaybackSession {
     func updateProxy(_ newProxyURL: String?) {
         guard proxyURL != newProxyURL else { return }
         proxyURL = newProxyURL
+        reconnectForConfigChange(dropCarried: false)
+    }
+
+    /// Reconnects with updated audio quality, volume normalization, or device
+    /// name when a session is already active or connecting.
+    func applyPlaybackSettings() {
+        reconnectForConfigChange(dropCarried: true)
+    }
+
+    private func reconnectForConfigChange(dropCarried: Bool) {
         guard expectedUsername != nil, credentials != nil else { return }
         switch state {
         case .ready:
             // Replacing an active engine drops its loaded track and queue;
             // let Player snapshot a resume point before connecting fresh.
             onPlayerEvent(.sessionEnded(resuming: false))
+            if dropCarried {
+                carrying = false
+                engine.disconnect()
+            }
             policy.reset()
             connectStored()
         case .connecting, .waiting, .failed:
+            if dropCarried {
+                carrying = false
+                engine.disconnect()
+            }
             policy.reset()
             connectStored()
         case .notSetUp, .authorizing, .needsAuthorization:
@@ -253,18 +278,20 @@ final class PlaybackSession {
     private func connect(_ credentials: CoreConfig.Credentials) {
         retryTask?.cancel()
         state = .connecting
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
         engine.connect(CoreConfig(
             deviceID: Self.deviceID,
-            deviceName: Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "Nanyin",
+            deviceName: settings.effectiveDeviceName,
             initialVolume: Player.savedVolume,
             credentials: credentials,
             expectedUsername: expectedUsername,
-            audioCacheDir: caches?.appending(path: Bundle.main.bundleIdentifier ?? "Nanyin").appending(path: "audio").path,
+            audioCacheDir: PlaybackSettings.audioCacheDirectory?.path,
             audioCacheLimit: 1 << 30,
-            proxy: proxyURL
+            proxy: proxyURL,
+            bitrate: UInt16(settings.audioQuality.rawValue),
+            normalisation: settings.normalizeVolume
         ))
     }
+
 
     private func saveCredentials(_ value: String?) {
         guard value != credentials else { return }

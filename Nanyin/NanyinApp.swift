@@ -58,5 +58,10 @@ struct NanyinApp: App {
                     .keyboardShortcut("r", modifiers: .command)
             }
         }
+
+        Settings {
+            SettingsView()
+                .environment(app)
+        }
     }
 }

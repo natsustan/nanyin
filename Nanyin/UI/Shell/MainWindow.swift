@@ -28,7 +28,6 @@ struct MainWindow: View {
         .preferredColorScheme(.dark)
         .onAppear { spaceKey.install { if app.showsLibrary { app.player.togglePlayPause() } } }
         .sheet(item: Bindable(app).credits) { CreditsSheet(credits: $0) }
-        .sheet(isPresented: Bindable(app).showProxySheet) { ProxySettingsSheet() }
     }
 
     /// Live while dragging; saved when the drag ends.
