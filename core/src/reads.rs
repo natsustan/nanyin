@@ -15,6 +15,7 @@ use http::Method;
 use librespot_core::{Error, Session, SpotifyUri, spotify_id::SpotifyId};
 use librespot_metadata::{
     Artist, Metadata, Playlist, Track as SessionTrack, artist::CountryTopTracks,
+    playlist::attribute::PlaylistAttributes,
 };
 use librespot_protocol::{
     extended_metadata::{BatchedEntityRequest, EntityRequest, ExtensionQuery},
@@ -26,7 +27,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     events::Track,
-    pathfinder::{HomeShelves, Pathfinder, ReleaseAlbum},
+    pathfinder::{HomeShelves, Image, Pathfinder, ReleaseAlbum},
 };
 
 /// Rows per page, as the Web API's limit.
@@ -46,6 +47,14 @@ pub struct PlaylistPage {
     pub rows: Vec<PlaylistRow>,
     /// The offset of the next page, or none at the end.
     pub next: Option<usize>,
+    /// Header metadata from the playlist itself, sent on the first page so
+    /// entries the Web API left blank still get a title, description and cover.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<Image>,
 }
 
 #[derive(Debug, Serialize, PartialEq)]
@@ -88,14 +97,20 @@ pub struct Credit {
     pub subroles: Vec<String>,
 }
 
-/// A playlist's songs as fetched once, paged through without fetching again.
-type List = Vec<(SpotifyUri, Option<i64>)>;
+/// A playlist's songs and header as fetched once, paged through without
+/// fetching again.
+struct KeptPlaylist {
+    items: Vec<(SpotifyUri, Option<i64>)>,
+    name: Option<String>,
+    description: Option<String>,
+    images: Vec<Image>,
+}
 
 pub struct Reads {
     session: Session,
     pathfinder: Pathfinder,
     /// Most recently read last.
-    lists: Mutex<VecDeque<(String, Arc<List>)>>,
+    lists: Mutex<VecDeque<(String, Arc<KeptPlaylist>)>>,
     known: Mutex<HashMap<String, Track>>,
 }
 
@@ -120,10 +135,11 @@ impl Reads {
 
     /// One page of a playlist's songs. The first page fetches the list afresh.
     pub async fn playlist(&self, id: &str, offset: usize) -> Result<PlaylistPage, Error> {
-        let list = match self.kept(id).filter(|_| offset > 0) {
-            Some(list) => list,
+        let kept = match self.kept(id).filter(|_| offset > 0) {
+            Some(kept) => kept,
             None => self.fetch(id).await?,
         };
+        let list = &kept.items;
         let end = (offset + PAGE).min(list.len());
         let page = list.get(offset..end).unwrap_or_default();
         let uris: Vec<SpotifyUri> = page.iter().map(|(uri, _)| uri.clone()).collect();
@@ -144,6 +160,13 @@ impl Reads {
             total: list.len(),
             rows,
             next: (end < list.len()).then_some(end),
+            name: (offset == 0).then(|| kept.name.clone()).flatten(),
+            description: (offset == 0).then(|| kept.description.clone()).flatten(),
+            images: if offset == 0 {
+                kept.images.clone()
+            } else {
+                Vec::new()
+            },
         })
     }
 
@@ -205,7 +228,7 @@ impl Reads {
         Ok(keys.iter().map(|key| known.get(key).cloned()).collect())
     }
 
-    fn kept(&self, id: &str) -> Option<Arc<List>> {
+    fn kept(&self, id: &str) -> Option<Arc<KeptPlaylist>> {
         let mut lists = self.lists.lock().ok()?;
         let index = lists.iter().position(|(kept, _)| kept == id)?;
         let entry = lists.remove(index)?;
@@ -214,32 +237,44 @@ impl Reads {
         Some(list)
     }
 
-    async fn fetch(&self, id: &str) -> Result<Arc<List>, Error> {
+    async fn fetch(&self, id: &str) -> Result<Arc<KeptPlaylist>, Error> {
         let uri = SpotifyUri::Playlist {
             id: SpotifyId::from_base62(id)?,
             user: None,
         };
         let playlist = Playlist::get(&self.session, &uri).await?;
-        let list: Arc<List> = Arc::new(
-            playlist
-                .contents
-                .items
-                .iter()
-                .filter(|item| matches!(item.id, SpotifyUri::Track { .. }))
-                .map(|item| {
-                    let added = item.attributes.timestamp.as_timestamp_ms();
-                    (item.id.clone(), (added > 0).then_some(added))
-                })
-                .collect(),
-        );
+        let image_template = self
+            .session
+            .get_user_attribute("image-url")
+            .unwrap_or_else(|| "https://i.scdn.co/image/{file_id}".into());
+        let items = playlist
+            .contents
+            .items
+            .iter()
+            .filter(|item| matches!(item.id, SpotifyUri::Track { .. }))
+            .map(|item| {
+                let added = item.attributes.timestamp.as_timestamp_ms();
+                (item.id.clone(), (added > 0).then_some(added))
+            })
+            .collect();
+        let name = (!playlist.attributes.name.is_empty()).then(|| playlist.attributes.name.clone());
+        let description = (!playlist.attributes.description.is_empty())
+            .then(|| playlist.attributes.description.clone());
+        let images = playlist_images(&playlist.attributes, &image_template);
+        let kept = Arc::new(KeptPlaylist {
+            items,
+            name,
+            description,
+            images,
+        });
         if let Ok(mut lists) = self.lists.lock() {
             lists.retain(|(kept, _)| kept != id);
             if lists.len() >= KEPT {
                 lists.pop_front();
             }
-            lists.push_back((id.to_owned(), list.clone()));
+            lists.push_back((id.to_owned(), kept.clone()));
         }
-        Ok(list)
+        Ok(kept)
     }
 
     /// Track metadata for `uris` in one batched request, by URI.
@@ -286,6 +321,51 @@ impl Reads {
         }
         Ok(tracks)
     }
+}
+
+/// The cover, from the sized pictures when the list carries them, else the
+/// single raw picture hash on the playlist attributes.
+fn playlist_images(attributes: &PlaylistAttributes, template: &str) -> Vec<Image> {
+    let sized: Vec<Image> = attributes
+        .picture_sizes
+        .iter()
+        .filter_map(|picture| {
+            Some(Image {
+                url: resolve_image_url(&picture.url, template)?,
+                width: match picture.target_name.as_str() {
+                    "small" => Some(60),
+                    "default" => Some(300),
+                    "large" => Some(640),
+                    _ => None,
+                },
+            })
+        })
+        .collect();
+    if !sized.is_empty() {
+        return sized;
+    }
+    if attributes.picture.is_empty() {
+        return Vec::new();
+    }
+    let mut hex = String::with_capacity(attributes.picture.len() * 2);
+    for byte in &attributes.picture {
+        use std::fmt::Write;
+        let _ = write!(&mut hex, "{byte:02x}");
+    }
+    vec![Image {
+        url: template.replace("{file_id}", &hex),
+        width: None,
+    }]
+}
+
+fn resolve_image_url(reference: &str, template: &str) -> Option<String> {
+    if reference.starts_with("https://") {
+        return Some(reference.to_owned());
+    }
+    reference
+        .strip_prefix("spotify:image:")
+        .filter(|id| !id.is_empty())
+        .map(|id| template.replace("{file_id}", id))
 }
 
 /// The first songs of the account's country's ranking, or of the worldwide
@@ -357,5 +437,59 @@ mod tests {
         assert!(top_track_uris(&CountryTopTracks::default(), "JP").is_empty());
         let many = CountryTopTracks(vec![ranking("ZZ", &(0..15).collect::<Vec<_>>())]);
         assert_eq!(top_track_uris(&many, "JP").len(), TOP);
+    }
+
+    #[test]
+    fn extracts_playlist_images_from_sizes_or_raw_picture() {
+        use librespot_metadata::image::{PictureSize, PictureSizes};
+
+        let template = "https://i.scdn.co/image/{file_id}";
+        let mut attributes = PlaylistAttributes {
+            name: String::new(),
+            description: String::new(),
+            picture: vec![0xab, 0xcd],
+            is_collaborative: false,
+            pl3_version: String::new(),
+            is_deleted_by_owner: false,
+            client_id: String::new(),
+            format: String::new(),
+            format_attributes: Default::default(),
+            picture_sizes: PictureSizes(vec![
+                PictureSize {
+                    target_name: "small".into(),
+                    url: "spotify:image:1122".into(),
+                },
+                PictureSize {
+                    target_name: "large".into(),
+                    url: "https://image-cdn.spotifycdn.com/cover".into(),
+                },
+            ]),
+        };
+        let sized = playlist_images(&attributes, template);
+        assert_eq!(
+            sized,
+            vec![
+                Image {
+                    url: "https://i.scdn.co/image/1122".into(),
+                    width: Some(60)
+                },
+                Image {
+                    url: "https://image-cdn.spotifycdn.com/cover".into(),
+                    width: Some(640)
+                },
+            ]
+        );
+
+        attributes.picture_sizes = PictureSizes::default();
+        assert_eq!(
+            playlist_images(&attributes, template),
+            vec![Image {
+                url: "https://i.scdn.co/image/abcd".into(),
+                width: None
+            }]
+        );
+
+        attributes.picture.clear();
+        assert!(playlist_images(&attributes, template).is_empty());
     }
 }
