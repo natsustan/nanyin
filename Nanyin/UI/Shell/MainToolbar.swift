@@ -59,6 +59,13 @@ struct MainToolbar: View {
         .background(Theme.metal(active: appearsActive))
         .hairline(.top, .white.opacity(0.7))
         .hairline(.bottom, Theme.metalEdge)
+        .onChange(of: showFull) { _, visible in
+            if !visible {
+                debounce?.cancel()
+                debounce = nil
+                query = ""
+            }
+        }
     }
 
     private var accountMenu: some View {
@@ -85,8 +92,9 @@ struct MainToolbar: View {
     private func scheduleSearch() {
         debounce?.cancel()
         let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
         if let target = SpotifyLink.parse(text) {
-            if shouldAutoOpen(text) {
+            if target.id.count >= 22 {
                 query = ""
                 app.openSpotifyLink(target)
             }
@@ -113,16 +121,5 @@ struct MainToolbar: View {
         } else {
             app.navigator.go(to: .search(text))
         }
-    }
-
-    /// Auto-opens pasted Spotify web URLs and full 22-character URIs; shorter
-    /// URIs being typed manually wait for Return.
-    private func shouldAutoOpen(_ text: String) -> Bool {
-        let lower = text.lowercased()
-        if lower.contains("spotify.com/") { return true }
-        if lower.hasPrefix("spotify:"), let last = text.split(separator: ":").last {
-            return last.count >= 22
-        }
-        return false
     }
 }

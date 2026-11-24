@@ -43,7 +43,7 @@ struct SettingsView: View {
         .preferredColorScheme(.dark)
         .onAppear { app.settings.refreshCacheSize() }
         .onDisappear {
-            app.settings.discardPendingDeviceName()
+            app.settings.discardTransientState()
             app.proxy.discardUnsavedChanges()
         }
     }
@@ -86,7 +86,7 @@ struct SettingsView: View {
                         .buttonStyle(DarkSegmentButtonStyle(selected: settings.audioQuality == quality))
                     }
                 }
-                sectionNote("Higher bitrates sound clearer and use more bandwidth and cache. Applies on reconnect.")
+                sectionNote("Higher bitrates sound clearer and use more bandwidth and cache. Reconnects playback when changed.")
             }
 
             Divider().overlay(Theme.divider)
@@ -152,7 +152,7 @@ struct SettingsView: View {
                 if let status = settings.cacheStatusMessage {
                     Text(status)
                         .font(AquaFont.regular(11.5))
-                        .foregroundStyle(Theme.green)
+                        .foregroundStyle(settings.cacheStatusIsError ? Theme.hex(0xF08B7D) : Theme.green)
                 }
             }
 

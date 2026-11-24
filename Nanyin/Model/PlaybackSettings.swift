@@ -13,15 +13,6 @@ final class PlaybackSettings {
         case high = 320
 
         var id: Int { rawValue }
-
-        var label: String {
-            switch self {
-            case .low: "Low (96 kbps)"
-            case .normal: "Normal (160 kbps)"
-            case .high: "High (320 kbps)"
-            }
-        }
-
         var shortLabel: String { "\(rawValue) kbps" }
     }
 
@@ -50,11 +41,13 @@ final class PlaybackSettings {
     private(set) var isComputingCacheSize = false
     private(set) var isClearingCache = false
     private(set) var cacheStatusMessage: String?
+    private(set) var cacheStatusIsError = false
 
     /// Fired when bitrate, volume normalization, or device name changes so an
     /// active playback session reconnects with the new settings.
     var onPlaybackConfigChanged: () -> Void = {}
 
+    @ObservationIgnored private var cacheTask: Task<Void, Never>?
     private static let qualityKey = "PlaybackAudioBitrate"
     private static let normalizeKey = "PlaybackNormalizeVolume"
     private static let deviceNameKey = "ConnectDeviceName"
@@ -74,7 +67,7 @@ final class PlaybackSettings {
     }
 
     var hasPendingDeviceNameChange: Bool {
-        sanitized(deviceNameDraft) != appliedDeviceName
+        Self.sanitize(deviceNameDraft) != appliedDeviceName
     }
 
     init() {
@@ -88,7 +81,7 @@ final class PlaybackSettings {
     }
 
     func applyDeviceName() {
-        let clean = sanitized(deviceNameDraft)
+        let clean = Self.sanitize(deviceNameDraft)
         deviceNameDraft = clean
         guard clean != appliedDeviceName else { return }
         appliedDeviceName = clean
@@ -100,18 +93,22 @@ final class PlaybackSettings {
         onPlaybackConfigChanged()
     }
 
-    func discardPendingDeviceName() {
+    func discardTransientState() {
         deviceNameDraft = appliedDeviceName
+        cacheStatusMessage = nil
+        cacheStatusIsError = false
     }
 
     func refreshCacheSize() {
-        guard !isComputingCacheSize else { return }
+        guard !isClearingCache else { return }
+        cacheTask?.cancel()
         isComputingCacheSize = true
         let dir = Self.audioCacheDirectory
-        Task {
+        cacheTask = Task {
             let bytes = await Task.detached(priority: .utility) {
                 Self.directorySize(at: dir)
             }.value
+            guard !Task.isCancelled else { return }
             cacheSizeBytes = bytes
             isComputingCacheSize = false
         }
@@ -119,20 +116,25 @@ final class PlaybackSettings {
 
     func clearCache() {
         guard !isClearingCache else { return }
+        cacheTask?.cancel()
+        isComputingCacheSize = false
         isClearingCache = true
         cacheStatusMessage = nil
+        cacheStatusIsError = false
         let dir = Self.audioCacheDirectory
         URLCache.shared.removeAllCachedResponses()
-        Task {
-            let removedError: String? = await Task.detached(priority: .utility) {
-                Self.removeContents(of: dir)
+        ImageLoader.shared.clearMemoryCache()
+        cacheTask = Task {
+            let result = await Task.detached(priority: .utility) {
+                let error = Self.removeContents(of: dir)
+                let bytes = Self.directorySize(at: dir)
+                return (error, bytes)
             }.value
-            let bytes = await Task.detached(priority: .utility) {
-                Self.directorySize(at: dir)
-            }.value
-            cacheSizeBytes = bytes
+            guard !Task.isCancelled else { return }
+            cacheSizeBytes = result.1
             isClearingCache = false
-            cacheStatusMessage = removedError ?? "Audio and cover art cache cleared."
+            cacheStatusIsError = result.0 != nil
+            cacheStatusMessage = result.0 ?? "Audio and cover art cache cleared."
         }
     }
 
@@ -152,10 +154,6 @@ final class PlaybackSettings {
             return isComputingCacheSize ? "Calculating…" : "—"
         }
         return ByteCountFormatter.string(fromByteCount: cacheSizeBytes, countStyle: .file)
-    }
-
-    private func sanitized(_ raw: String) -> String {
-        Self.sanitize(raw)
     }
 
     private static func sanitize(_ raw: String) -> String {
@@ -181,14 +179,22 @@ final class PlaybackSettings {
 
     private nonisolated static func removeContents(of url: URL?) -> String? {
         guard let url, FileManager.default.fileExists(atPath: url.path) else { return nil }
+        let entries: [URL]
         do {
-            let entries = try FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil)
-            for entry in entries {
-                try FileManager.default.removeItem(at: entry)
-            }
-            return nil
+            entries = try FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil)
         } catch {
-            return "Could not clear all cached files: \(error.localizedDescription)"
+            return "Could not read cache directory: \(error.localizedDescription)"
         }
+        var failed = 0
+        for entry in entries {
+            do {
+                try FileManager.default.removeItem(at: entry)
+            } catch {
+                failed += 1
+            }
+        }
+        return failed == 0
+            ? nil
+            : "Cleared cache, but \(failed) file\(failed == 1 ? "" : "s") in use could not be removed."
     }
 }

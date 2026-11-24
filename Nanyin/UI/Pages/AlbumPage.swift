@@ -13,15 +13,13 @@ struct AlbumPage: View {
                 } accessory: {
                     HStack(spacing: 6) {
                         if let isSaved = detail.isSaved {
-                            Button { detail.toggleSave() } label: {
-                                HStack(spacing: 4) {
-                                    Image(systemName: isSaved ? "checkmark" : "plus")
-                                        .font(.system(size: 9, weight: .bold))
-                                    Text(isSaved ? "Saved" : "Save")
-                                }
-                            }
-                            .buttonStyle(TexturedButtonStyle())
-                            .disabled(detail.isSaving)
+                            LibraryToggleButton(
+                                isAdded: isSaved,
+                                addedTitle: "Saved",
+                                addTitle: "Save",
+                                disabled: detail.isSaving,
+                                action: detail.toggleSave
+                            )
                         }
                         Button("Play") { app.player.play(contextURI: album.uri) }
                             .buttonStyle(TexturedButtonStyle())
@@ -59,15 +57,13 @@ struct ArtistPage: View {
                 if let artist = detail.artist {
                     HStack(spacing: 6) {
                         if let isFollowing = detail.isFollowing {
-                            Button { detail.toggleFollow() } label: {
-                                HStack(spacing: 4) {
-                                    Image(systemName: isFollowing ? "checkmark" : "plus")
-                                        .font(.system(size: 9, weight: .bold))
-                                    Text(isFollowing ? "Following" : "Follow")
-                                }
-                            }
-                            .buttonStyle(TexturedButtonStyle())
-                            .disabled(detail.isUpdatingFollow)
+                            LibraryToggleButton(
+                                isAdded: isFollowing,
+                                addedTitle: "Following",
+                                addTitle: "Follow",
+                                disabled: detail.isUpdatingFollow,
+                                action: detail.toggleFollow
+                            )
                         }
                         Button("Play") { app.player.play(contextURI: artist.uri) }
                             .buttonStyle(TexturedButtonStyle())
@@ -189,5 +185,25 @@ struct Artwork: View {
             guard let url, ImageLoader.shared.cached(url) == nil, let image = await ImageLoader.shared.image(url) else { return }
             loaded = (url, image)
         }
+    }
+}
+
+private struct LibraryToggleButton: View {
+    let isAdded: Bool
+    let addedTitle: String
+    let addTitle: String
+    let disabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: isAdded ? "checkmark" : "plus")
+                    .font(.system(size: 9, weight: .bold))
+                Text(isAdded ? addedTitle : addTitle)
+            }
+        }
+        .buttonStyle(TexturedButtonStyle())
+        .disabled(disabled)
     }
 }

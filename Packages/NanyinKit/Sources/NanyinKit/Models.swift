@@ -106,6 +106,11 @@ public struct PlaylistItem: Codable, Sendable, Hashable {
 public struct PlaylistOwner: Codable, Sendable, Hashable {
     public let id: String
     public let display_name: String?
+
+    public init(id: String, display_name: String? = nil) {
+        self.id = id
+        self.display_name = display_name
+    }
 }
 
 public struct Playlist: Codable, Sendable, Hashable, Identifiable {
@@ -116,6 +121,24 @@ public struct Playlist: Codable, Sendable, Hashable, Identifiable {
     public var images: [SpotifyImage]?
     public let owner: PlaylistOwner
     public let collaborative: Bool?
+
+    public init(
+        id: String,
+        name: String,
+        uri: String,
+        description: String? = nil,
+        images: [SpotifyImage]? = nil,
+        owner: PlaylistOwner,
+        collaborative: Bool? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.uri = uri
+        self.description = description
+        self.images = images
+        self.owner = owner
+        self.collaborative = collaborative
+    }
 
     public var ownerName: String? {
         if let display = owner.display_name, !display.isEmpty { return display }

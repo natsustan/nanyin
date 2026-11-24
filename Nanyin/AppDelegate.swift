@@ -4,6 +4,13 @@ import Foundation
 /// Detects an already-running copy of Nanyin with the same bundle identifier so
 /// two processes never hold two Spotify Connect sessions for the same device ID.
 enum AppInstance {
+    static var isSecondary: Bool {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["NANYIN_DEMO"] == "1" { return false }
+        #endif
+        return existingRunningInstance() != nil
+    }
+
     static func existingRunningInstance() -> NSRunningApplication? {
         guard let bundleID = Bundle.main.bundleIdentifier else { return nil }
         let currentPID = ProcessInfo.processInfo.processIdentifier
@@ -21,13 +28,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var wakeTask: Task<Void, Never>?
 
     func applicationWillFinishLaunching(_ notification: Notification) {
-        if let existing = AppInstance.existingRunningInstance() {
+        if AppInstance.isSecondary, let existing = AppInstance.existingRunningInstance() {
+            NSApp.yieldActivation(to: existing)
             existing.activate(options: [.activateAllWindows])
             NSApp.terminate(nil)
         }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        guard !AppInstance.isSecondary else { return }
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification,
             object: nil,
@@ -39,9 +48,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag {
-            for window in sender.windows where window.canBecomeMain {
-                window.deminiaturize(nil)
-                window.makeKeyAndOrderFront(nil)
+            let target = sender.windows.first { $0.frameAutosaveName == "Main" }
+                ?? sender.windows.first { $0.canBecomeMain }
+            if let target {
+                target.deminiaturize(nil)
+                target.makeKeyAndOrderFront(nil)
                 return false
             }
         }

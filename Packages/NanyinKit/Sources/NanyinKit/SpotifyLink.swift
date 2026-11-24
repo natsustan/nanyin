@@ -7,6 +7,12 @@ public enum SpotifyTarget: Equatable, Hashable, Sendable {
     case artist(id: String)
     case playlist(id: String)
 
+    public var id: String {
+        switch self {
+        case .track(let id), .album(let id), .artist(let id), .playlist(let id): id
+        }
+    }
+
     public var uri: String {
         switch self {
         case .track(let id): "spotify:track:\(id)"

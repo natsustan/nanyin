@@ -5,7 +5,10 @@ import Testing
 @Suite("SpotifyLink")
 struct SpotifyLinkTests {
     @Test func parsesURIs() {
-        #expect(SpotifyLink.parse("spotify:track:4uLU6hMCjMI75M1A2tKUQC") == .track(id: "4uLU6hMCjMI75M1A2tKUQC"))
+        let track = SpotifyLink.parse("spotify:track:4uLU6hMCjMI75M1A2tKUQC")
+        #expect(track == .track(id: "4uLU6hMCjMI75M1A2tKUQC"))
+        #expect(track?.id == "4uLU6hMCjMI75M1A2tKUQC")
+        #expect(track?.uri == "spotify:track:4uLU6hMCjMI75M1A2tKUQC")
         #expect(SpotifyLink.parse("spotify:album:1DFixLWuPkv3KT3TnV35m3") == .album(id: "1DFixLWuPkv3KT3TnV35m3"))
         #expect(SpotifyLink.parse("spotify:artist:0OdUWJ0sBjDrqHygGUXeCF") == .artist(id: "0OdUWJ0sBjDrqHygGUXeCF"))
         #expect(SpotifyLink.parse("spotify:playlist:37i9dQZF1DXcBWIGoYBM5M") == .playlist(id: "37i9dQZF1DXcBWIGoYBM5M"))

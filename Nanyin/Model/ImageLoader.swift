@@ -20,6 +20,10 @@ final class ImageLoader {
         cache.object(forKey: url as NSURL)
     }
 
+    func clearMemoryCache() {
+        cache.removeAllObjects()
+    }
+
     /// The image at `url`; concurrent requests for one URL share a download.
     func image(_ url: URL) async -> NSImage? {
         if let image = cached(url) { return image }

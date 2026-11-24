@@ -14,24 +14,34 @@ final class AlbumDetail {
 
     @ObservationIgnored private let api: SpotifyWebAPI
     @ObservationIgnored private let notices: Notices
+    @ObservationIgnored private let isCurrentAccount: () -> Bool
     @ObservationIgnored private let onLibraryChanged: () -> Void
 
-    init(id: String, api: SpotifyWebAPI, notices: Notices, onLibraryChanged: @escaping () -> Void = {}) {
+    init(
+        id: String,
+        api: SpotifyWebAPI,
+        notices: Notices,
+        isCurrentAccount: @escaping () -> Bool = { true },
+        onLibraryChanged: @escaping () -> Void = {}
+    ) {
         self.api = api
         self.notices = notices
+        self.isCurrentAccount = isCurrentAccount
         self.onLibraryChanged = onLibraryChanged
         Task {
             do {
                 let album = try await api.album(id)
+                guard isCurrentAccount() else { return }
                 self.album = album
                 let rows = (album.tracks?.items ?? []).enumerated().map {
                     TrackRow(index: $0.offset, track: $0.element, album: album)
                 }
                 tracks = TrackList(rows: rows, contextURI: album.uri)
-                if let saved = try? await api.libraryContains([album.uri]).first {
+                if let saved = try? await api.libraryContains([album.uri]).first, isCurrentAccount() {
                     isSaved = saved
                 }
             } catch {
+                guard isCurrentAccount() else { return }
                 self.error = error.localizedDescription
             }
         }
@@ -50,8 +60,10 @@ final class AlbumDetail {
                 } else {
                     try await api.remove([album.uri])
                 }
+                guard isCurrentAccount() else { return }
                 onLibraryChanged()
             } catch {
+                guard isCurrentAccount() else { return }
                 isSaved = current
                 notices.report("Could not \(target ? "save" : "remove") “\(album.name)”: \(error.localizedDescription)")
             }
@@ -74,6 +86,7 @@ final class ArtistDetail {
 
     @ObservationIgnored private let api: SpotifyWebAPI
     @ObservationIgnored private let notices: Notices
+    @ObservationIgnored private let isCurrentAccount: () -> Bool
     @ObservationIgnored private let onLibraryChanged: () -> Void
 
     init(
@@ -81,25 +94,36 @@ final class ArtistDetail {
         api: SpotifyWebAPI,
         session: PlaybackSession,
         notices: Notices,
+        isCurrentAccount: @escaping () -> Bool = { true },
         onLibraryChanged: @escaping () -> Void = {}
     ) {
         self.api = api
         self.notices = notices
+        self.isCurrentAccount = isCurrentAccount
         self.onLibraryChanged = onLibraryChanged
         topTracks = .topTracks(session: session, artistID: id)
         Task {
             do {
                 let artist = try await api.artist(id)
+                guard isCurrentAccount() else { return }
                 self.artist = artist
-                if let following = try? await api.libraryContains([artist.uri]).first {
+                if let following = try? await api.libraryContains([artist.uri]).first, isCurrentAccount() {
                     isFollowing = following
                 }
             } catch {
+                guard isCurrentAccount() else { return }
                 self.error = error.localizedDescription
             }
         }
         Task {
-            do { albums = try await api.artistAlbums(id).items } catch { albumsError = error.localizedDescription }
+            do {
+                let items = try await api.artistAlbums(id).items
+                guard isCurrentAccount() else { return }
+                albums = items
+            } catch {
+                guard isCurrentAccount() else { return }
+                albumsError = error.localizedDescription
+            }
         }
     }
 
@@ -116,8 +140,10 @@ final class ArtistDetail {
                 } else {
                     try await api.remove([artist.uri])
                 }
+                guard isCurrentAccount() else { return }
                 onLibraryChanged()
             } catch {
+                guard isCurrentAccount() else { return }
                 isFollowing = current
                 notices.report("Could not \(target ? "follow" : "unfollow") \(artist.name): \(error.localizedDescription)")
             }
