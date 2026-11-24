@@ -33,17 +33,17 @@ Nanyin never sees your Spotify password; OAuth tokens and playback credentials a
 
 ## What's Included
 
-- **Library & Playlists**: Starred (Liked Songs), Saved Albums, Followed Artists, creating/renaming/editing/deleting playlists, adding/removing tracks, in-playlist filter and sort, album saving, and artist following.
+- **Library & Playlists**: Starred (Liked Songs) with filter and sort, Saved Albums, Followed Artists, creating/renaming/editing/deleting playlists, drag-and-drop tracks onto sidebar playlists and drag-to-reorder within playlists, in-playlist filter and sort, album saving, and artist following.
 - **What's New**: Followed artists' new releases, personalized mixes, top artists, top tracks, and recently played history.
 - **Search & Links**: Search tracks, artists, albums, and playlists, or paste any `open.spotify.com` URL / `spotify:` URI directly into the search bar.
-- **Native Playback**: High-quality playback (96 / 160 / 320 kbps), optional volume normalization, song credits, macOS media keys and Control Center integration, Spotify Connect receiver, and automatic recovery after sleep or brief drops.
+- **Native Playback & Connect**: High-quality playback (96 / 160 / 320 kbps), optional volume normalization, mute & volume shortcuts, Play Queue management, Spotify Connect device switching and takeover, song credits, macOS media keys and Control Center integration, and automatic recovery after sleep or brief drops.
+- **Synced Lyrics**: On-demand synced lyrics panel (`⌘⇧L`) with click-to-seek, powered by Spotify's lyrics service over your playback session with [LRCLIB](https://lrclib.net) fallback and local caching.
 - **Settings (`⌘,`)**: Audio quality, volume normalization, custom Connect device name, HTTP/SOCKS5 proxy configuration, cache management, and one-click log access.
 
 ## Known Limitations
 
 - **Spotify Free accounts are not supported** (Spotify requires Premium for playback and personal Development Mode apps).
 - **Music only**: Podcasts, audiobooks, and offline downloads are not supported.
-- **No built-in lyrics** or outbound Spotify Connect device switcher yet (Nanyin acts as a Connect receiver).
 - **Proxy for playback**: Browsing, sign-in, and cover art support macOS System Proxy, HTTP, and SOCKS5 (including authentication). Audio playback (librespot) only tunnels through an unauthenticated HTTP proxy (for example `http://127.0.0.1:7890`).
 
 ## Troubleshooting

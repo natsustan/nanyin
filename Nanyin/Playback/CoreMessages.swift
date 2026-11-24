@@ -143,6 +143,11 @@ struct CoreCredits: Decodable, Equatable, Sendable {
     let sources: [String]
 }
 
+/// Wrapped Spotify lyrics reply (`core/src/reads.rs`).
+struct CoreLyricsReply: Decodable, Equatable, Sendable {
+    let lyrics: Lyrics?
+}
+
 /// Personalized Home shelves read through Pathfinder (`core/src/pathfinder.rs`).
 struct CoreHomeShelves: Decodable, Equatable, Sendable {
     let madeForYou: [Playlist]
@@ -162,6 +167,8 @@ enum CoreAsk: Encodable, Sendable {
     case topTracks(artistID: String)
     /// Answered with `CoreCredits`.
     case credits(trackID: String)
+    /// Answered with `CoreLyricsReply`.
+    case lyrics(trackID: String, coverFileID: String?)
     /// Answered with `[AlbumSummary]`.
     case newReleases(force: Bool)
     /// Answered with `CoreHomeShelves`.
@@ -169,6 +176,7 @@ enum CoreAsk: Encodable, Sendable {
 
     private enum Key: String, CodingKey {
         case ask, id, offset, timezone, force
+        case coverFileID = "cover_file_id"
     }
 
     func encode(to encoder: Encoder) throws {
@@ -184,6 +192,10 @@ enum CoreAsk: Encodable, Sendable {
         case .credits(let trackID):
             try c.encode("credits", forKey: .ask)
             try c.encode(trackID, forKey: .id)
+        case .lyrics(let trackID, let coverFileID):
+            try c.encode("lyrics", forKey: .ask)
+            try c.encode(trackID, forKey: .id)
+            try c.encodeIfPresent(coverFileID, forKey: .coverFileID)
         case .newReleases(let force):
             try c.encode("new_releases", forKey: .ask)
             try c.encode(force, forKey: .force)

@@ -46,6 +46,8 @@ final class PlaybackSettings {
     /// Fired when bitrate, volume normalization, or device name changes so an
     /// active playback session reconnects with the new settings.
     var onPlaybackConfigChanged: () -> Void = {}
+    /// Fired when the user clears caches so auxiliary caches (e.g. lyrics) clear too.
+    var onCacheCleared: () -> Void = {}
 
     @ObservationIgnored private var cacheTask: Task<Void, Never>?
     private static let qualityKey = "PlaybackAudioBitrate"
@@ -124,6 +126,7 @@ final class PlaybackSettings {
         let dir = Self.audioCacheDirectory
         URLCache.shared.removeAllCachedResponses()
         ImageLoader.shared.clearMemoryCache()
+        onCacheCleared()
         cacheTask = Task {
             let result = await Task.detached(priority: .utility) {
                 let error = Self.removeContents(of: dir)

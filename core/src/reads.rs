@@ -12,7 +12,7 @@ use std::{
 };
 
 use http::Method;
-use librespot_core::{Error, Session, SpotifyUri, spotify_id::SpotifyId};
+use librespot_core::{Error, Session, SpotifyUri, error::ErrorKind, spotify_id::SpotifyId};
 use librespot_metadata::{
     Artist, Metadata, Playlist, Track as SessionTrack, artist::CountryTopTracks,
     playlist::attribute::PlaylistAttributes,
@@ -95,6 +95,29 @@ pub struct Credit {
     pub uri: String,
     /// "Composer", "Lyricist", "Lead Vocal"…
     pub subroles: Vec<String>,
+}
+
+/// One line of Spotify lyrics, optionally timed to its start in milliseconds.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct LyricsLine {
+    pub start_time_ms: Option<u32>,
+    pub text: String,
+}
+
+/// Lyrics fetched from Spotify's `color-lyrics` service, shaped like `NanyinKit.Lyrics`.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct Lyrics {
+    pub lines: Vec<LyricsLine>,
+    pub synced: bool,
+    pub instrumental: bool,
+    pub source: String,
+}
+
+/// Wrapped reply so `lyrics: None` serializes as `{"lyrics": null}` rather than
+/// a bare null `ok` field in `Event::Reply`.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct LyricsReply {
+    pub lyrics: Option<Lyrics>,
 }
 
 /// A playlist's songs and header as fetched once, paged through without
@@ -195,6 +218,39 @@ impl Reads {
             .request_as_json(&Method::GET, &endpoint, None, None)
             .await?;
         Ok(serde_json::from_slice(&body)?)
+    }
+
+    /// A song's lyrics from Spotify's `color-lyrics` endpoint, made only when
+    /// the listener has the lyrics panel open. Returns `lyrics: None` on 404.
+    pub async fn lyrics(
+        &self,
+        id: &str,
+        cover_file_id: Option<&str>,
+    ) -> Result<LyricsReply, Error> {
+        let spotify_id = SpotifyId::from_base62(id)?;
+        let cover = match cover_file_id.filter(|c| is_hex_file_id(c)) {
+            Some(c) => Some(c.to_owned()),
+            None => self.track_cover_file_id(&spotify_id).await,
+        };
+        let endpoint = lyrics_endpoint(&spotify_id, cover.as_deref());
+        match self
+            .session
+            .spclient()
+            .request_as_json(&Method::GET, &endpoint, None, None)
+            .await
+        {
+            Ok(body) => Ok(LyricsReply {
+                lyrics: parse_spotify_lyrics(&body),
+            }),
+            Err(error) if error.kind == ErrorKind::NotFound => Ok(LyricsReply { lyrics: None }),
+            Err(error) => Err(error),
+        }
+    }
+
+    async fn track_cover_file_id(&self, id: &SpotifyId) -> Option<String> {
+        let uri = SpotifyUri::Track { id: *id };
+        let track = SessionTrack::get(&self.session, &uri).await.ok()?;
+        track.album.covers.first().map(|cover| cover.id.to_string())
     }
 
     /// The tracks at `uris`, in order; none where Spotify has no song.
@@ -368,6 +424,61 @@ fn resolve_image_url(reference: &str, template: &str) -> Option<String> {
         .map(|id| template.replace("{file_id}", id))
 }
 
+fn is_hex_file_id(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 64 && s.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+fn lyrics_endpoint(id: &SpotifyId, cover: Option<&str>) -> String {
+    let track = id.to_base62();
+    let query = "format=json&vocalRemoval=false&market=from_token";
+    match cover {
+        Some(cover) => {
+            format!("/color-lyrics/v2/track/{track}/image/spotify:image:{cover}?{query}")
+        }
+        None => format!("/color-lyrics/v2/track/{track}?{query}"),
+    }
+}
+
+fn parse_spotify_lyrics(bytes: &[u8]) -> Option<Lyrics> {
+    let json: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+    let lyrics = json.get("lyrics")?;
+    let synced_flag = lyrics.get("syncType").and_then(|v| v.as_str()) == Some("LINE_SYNCED");
+    let lines: Vec<LyricsLine> = lyrics
+        .get("lines")?
+        .as_array()?
+        .iter()
+        .filter_map(|line| {
+            let text = line.get("words")?.as_str()?.trim();
+            if text.is_empty() || text == "\u{266a}" {
+                return None;
+            }
+            let start_time_ms = line
+                .get("startTimeMs")
+                .and_then(|value| {
+                    value
+                        .as_str()
+                        .and_then(|text| text.parse().ok())
+                        .or_else(|| value.as_u64().and_then(|n| u32::try_from(n).ok()))
+                })
+                .filter(|_| synced_flag);
+            Some(LyricsLine {
+                start_time_ms,
+                text: text.to_owned(),
+            })
+        })
+        .collect();
+    if lines.is_empty() {
+        return None;
+    }
+    let synced = synced_flag && lines.iter().all(|line| line.start_time_ms.is_some());
+    Some(Lyrics {
+        lines,
+        synced,
+        instrumental: false,
+        source: "Spotify".into(),
+    })
+}
+
 /// The first songs of the account's country's ranking, or of the worldwide
 /// one (`ZZ`; librespot's `for_country` falls back to an empty country,
 /// which Spotify does not send). An empty ranking counts as none.
@@ -491,5 +602,36 @@ mod tests {
 
         attributes.picture.clear();
         assert!(playlist_images(&attributes, template).is_empty());
+    }
+
+    #[test]
+    fn builds_lyrics_endpoint_and_parses_synced_response() {
+        let id = SpotifyId::from_base62("4uLU6hMCjMI75M1A2tKUQC").unwrap();
+        assert_eq!(
+            lyrics_endpoint(&id, Some("ab12")),
+            "/color-lyrics/v2/track/4uLU6hMCjMI75M1A2tKUQC/image/spotify:image:ab12?format=json&vocalRemoval=false&market=from_token"
+        );
+        assert_eq!(
+            lyrics_endpoint(&id, None),
+            "/color-lyrics/v2/track/4uLU6hMCjMI75M1A2tKUQC?format=json&vocalRemoval=false&market=from_token"
+        );
+
+        let body = br#"{
+            "lyrics": {
+                "syncType": "LINE_SYNCED",
+                "lines": [
+                    {"startTimeMs": "1200", "words": "Hello world"},
+                    {"startTimeMs": "3400", "words": "\u266a"},
+                    {"startTimeMs": "5000", "words": "Second line"}
+                ]
+            }
+        }"#;
+        let parsed = parse_spotify_lyrics(body).unwrap();
+        assert!(parsed.synced);
+        assert_eq!(parsed.source, "Spotify");
+        assert_eq!(parsed.lines.len(), 2);
+        assert_eq!(parsed.lines[0].start_time_ms, Some(1200));
+        assert_eq!(parsed.lines[0].text, "Hello world");
+        assert_eq!(parsed.lines[1].start_time_ms, Some(5000));
     }
 }

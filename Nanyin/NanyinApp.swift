@@ -69,6 +69,9 @@ struct NanyinApp: App {
                 Button("Show Current Song") { app.revealPlayingTrack() }
                     .keyboardShortcut("j", modifiers: .command)
                     .disabled(app.player.track == nil)
+                Button(app.showLyrics ? "Hide Lyrics" : "Show Lyrics") { app.showLyrics.toggle() }
+                    .keyboardShortcut("l", modifiers: [.command, .shift])
+                    .disabled(!app.showsLibrary)
             }
         }
 

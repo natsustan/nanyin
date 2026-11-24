@@ -32,6 +32,11 @@ struct PlayerBar: View {
                 }
                 .buttonStyle(GraphiteToggleStyle(isOn: player.repeatMode != .off))
                 .help("Repeat")
+                Button { app.showLyrics.toggle() } label: {
+                    Image(systemName: "quote.bubble")
+                }
+                .buttonStyle(GraphiteToggleStyle(isOn: app.showLyrics))
+                .help(app.showLyrics ? "Hide Lyrics" : "Show Lyrics")
                 Button { showDevices.toggle() } label: {
                     Image(systemName: "hifispeaker.2")
                 }

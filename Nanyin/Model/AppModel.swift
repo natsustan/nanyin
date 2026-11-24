@@ -14,6 +14,7 @@ final class AppModel {
     let session: PlaybackSession
     let player: Player
     let connect: ConnectDevices
+    let lyrics: LyricsModel
     let library: Library
     let stars: Stars
     let history: PlayHistoryStore
@@ -21,6 +22,8 @@ final class AppModel {
     let notices = Notices()
     /// The credits sheet on the main window, while open.
     var credits: TrackCredits?
+    /// Whether the right-hand synced lyrics pane is open.
+    var showLyrics = false
     /// Shown once right after Web API sign-in on a Premium account that has no
     /// saved playback credential yet; cleared once playback connects or is skipped.
     private var showPlaybackOnboarding = false
@@ -62,6 +65,7 @@ final class AppModel {
         )
         player = Player(session: session, notices: notices)
         connect = ConnectDevices(api: account.api, session: session, player: player, notices: notices)
+        lyrics = LyricsModel(session: session, transport: proxy.transport, bundleID: bundleID)
         stars = Stars(api: account.api)
         history = PlayHistoryStore(bundleID: bundleID)
         library = Library(api: account.api, stars: stars, session: session, history: history, notices: notices)
@@ -69,6 +73,7 @@ final class AppModel {
         navigator.willShow = { [library] route in library.prepare(route) }
         proxy.onPlaybackProxyChanged = { [session] url in session.updateProxy(url) }
         settings.onPlaybackConfigChanged = { [session] in session.applyPlaybackSettings() }
+        settings.onCacheCleared = { [lyrics] in lyrics.clearCache() }
         guard !secondaryInstance else { return }
         Self.active = self
         #if DEBUG
@@ -174,8 +179,10 @@ final class AppModel {
         linkLookupTask?.cancel()
         linkLookupTask = nil
         credits = nil
+        showLyrics = false
         showPlaybackOnboarding = false
         connect.reset()
+        lyrics.reset()
         player.signOut()
         session.signOut()
         history.unload()

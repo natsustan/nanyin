@@ -14,6 +14,9 @@ struct MainWindow: View {
                     RouteView(route: app.navigator.current)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .background(Theme.content)
+                    if app.showLyrics {
+                        LyricsPanel()
+                    }
                 }
                 PlaybackNotice()
                 PlayerBar()
