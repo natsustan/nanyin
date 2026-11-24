@@ -50,8 +50,9 @@ final class Player {
     private(set) var repeatMode = Repeat.off
     /// What plays after the current track, as the core last reported it.
     private(set) var upNext = TrackList(rows: [])
-    /// Whether any tracks in the queue were manually added (`provider == "queue"`).
-    private(set) var hasManualQueue = false
+    /// Number of manually queued tracks (`provider == "queue"`) at the front of `upNext`.
+    private(set) var manualQueueCount = 0
+    var hasManualQueue: Bool { manualQueueCount > 0 }
     private(set) var volume = Player.savedVolume
     private(set) var isMuted = Player.savedVolume == 0
     /// Set when another device took playback over.
@@ -263,7 +264,7 @@ final class Player {
         contextURI = nil
         track = nil
         upNext = TrackList(rows: [])
-        hasManualQueue = false
+        manualQueueCount = 0
         isPlaying = false
         isLoading = false
         playingElsewhere = false
@@ -328,17 +329,17 @@ final class Player {
             shuffle = on
         case .repeat(let context, let track):
             repeatMode = track ? .track : context ? .context : .off
-        case .queue(let context, let tracks, let hasManual):
+        case .queue(let context, let tracks, let manualCount):
             let resolved = context.isEmpty ? nil : context
             contextURI = resolved
-            hasManualQueue = hasManual
+            manualQueueCount = manualCount
             upNext = TrackList(
                 rows: tracks.enumerated().map { TrackRow(index: $0.offset, track: $0.element) },
                 contextURI: resolved)
         case .deactivated:
             resumePoint = nil
             contextURI = nil
-            hasManualQueue = false
+            manualQueueCount = 0
             upNext = TrackList(rows: [])
             isPlaying = false
             isLoading = false

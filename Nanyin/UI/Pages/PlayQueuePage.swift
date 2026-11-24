@@ -46,12 +46,20 @@ struct PlayQueuePage: View {
                         list: upNext,
                         columns: [.star, .track, .artist, .time, .album],
                         playOverride: { row in
-                            // Play from the chosen queued track onward directly so
-                            // manually queued songs outside the active context still play.
-                            if let idx = upNext.rows.firstIndex(where: { $0.id == row.id }) {
-                                app.player.play(rows: Array(upNext.rows[idx...]), start: row)
-                            } else {
+                            guard let idx = upNext.rows.firstIndex(where: { $0.id == row.id }) else {
                                 app.player.play(trackURI: row.uri)
+                                return
+                            }
+                            if idx == 0 {
+                                // Advances directly to the next queued track, keeping both
+                                // any remaining manual queue and the full playlist/album context.
+                                app.player.next()
+                            } else if idx >= player.manualQueueCount, upNext.contextURI != nil {
+                                // Context track: start inside the full playlist/album context.
+                                app.player.play(row, in: upNext)
+                            } else {
+                                // Later manually queued track: play from that item onward.
+                                app.player.play(rows: Array(upNext.rows[idx...]), start: row)
                             }
                         }
                     )

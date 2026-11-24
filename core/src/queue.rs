@@ -38,22 +38,34 @@ impl QueueResolver {
     ) {
         let generation = self.latest.fetch_add(1, Ordering::SeqCst) + 1;
         let (reads, latest) = (self.reads.clone(), self.latest.clone());
-        let has_manual = next.iter().any(|track| track.provider == "queue");
-        let uris: Vec<SpotifyUri> = next
+        let entries: Vec<(SpotifyUri, bool)> = next
             .iter()
-            .filter_map(|track| SpotifyUri::from_uri(&track.uri).ok())
-            .filter(SpotifyUri::is_playable)
+            .filter_map(|track| {
+                let uri = SpotifyUri::from_uri(&track.uri).ok()?;
+                uri.is_playable().then(|| (uri, track.provider == "queue"))
+            })
             .take(SHOWN)
             .collect();
+        let uris: Vec<SpotifyUri> = entries.iter().map(|(uri, _)| uri.clone()).collect();
         tokio::spawn(async move {
             let Ok(tracks) = reads.tracks(&uris).await else {
                 return;
             };
             if latest.load(Ordering::SeqCst) == generation {
+                let mut resolved = Vec::with_capacity(entries.len());
+                let mut manual_count = 0usize;
+                for ((_, is_manual), track) in entries.into_iter().zip(tracks) {
+                    if let Some(track) = track {
+                        if is_manual && resolved.len() == manual_count {
+                            manual_count += 1;
+                        }
+                        resolved.push(track);
+                    }
+                }
                 emit(Event::Queue {
                     context_uri,
-                    tracks: tracks.into_iter().flatten().collect(),
-                    has_manual,
+                    tracks: resolved,
+                    manual_count,
                 });
             }
         });

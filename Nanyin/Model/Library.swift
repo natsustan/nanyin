@@ -312,10 +312,15 @@ final class Library {
                     removedAny = true
                     remaining.subtract(batch)
                 }
-                if account == self.account, hadMore || list.pages.wasReloaded(since: removal) {
-                    // Server offsets shifted for unloaded pages, or a reload ran
-                    // while the delete was in flight; reconcile cleanly.
-                    list.pages.reload()
+                if account == self.account {
+                    if hadMore || list.pages.wasReloaded(since: removal) {
+                        // Server offsets shifted for unloaded pages, or a reload ran
+                        // while the delete was in flight; reconcile cleanly.
+                        list.pages.reload()
+                    } else {
+                        // Keep remaining rows' server slot IDs accurate for future reorders.
+                        Self.reindexAfterRemoval(in: list, removedIDs: removal.removedItems.map(\.id))
+                    }
                 }
             } catch {
                 guard account == self.account else { return }
@@ -324,6 +329,10 @@ final class Library {
                         list.pages.reload()
                     } else {
                         list.pages.restore(removal) { remaining.contains($0.uri) }
+                        let deletedIDs = removal.removedItems
+                            .filter { !remaining.contains($0.uri) }
+                            .map(\.id)
+                        Self.reindexAfterRemoval(in: list, removedIDs: deletedIDs)
                     }
                 } else {
                     list.pages.restore(removal)
@@ -332,6 +341,16 @@ final class Library {
             }
             if account == self.account { busy.remove(playlist.id) }
         }
+    }
+
+    private static func reindexAfterRemoval(in list: TrackList, removedIDs: [Int]) {
+        guard !removedIDs.isEmpty else { return }
+        let sortedRemoved = removedIDs.sorted()
+        let updated = list.rows.map { row in
+            let shift = sortedRemoved.prefix { $0 < row.id }.count
+            return shift > 0 ? row.withID(row.id - shift) : row
+        }
+        list.pages.replaceItems(updated)
     }
 
     /// Removes a playlist from the listener's library; for their own ones
