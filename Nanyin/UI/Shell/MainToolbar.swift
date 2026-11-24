@@ -1,3 +1,4 @@
+import NanyinKit
 import SwiftUI
 
 /// The unified metal title bar and toolbar: traffic lights and the window
@@ -5,6 +6,7 @@ import SwiftUI
 struct MainToolbar: View {
     @Environment(AppModel.self) private var app
     @Environment(\.appearsActive) private var appearsActive
+    @Environment(\.openSettings) private var openSettings
     @State private var query = ""
     @State private var debounce: Task<Void, Never>?
 
@@ -40,6 +42,7 @@ struct MainToolbar: View {
                     }
                     AquaSearchField(text: $query, onSubmit: { search(replacing: false) }, focusRequest: navigator.searchFocusRequests)
                         .frame(width: 220)
+                        .help("Search songs, artists, albums, playlists, or paste a Spotify link")
                         .onChange(of: query) { scheduleSearch() }
                     Spacer()
                     if app.account.profile != nil {
@@ -56,6 +59,13 @@ struct MainToolbar: View {
         .background(Theme.metal(active: appearsActive))
         .hairline(.top, .white.opacity(0.7))
         .hairline(.bottom, Theme.metalEdge)
+        .onChange(of: showFull) { _, visible in
+            if !visible {
+                debounce?.cancel()
+                debounce = nil
+                query = ""
+            }
+        }
     }
 
     private var accountMenu: some View {
@@ -64,7 +74,7 @@ struct MainToolbar: View {
                 Text(profile.isPremium ? "\(profile.name) · Premium" : profile.name)
             }
             Divider()
-            Button("Proxy Settings…") { app.showProxySheet = true }
+            Button("Settings…") { openSettings() }
             Divider()
             Button("Sign Out") { Task { await app.signOut() } }
         } label: {
@@ -77,9 +87,19 @@ struct MainToolbar: View {
     }
 
     /// Typing searches after a pause, refining the current search page
-    /// instead of adding a history entry per pause.
+    /// instead of adding a history entry per pause. Pasting a Spotify link
+    /// opens it directly instead of searching the URL text.
     private func scheduleSearch() {
         debounce?.cancel()
+        let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        if let target = SpotifyLink.parse(text) {
+            if target.id.count >= 22 {
+                query = ""
+                app.openSpotifyLink(target)
+            }
+            return
+        }
         debounce = Task {
             try? await Task.sleep(for: .milliseconds(450))
             guard !Task.isCancelled else { return }
@@ -89,8 +109,13 @@ struct MainToolbar: View {
 
     private func search(replacing: Bool) {
         debounce?.cancel()
-        let text = query.trimmingCharacters(in: .whitespaces)
+        let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
+        if let target = SpotifyLink.parse(text) {
+            query = ""
+            app.openSpotifyLink(target)
+            return
+        }
         if case .search = app.navigator.current {
             app.navigator.go(to: .search(text), replacing: replacing)
         } else {

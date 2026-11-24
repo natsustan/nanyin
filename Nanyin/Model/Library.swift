@@ -342,6 +342,18 @@ final class Library {
         } else if var known = knownPlaylists[id] {
             merge(into: &known)
             knownPlaylists[id] = known
+        } else {
+            // Opened directly (e.g. from a pasted Spotify link) before appearing
+            // in the library or any shelf: synthesize an entry so PlaylistPage
+            // shows its title, cover, description, and "Add to Library".
+            knownPlaylists[id] = Playlist(
+                id: id,
+                name: page.name ?? "",
+                uri: "spotify:playlist:\(id)",
+                description: page.description,
+                images: page.images,
+                owner: PlaylistOwner(id: "", display_name: nil)
+            )
         }
     }
 
@@ -355,28 +367,52 @@ final class Library {
         pages[route]
     }
 
+    /// Reloads a cached Saved Albums or Followed Artists page in place so the
+    /// currently visible page never goes blank if the user already went back.
+    func reloadLibraryPage(_ route: Route) {
+        switch pages[route] {
+        case .albums(let pager)?: pager.reload()
+        case .artists(let pager)?: pager.reload()
+        default: break
+        }
+    }
+
     /// Creates the content for `route` the first time it is shown.
     func prepare(_ route: Route) {
         guard pages[route] == nil, let username else { return }
+        let account = self.account
+        let isCurrentAccount: () -> Bool = { [weak self] in self?.account == account }
         let content: PageContent
         switch route {
         case .whatsNew:
-            content = .whatsNew(WhatsNewModel(api: api, session: session, history: history) { [weak self] in self?.remember($0) })
+            content = .whatsNew(WhatsNewModel(api: api, session: session, history: history) { [weak self] playlists in
+                guard isCurrentAccount() else { return }
+                self?.remember(playlists)
+            })
         case .likedSongs: content = .tracks(.liked(api: api, username: username, stars: stars))
         case .playlist(let id):
             // Development Mode grants read only the listener's own playlists;
             // the session reads any, so it takes every one not known as own.
             let owned = playlists.contains { $0.id == id && isOwn($0) }
-            let account = account
             content = .tracks(owned
                 ? .playlist(api: api, id: id)
                 : .sessionPlaylist(session: session, id: id) { [weak self] page in
-                    guard let self, self.account == account else { return }
-                    self.applySessionMetadata(id: id, page: page)
+                    guard isCurrentAccount() else { return }
+                    self?.applySessionMetadata(id: id, page: page)
                 })
-        case .album(let id): content = .album(AlbumDetail(id: id, api: api))
-        case .artist(let id): content = .artist(ArtistDetail(id: id, api: api, session: session))
-        case .search(let query): content = .search(SearchResultsModel(query: query, api: api))
+        case .album(let id):
+            content = .album(AlbumDetail(id: id, api: api, notices: notices, isCurrentAccount: isCurrentAccount) { [weak self] in
+                self?.reloadLibraryPage(.albums)
+            })
+        case .artist(let id):
+            content = .artist(ArtistDetail(id: id, api: api, session: session, notices: notices, isCurrentAccount: isCurrentAccount) { [weak self] in
+                self?.reloadLibraryPage(.artists)
+            })
+        case .search(let query):
+            content = .search(SearchResultsModel(query: query, api: api) { [weak self] playlists in
+                guard isCurrentAccount() else { return }
+                self?.remember(playlists)
+            })
         case .albums: content = .albums(.savedAlbums(api: api))
         case .artists: content = .artists(.followedArtists(api: api))
         case .queue: return

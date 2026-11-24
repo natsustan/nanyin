@@ -48,6 +48,12 @@ pub struct Config {
     /// Optional HTTP proxy URL without credentials (e.g. `http://127.0.0.1:7890`).
     #[serde(default)]
     pub proxy: Option<String>,
+    /// Audio bitrate in kbps (`96`, `160`, or `320`; defaults to `320`).
+    #[serde(default)]
+    pub bitrate: Option<u16>,
+    /// Whether loudness normalization is enabled on the player.
+    #[serde(default)]
+    pub normalisation: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -288,9 +294,10 @@ impl Engine {
             session: session.clone(),
             queue: QueueResolver::new(reads.clone()),
         };
+        let bitrate = parse_bitrate(config.bitrate);
         let deck = match &carried {
             Some(carried) => carried.deck.clone(),
-            None => Deck::new(&session, route(), player_emit)?,
+            None => Deck::new(&session, route(), player_emit, bitrate, config.normalisation)?,
         };
 
         let connect_config = ConnectConfig {
@@ -417,7 +424,13 @@ impl Carried {
 }
 
 impl Deck {
-    fn new(session: &Session, route: Route, emit: Emit) -> Result<Self, Failure> {
+    fn new(
+        session: &Session,
+        route: Route,
+        emit: Emit,
+        bitrate: Bitrate,
+        normalisation: bool,
+    ) -> Result<Self, Failure> {
         let mixer = mixer::find(Some("softvol"))
             .ok_or_else(|| Failure::other("soft volume mixer missing"))?(
             MixerConfig {
@@ -431,7 +444,8 @@ impl Deck {
             audio_backend::find(None).ok_or_else(|| Failure::other("audio backend missing"))?;
         let player = Player::new(
             PlayerConfig {
-                bitrate: Bitrate::Bitrate320,
+                bitrate,
+                normalisation,
                 ..PlayerConfig::default()
             },
             session.clone(),
@@ -622,6 +636,14 @@ impl Now {
     }
 }
 
+fn parse_bitrate(kbps: Option<u16>) -> Bitrate {
+    match kbps {
+        Some(96) => Bitrate::Bitrate96,
+        Some(160) => Bitrate::Bitrate160,
+        _ => Bitrate::Bitrate320,
+    }
+}
+
 /// Parses an optional HTTP proxy URL for librespot. librespot's tunnel only
 /// speaks unauthenticated HTTP CONNECT, so anything else is rejected cleanly
 /// rather than silently bypassed.
@@ -716,5 +738,24 @@ mod tests {
         assert!(parse_proxy(Some("socks5://127.0.0.1:1080")).is_err());
         assert!(parse_proxy(Some("http://user:pass@127.0.0.1:7890")).is_err());
         assert!(parse_proxy(Some("not-a-url")).is_err());
+    }
+
+    #[test]
+    fn parses_bitrate_and_config_defaults() {
+        assert_eq!(parse_bitrate(None), Bitrate::Bitrate320);
+        assert_eq!(parse_bitrate(Some(96)), Bitrate::Bitrate96);
+        assert_eq!(parse_bitrate(Some(160)), Bitrate::Bitrate160);
+        assert_eq!(parse_bitrate(Some(320)), Bitrate::Bitrate320);
+        assert_eq!(parse_bitrate(Some(128)), Bitrate::Bitrate320);
+
+        let raw = r#"{
+            "device_id": "abc",
+            "device_name": "Nanyin",
+            "initial_volume": 32768,
+            "credentials": { "type": "access_token", "token": "tok" }
+        }"#;
+        let cfg: Config = serde_json::from_str(raw).unwrap();
+        assert_eq!(cfg.bitrate, None);
+        assert!(!cfg.normalisation);
     }
 }

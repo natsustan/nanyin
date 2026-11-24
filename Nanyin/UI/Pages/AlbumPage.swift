@@ -11,8 +11,18 @@ struct AlbumPage: View {
                 PageHeader(title: album.name, subtitle: subtitle(album)) {
                     CoverImage(url: album.images?.best(minimum: 200), size: 96)
                 } accessory: {
-                    Button("Play") { app.player.play(contextURI: album.uri) }
-                        .buttonStyle(TexturedButtonStyle())
+                    HStack(spacing: 6) {
+                        LibraryToggleButton(
+                            status: detail.libraryStatus,
+                            addedTitle: "Saved",
+                            addTitle: "Save",
+                            disabled: detail.isSaving,
+                            toggle: detail.toggleSave,
+                            retry: detail.retryLibraryStatus
+                        )
+                        Button("Play") { app.player.play(contextURI: album.uri) }
+                            .buttonStyle(TexturedButtonStyle())
+                    }
                 }
             } else {
                 PageHeader(title: "Album", subtitle: detail.error ?? "Loading…")
@@ -44,8 +54,18 @@ struct ArtistPage: View {
                 CoverImage(url: detail.artist?.images?.best(minimum: 200), size: 72)
             } accessory: {
                 if let artist = detail.artist {
-                    Button("Play") { app.player.play(contextURI: artist.uri) }
-                        .buttonStyle(TexturedButtonStyle())
+                    HStack(spacing: 6) {
+                        LibraryToggleButton(
+                            status: detail.libraryStatus,
+                            addedTitle: "Following",
+                            addTitle: "Follow",
+                            disabled: detail.isUpdatingFollow,
+                            toggle: detail.toggleFollow,
+                            retry: detail.retryLibraryStatus
+                        )
+                        Button("Play") { app.player.play(contextURI: artist.uri) }
+                            .buttonStyle(TexturedButtonStyle())
+                    }
                 }
             }
             if let message = detail.albumsError {
@@ -162,6 +182,42 @@ struct Artwork: View {
         .task(id: url) {
             guard let url, ImageLoader.shared.cached(url) == nil, let image = await ImageLoader.shared.image(url) else { return }
             loaded = (url, image)
+        }
+    }
+}
+
+private struct LibraryToggleButton: View {
+    let status: LibraryStatus
+    let addedTitle: String
+    let addTitle: String
+    let disabled: Bool
+    let toggle: () -> Void
+    let retry: () -> Void
+
+    var body: some View {
+        switch status {
+        case .loading:
+            EmptyView()
+        case .known(let isAdded):
+            Button(action: toggle) {
+                HStack(spacing: 4) {
+                    Image(systemName: isAdded ? "checkmark" : "plus")
+                        .font(.system(size: 9, weight: .bold))
+                    Text(isAdded ? addedTitle : addTitle)
+                }
+            }
+            .buttonStyle(TexturedButtonStyle())
+            .disabled(disabled)
+        case .failed(let reason):
+            Button(action: retry) {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 9, weight: .bold))
+                    Text("Retry \(addTitle)")
+                }
+            }
+            .buttonStyle(TexturedButtonStyle())
+            .help("Couldn't check library status: \(reason). Click to try again.")
         }
     }
 }

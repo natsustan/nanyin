@@ -2,7 +2,7 @@ import NanyinKit
 import SwiftUI
 
 /// Inline proxy configuration form used both on the sign-in screen (collapsible)
-/// and inside the signed-in Proxy Settings sheet.
+/// and inside the Settings window (`SettingsView`).
 struct ProxySettingsForm: View {
     @Environment(AppModel.self) private var app
 
@@ -93,36 +93,5 @@ struct ProxySettingsForm: View {
         } else {
             "Used for sign-in, library, and artwork. Playback on this Mac only tunnels through HTTP proxies without a password."
         }
-    }
-}
-
-/// Sheet shown from the signed-in Account menu.
-struct ProxySettingsSheet: View {
-    @Environment(AppModel.self) private var app
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Text("Proxy Settings")
-                    .font(AquaFont.bold(15))
-                    .foregroundStyle(Theme.text)
-                Spacer()
-                Button("Done") { dismiss() }
-                    .buttonStyle(TexturedButtonStyle())
-                    .keyboardShortcut(.cancelAction)
-            }
-            Text("Configure how Nanyin connects to Spotify. Passwords are stored in your macOS Keychain.")
-                .font(AquaFont.regular(12))
-                .foregroundStyle(Theme.secondaryText)
-                .fixedSize(horizontal: false, vertical: true)
-
-            ProxySettingsForm()
-        }
-        .padding(20)
-        .frame(width: 420)
-        .background(Theme.hex(0x2F2F2F))
-        .preferredColorScheme(.dark)
-        .onDisappear { app.proxy.discardUnsavedChanges() }
     }
 }

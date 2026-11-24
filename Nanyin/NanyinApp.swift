@@ -11,9 +11,12 @@ private let checksForUpdates = true
 
 @main
 struct NanyinApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @State private var app = AppModel()
     private let updater = SPUStandardUpdaterController(
-        startingUpdater: checksForUpdates, updaterDelegate: nil, userDriverDelegate: nil)
+        startingUpdater: checksForUpdates && !AppInstance.isSecondary,
+        updaterDelegate: nil,
+        userDriverDelegate: nil)
 
     init() {
         // Cover art comes from Spotify's image CDN (not the Web API); keep
@@ -57,6 +60,11 @@ struct NanyinApp: App {
                 Button("Repeat") { app.player.cycleRepeat() }
                     .keyboardShortcut("r", modifiers: .command)
             }
+        }
+
+        Settings {
+            SettingsView()
+                .environment(app)
         }
     }
 }

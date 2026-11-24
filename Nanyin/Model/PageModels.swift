@@ -2,6 +2,13 @@ import Foundation
 import NanyinKit
 import Observation
 
+/// Saved/followed state of an album or artist on its detail page.
+enum LibraryStatus: Equatable {
+    case loading
+    case known(Bool)
+    case failed(String)
+}
+
 /// An album page: the album and its tracks, in one request.
 @MainActor
 @Observable
@@ -9,18 +16,82 @@ final class AlbumDetail {
     private(set) var album: Album?
     private(set) var tracks: TrackList?
     private(set) var error: String?
+    private(set) var libraryStatus: LibraryStatus = .loading
+    private(set) var isSaving = false
 
-    init(id: String, api: SpotifyWebAPI) {
+    @ObservationIgnored private let api: SpotifyWebAPI
+    @ObservationIgnored private let notices: Notices
+    @ObservationIgnored private let isCurrentAccount: () -> Bool
+    @ObservationIgnored private let onLibraryChanged: () -> Void
+
+    init(
+        id: String,
+        api: SpotifyWebAPI,
+        notices: Notices,
+        isCurrentAccount: @escaping () -> Bool = { true },
+        onLibraryChanged: @escaping () -> Void = {}
+    ) {
+        self.api = api
+        self.notices = notices
+        self.isCurrentAccount = isCurrentAccount
+        self.onLibraryChanged = onLibraryChanged
         Task {
             do {
                 let album = try await api.album(id)
+                guard isCurrentAccount() else { return }
                 self.album = album
                 let rows = (album.tracks?.items ?? []).enumerated().map {
                     TrackRow(index: $0.offset, track: $0.element, album: album)
                 }
                 tracks = TrackList(rows: rows, contextURI: album.uri)
+                await checkLibraryStatus(for: album)
             } catch {
+                guard isCurrentAccount() else { return }
                 self.error = error.localizedDescription
+            }
+        }
+    }
+
+    func retryLibraryStatus() {
+        guard let album, case .failed = libraryStatus else { return }
+        libraryStatus = .loading
+        Task { await checkLibraryStatus(for: album) }
+    }
+
+    private func checkLibraryStatus(for album: Album) async {
+        do {
+            let saved = try await api.libraryContains([album.uri]).first
+            guard isCurrentAccount() else { return }
+            if let saved {
+                libraryStatus = .known(saved)
+            } else {
+                libraryStatus = .failed("Spotify did not return library status.")
+            }
+        } catch {
+            guard isCurrentAccount() else { return }
+            libraryStatus = .failed(error.localizedDescription)
+        }
+    }
+
+    func toggleSave() {
+        guard let album, case .known(let current) = libraryStatus, !isSaving else { return }
+        let target = !current
+        libraryStatus = .known(target)
+        isSaving = true
+        Task {
+            defer { isSaving = false }
+            do {
+                if target {
+                    try await api.save([album.uri])
+                } else {
+                    try await api.remove([album.uri])
+                }
+                guard isCurrentAccount() else { return }
+                onLibraryChanged()
+            } catch {
+                guard isCurrentAccount() else { return }
+                libraryStatus = .known(current)
+                notices.report("Could not \(target ? "save" : "remove") “\(album.name)”: \(error.localizedDescription)")
             }
         }
     }
@@ -35,15 +106,92 @@ final class ArtistDetail {
     private(set) var error: String?
     private(set) var albums: [AlbumSummary] = []
     private(set) var albumsError: String?
+    private(set) var libraryStatus: LibraryStatus = .loading
+    private(set) var isUpdatingFollow = false
     let topTracks: TrackList
 
-    init(id: String, api: SpotifyWebAPI, session: PlaybackSession) {
+    @ObservationIgnored private let api: SpotifyWebAPI
+    @ObservationIgnored private let notices: Notices
+    @ObservationIgnored private let isCurrentAccount: () -> Bool
+    @ObservationIgnored private let onLibraryChanged: () -> Void
+
+    init(
+        id: String,
+        api: SpotifyWebAPI,
+        session: PlaybackSession,
+        notices: Notices,
+        isCurrentAccount: @escaping () -> Bool = { true },
+        onLibraryChanged: @escaping () -> Void = {}
+    ) {
+        self.api = api
+        self.notices = notices
+        self.isCurrentAccount = isCurrentAccount
+        self.onLibraryChanged = onLibraryChanged
         topTracks = .topTracks(session: session, artistID: id)
         Task {
-            do { artist = try await api.artist(id) } catch { self.error = error.localizedDescription }
+            do {
+                let artist = try await api.artist(id)
+                guard isCurrentAccount() else { return }
+                self.artist = artist
+                await checkLibraryStatus(for: artist)
+            } catch {
+                guard isCurrentAccount() else { return }
+                self.error = error.localizedDescription
+            }
         }
         Task {
-            do { albums = try await api.artistAlbums(id).items } catch { albumsError = error.localizedDescription }
+            do {
+                let items = try await api.artistAlbums(id).items
+                guard isCurrentAccount() else { return }
+                albums = items
+            } catch {
+                guard isCurrentAccount() else { return }
+                albumsError = error.localizedDescription
+            }
+        }
+    }
+
+    func retryLibraryStatus() {
+        guard let artist, case .failed = libraryStatus else { return }
+        libraryStatus = .loading
+        Task { await checkLibraryStatus(for: artist) }
+    }
+
+    private func checkLibraryStatus(for artist: Artist) async {
+        do {
+            let following = try await api.libraryContains([artist.uri]).first
+            guard isCurrentAccount() else { return }
+            if let following {
+                libraryStatus = .known(following)
+            } else {
+                libraryStatus = .failed("Spotify did not return follow status.")
+            }
+        } catch {
+            guard isCurrentAccount() else { return }
+            libraryStatus = .failed(error.localizedDescription)
+        }
+    }
+
+    func toggleFollow() {
+        guard let artist, case .known(let current) = libraryStatus, !isUpdatingFollow else { return }
+        let target = !current
+        libraryStatus = .known(target)
+        isUpdatingFollow = true
+        Task {
+            defer { isUpdatingFollow = false }
+            do {
+                if target {
+                    try await api.save([artist.uri])
+                } else {
+                    try await api.remove([artist.uri])
+                }
+                guard isCurrentAccount() else { return }
+                onLibraryChanged()
+            } catch {
+                guard isCurrentAccount() else { return }
+                libraryStatus = .known(current)
+                notices.report("Could not \(target ? "follow" : "unfollow") \(artist.name): \(error.localizedDescription)")
+            }
         }
     }
 }
@@ -75,21 +223,24 @@ final class TrackCredits: Identifiable {
     }
 }
 
-/// One search: matching artists and albums, and the matching tracks.
+/// One search: matching artists, albums, playlists, and tracks.
 @MainActor
 @Observable
 final class SearchResultsModel {
     private(set) var artists: [Artist] = []
     private(set) var albums: [AlbumSummary] = []
+    private(set) var playlists: [Playlist] = []
     private(set) var tracks: TrackList?
     private(set) var error: String?
 
-    init(query: String, api: SpotifyWebAPI) {
+    init(query: String, api: SpotifyWebAPI, onPlaylists: @escaping ([Playlist]) -> Void = { _ in }) {
         Task {
             do {
                 let found = try await api.search(query)
                 artists = found.artists?.items ?? []
                 albums = found.albums?.items ?? []
+                playlists = found.compactPlaylists
+                onPlaylists(playlists)
                 let rows = (found.tracks?.items ?? []).enumerated().map { TrackRow(index: $0.offset, track: $0.element) }
                 tracks = TrackList(rows: rows)
             } catch {

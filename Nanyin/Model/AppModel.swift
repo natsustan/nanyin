@@ -6,6 +6,9 @@ import Observation
 @MainActor
 @Observable
 final class AppModel {
+    static weak var active: AppModel?
+
+    let settings = PlaybackSettings()
     let proxy: ProxyManager
     let account: Account
     let session: PlaybackSession
@@ -17,12 +20,11 @@ final class AppModel {
     let notices = Notices()
     /// The credits sheet on the main window, while open.
     var credits: TrackCredits?
-    /// The Proxy Settings sheet, opened from the signed-in Account menu.
-    var showProxySheet = false
     /// Shown once right after Web API sign-in on a Premium account that has no
     /// saved playback credential yet; cleared once playback connects or is skipped.
     private var showPlaybackOnboarding = false
-    private let nowPlaying: NowPlayingBridge
+    private let nowPlaying: NowPlayingBridge?
+    @ObservationIgnored private var linkLookupTask: Task<Void, Never>?
 
     /// Step 2 of onboarding: right after Web API sign-in on a Premium account
     /// that has never set up playback on this Mac yet.
@@ -42,21 +44,31 @@ final class AppModel {
         #else
         let demo = false
         #endif
+        let secondaryInstance = AppInstance.isSecondary
         let bundleID = Bundle.main.bundleIdentifier ?? "com.cosmoss.nanyin"
-        let secrets: any SecretStore = demo
+        let secrets: any SecretStore = (demo || secondaryInstance)
             ? MemorySecretStore()
             : KeychainStore(service: bundleID + ".credentials")
         proxy = ProxyManager(secrets: secrets)
         ImageLoader.shared.transport = proxy.transport
         account = Account(secrets: secrets, transport: proxy.transport)
-        session = PlaybackSession(secrets: secrets, transport: proxy.transport, proxyURL: proxy.playbackProxyURL)
+        session = PlaybackSession(
+            secrets: secrets,
+            settings: settings,
+            transport: proxy.transport,
+            proxyURL: proxy.playbackProxyURL,
+            activateEngine: !secondaryInstance
+        )
         player = Player(session: session, notices: notices)
         stars = Stars(api: account.api)
         history = PlayHistoryStore(bundleID: bundleID)
         library = Library(api: account.api, stars: stars, session: session, history: history, notices: notices)
-        nowPlaying = NowPlayingBridge(player: player)
+        nowPlaying = secondaryInstance ? nil : NowPlayingBridge(player: player)
         navigator.willShow = { [library] route in library.prepare(route) }
         proxy.onPlaybackProxyChanged = { [session] url in session.updateProxy(url) }
+        settings.onPlaybackConfigChanged = { [session] in session.applyPlaybackSettings() }
+        guard !secondaryInstance else { return }
+        Self.active = self
         #if DEBUG
         if demo {
             DemoContent.install(in: self)
@@ -93,6 +105,44 @@ final class AppModel {
         }
     }
 
+    func handleSystemWake() {
+        session.handleSystemWake()
+    }
+
+    func prepareForTermination() {
+        linkLookupTask?.cancel()
+        linkLookupTask = nil
+        session.disconnectForTermination()
+    }
+
+    func openSpotifyLink(_ target: SpotifyTarget) {
+        linkLookupTask?.cancel()
+        linkLookupTask = nil
+        switch target {
+        case .album(let id):
+            navigator.go(to: .album(id: id))
+        case .artist(let id):
+            navigator.go(to: .artist(id: id))
+        case .playlist(let id):
+            navigator.go(to: .playlist(id: id))
+        case .track(let id):
+            player.play(trackURI: target.uri)
+            let from = navigator.current
+            let api = account.api
+            linkLookupTask = Task { [weak self] in
+                guard let track = try? await api.track(id),
+                      !Task.isCancelled,
+                      let self,
+                      self.account.profile != nil,
+                      self.navigator.current == from,
+                      let albumURI = track.album?.uri,
+                      let route = Route(uri: albumURI)
+                else { return }
+                self.navigator.go(to: route)
+            }
+        }
+    }
+
     func skipPlaybackSetup() {
         session.cancelAuthorize()
         showPlaybackOnboarding = false
@@ -103,8 +153,9 @@ final class AppModel {
     }
 
     func signOut() async {
+        linkLookupTask?.cancel()
+        linkLookupTask = nil
         credits = nil
-        showProxySheet = false
         showPlaybackOnboarding = false
         player.signOut()
         session.signOut()

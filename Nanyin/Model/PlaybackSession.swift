@@ -44,12 +44,14 @@ final class PlaybackSession {
     var onPlayerEvent: (CoreEvent) -> Void = { _ in }
 
     private let secrets: any SecretStore
-    private let engine = PlaybackEngine.shared
+    private let settings: PlaybackSettings
+    private let engine: PlaybackEngine?
     private let oauth: SpotifyOAuth
     private var policy = ReconnectPolicy()
     private var expectedUsername: String?
     private var proxyURL: String?
     private var retryTask: Task<Void, Never>?
+    private var settingsReconnectTask: Task<Void, Never>?
     /// The core kept a dropped session's song playing for the next one.
     private var carrying = false
     private var authorizeTask: Task<Void, Never>?
@@ -60,11 +62,20 @@ final class PlaybackSession {
     private static let credentialsKey = "playback-credentials"
     private static let deviceIDKey = "ConnectDeviceID"
 
-    init(secrets: any SecretStore, transport: HTTPTransport = .shared, proxyURL: String? = nil) {
+    init(
+        secrets: any SecretStore,
+        settings: PlaybackSettings,
+        transport: HTTPTransport = .shared,
+        proxyURL: String? = nil,
+        activateEngine: Bool = true
+    ) {
         self.secrets = secrets
+        self.settings = settings
         self.oauth = SpotifyOAuth(transport: transport)
         self.proxyURL = proxyURL
-        engine.onEvent = { [weak self] event in self?.handle(event) }
+        let engine = activateEngine ? PlaybackEngine.shared : nil
+        self.engine = engine
+        engine?.onEvent = { [weak self] event in self?.handle(event) }
     }
 
     /// Updates the optional unauthenticated HTTP proxy for librespot.
@@ -73,20 +84,57 @@ final class PlaybackSession {
     func updateProxy(_ newProxyURL: String?) {
         guard proxyURL != newProxyURL else { return }
         proxyURL = newProxyURL
+        settingsReconnectTask?.cancel()
+        reconnectForConfigChange(dropCarried: false)
+    }
+
+    /// Reconnects with updated audio quality, volume normalization, or device
+    /// name when a session is already active or connecting. Debounced briefly so
+    /// rapid clicks in Settings never trigger parallel AP logins.
+    func applyPlaybackSettings() {
+        guard expectedUsername != nil, credentials != nil else { return }
+        switch state {
+        case .ready, .connecting, .waiting, .failed:
+            settingsReconnectTask?.cancel()
+            settingsReconnectTask = Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(500))
+                guard !Task.isCancelled else { return }
+                self?.reconnectForConfigChange(dropCarried: true)
+            }
+        case .notSetUp, .authorizing, .needsAuthorization:
+            break
+        }
+    }
+
+    /// Nudges a backed-off session to reconnect promptly after Mac wakes from
+    /// sleep without clearing the 10-minute drop limit or opening a browser.
+    func handleSystemWake() {
+        guard case .waiting = state else { return }
+        retryTask?.cancel()
+        connectStored()
+    }
+
+    private func reconnectForConfigChange(dropCarried: Bool) {
         guard expectedUsername != nil, credentials != nil else { return }
         switch state {
         case .ready:
             // Replacing an active engine drops its loaded track and queue;
             // let Player snapshot a resume point before connecting fresh.
             onPlayerEvent(.sessionEnded(resuming: false))
-            policy.reset()
-            connectStored()
+            if dropCarried { engine?.disconnect() }
         case .connecting, .waiting, .failed:
-            policy.reset()
-            connectStored()
+            if dropCarried {
+                if carrying {
+                    stopCarried()
+                } else {
+                    engine?.disconnect()
+                }
+            }
         case .notSetUp, .authorizing, .needsAuthorization:
-            break
+            return
         }
+        policy.reset()
+        connectStored()
     }
 
     /// Connects with the saved credential, if there is one. Called once the
@@ -102,6 +150,7 @@ final class PlaybackSession {
         guard expectedUsername != nil else { return }
         authorizeTask?.cancel()
         retryTask?.cancel()
+        settingsReconnectTask?.cancel()
         authorizeURL = nil
         state = .authorizing
         authorizeTask = Task {
@@ -144,6 +193,7 @@ final class PlaybackSession {
 
     /// Explicit user action after a failure: try the saved credential now.
     func retry() {
+        settingsReconnectTask?.cancel()
         policy.reset()
         if !connectStored() { state = .notSetUp }
     }
@@ -153,8 +203,9 @@ final class PlaybackSession {
         authorizeTask = nil
         authorizeURL = nil
         retryTask?.cancel()
+        settingsReconnectTask?.cancel()
         carrying = false
-        engine.disconnect()
+        engine?.disconnect()
         saveCredentials(nil)
         expectedUsername = nil
         state = .notSetUp
@@ -162,6 +213,7 @@ final class PlaybackSession {
 
     /// Sends a command to the session; returns why it could not, if it could not.
     func send(_ command: CoreCommand) -> String? {
+        guard let engine else { return "Playback is unavailable." }
         switch state {
         case .ready:
             return engine.send(command) ? nil : "Playback stopped responding."
@@ -187,36 +239,36 @@ final class PlaybackSession {
 
     /// A page of a playlist, read through the session rather than the Web API.
     func readPlaylist(id: String, offset: Int) async throws -> SessionPlaylistPage {
-        try await untilReady()
-        return try await engine.request(.playlist(id: id, offset: offset))
+        try await request(.playlist(id: id, offset: offset))
     }
 
     /// An artist's popular songs, read through the session: the Web API
     /// answers Development Mode apps 403 for them.
     func readTopTracks(artistID: String) async throws -> [CoreTrack] {
-        try await untilReady()
-        return try await engine.request(.topTracks(artistID: artistID))
+        try await request(.topTracks(artistID: artistID))
     }
 
     /// A song's credits, read through the session as Spotify's own clients
     /// read them (the Web API has none). Only ever asked for by the listener.
     func readCredits(trackID: String) async throws -> CoreCredits {
-        try await untilReady()
-        return try await engine.request(.credits(trackID: trackID))
+        try await request(.credits(trackID: trackID))
     }
 
     /// Followed artists' new releases, read through Pathfinder on the session.
     func readNewReleases(force: Bool = false) async throws -> [AlbumSummary] {
-        try await untilReady()
-        return try await engine.request(.newReleases(force: force))
+        try await request(.newReleases(force: force))
     }
 
     /// Personalized Home shelves (Made for you and Your top mixes), read
     /// through Pathfinder over the playback session.
     func readMadeForYou(force: Bool = false) async throws -> CoreHomeShelves {
+        try await request(.madeForYou(timezone: TimeZone.current.identifier, force: force))
+    }
+
+    private func request<T: Decodable>(_ ask: CoreAsk) async throws -> T {
         try await untilReady()
-        return try await engine.request(
-            .madeForYou(timezone: TimeZone.current.identifier, force: force))
+        guard let engine else { throw ReadError.notConnected }
+        return try await engine.request(ask)
     }
 
     /// Waits out a connection in progress (just after launch, or a
@@ -251,19 +303,31 @@ final class PlaybackSession {
     }
 
     private func connect(_ credentials: CoreConfig.Credentials) {
+        guard let engine else { return }
         retryTask?.cancel()
+        settingsReconnectTask?.cancel()
         state = .connecting
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
         engine.connect(CoreConfig(
             deviceID: Self.deviceID,
-            deviceName: Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "Nanyin",
+            deviceName: settings.effectiveDeviceName,
             initialVolume: Player.savedVolume,
             credentials: credentials,
             expectedUsername: expectedUsername,
-            audioCacheDir: caches?.appending(path: Bundle.main.bundleIdentifier ?? "Nanyin").appending(path: "audio").path,
+            audioCacheDir: PlaybackSettings.audioCacheDirectory?.path,
             audioCacheLimit: 1 << 30,
-            proxy: proxyURL
+            proxy: proxyURL,
+            bitrate: UInt16(settings.audioQuality.rawValue),
+            normalisation: settings.normalizeVolume
         ))
+    }
+
+    /// Shuts down the librespot session cleanly before the app exits.
+    func disconnectForTermination() {
+        authorizeTask?.cancel()
+        retryTask?.cancel()
+        settingsReconnectTask?.cancel()
+        carrying = false
+        engine?.disconnect()
     }
 
     private func saveCredentials(_ value: String?) {
@@ -320,7 +384,7 @@ final class PlaybackSession {
     private func stopCarried() {
         guard carrying else { return }
         carrying = false
-        engine.disconnect()
+        engine?.disconnect()
         onPlayerEvent(.sessionEnded(resuming: false))
     }
 
