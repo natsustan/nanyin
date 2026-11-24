@@ -40,6 +40,11 @@ pub enum Event {
         uri: String,
         position_ms: u32,
     },
+    /// A seek or position correction without changing playing/paused state.
+    Position {
+        uri: String,
+        position_ms: u32,
+    },
     Paused {
         uri: String,
         position_ms: u32,
@@ -202,8 +207,11 @@ impl Event {
                 track_id,
                 position_ms,
                 ..
-            }
-            | P::Seeked {
+            } => Self::Playing {
+                uri: track_id.to_uri(),
+                position_ms,
+            },
+            P::Seeked {
                 track_id,
                 position_ms,
                 ..
@@ -212,7 +220,7 @@ impl Event {
                 track_id,
                 position_ms,
                 ..
-            } => Self::Playing {
+            } => Self::Position {
                 uri: track_id.to_uri(),
                 position_ms,
             },
@@ -251,6 +259,15 @@ mod tests {
         assert_eq!(
             json,
             r#"{"type":"playing","uri":"spotify:track:x","position_ms":5}"#
+        );
+        let json = serde_json::to_string(&Event::Position {
+            uri: "spotify:track:x".into(),
+            position_ms: 42,
+        })
+        .unwrap();
+        assert_eq!(
+            json,
+            r#"{"type":"position","uri":"spotify:track:x","position_ms":42}"#
         );
         let json = serde_json::to_string(&Event::ConnectFailed {
             reason: FailureReason::AuthRejected,

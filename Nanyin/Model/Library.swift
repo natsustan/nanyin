@@ -4,6 +4,7 @@ import Observation
 
 /// What a route shows, kept while the app runs so going back costs nothing.
 enum PageContent {
+    case whatsNew(WhatsNewModel)
     case tracks(TrackList)
     case album(AlbumDetail)
     case artist(ArtistDetail)
@@ -23,19 +24,24 @@ final class Library {
     private(set) var playlistsLoaded = false
     /// Filled by `prepare` before a route is shown; views only read it.
     @ObservationIgnored private var pages: [Route: PageContent] = [:]
+    /// Playlists met outside the library (e.g. Made for You), remembered so
+    /// opening one still shows its title.
+    @ObservationIgnored private var knownPlaylists: [String: Playlist] = [:]
     private let api: SpotifyWebAPI
     private let stars: Stars
     private let session: PlaybackSession
+    private let history: PlayHistoryStore
     private let notices: Notices
     private var username: String?
     /// Bumped at sign-out; a request's answer applies only to the account
     /// that sent it.
     @ObservationIgnored private var account = 0
 
-    init(api: SpotifyWebAPI, stars: Stars, session: PlaybackSession, notices: Notices) {
+    init(api: SpotifyWebAPI, stars: Stars, session: PlaybackSession, history: PlayHistoryStore, notices: Notices) {
         self.api = api
         self.stars = stars
         self.session = session
+        self.history = history
         self.notices = notices
     }
 
@@ -53,6 +59,7 @@ final class Library {
         playlistsLoaded = false
         edit = nil
         pages = [:]
+        knownPlaylists = [:]
     }
 
     /// Shows each page of playlists as it arrives.
@@ -85,7 +92,11 @@ final class Library {
     }
 
     func playlist(_ id: String) -> Playlist? {
-        playlists.first { $0.id == id }
+        playlists.first { $0.id == id } ?? knownPlaylists[id]
+    }
+
+    func remember(_ playlists: [Playlist]) {
+        for playlist in playlists { knownPlaylists[playlist.id] = playlist }
     }
 
     // MARK: Creating, renaming and removing playlists
@@ -190,6 +201,12 @@ final class Library {
         }
     }
 
+    func didRecordPlay() {
+        if case .whatsNew(let model) = pages[.whatsNew] {
+            model.didRecordPlay()
+        }
+    }
+
     func content(for route: Route) -> PageContent? {
         pages[route]
     }
@@ -199,7 +216,8 @@ final class Library {
         guard pages[route] == nil, let username else { return }
         let content: PageContent
         switch route {
-        case .whatsNew: content = .tracks(.recentlyPlayed(api: api))
+        case .whatsNew:
+            content = .whatsNew(WhatsNewModel(api: api, session: session, history: history) { [weak self] in self?.remember($0) })
         case .likedSongs: content = .tracks(.liked(api: api, username: username, stars: stars))
         case .playlist(let id):
             // Development Mode grants read only the listener's own playlists;

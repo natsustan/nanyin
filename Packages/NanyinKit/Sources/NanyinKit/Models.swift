@@ -29,6 +29,12 @@ public struct ArtistRef: Codable, Sendable, Hashable {
     public let id: String?
     public let name: String
     public let uri: String?
+
+    public init(id: String? = nil, name: String, uri: String? = nil) {
+        self.id = id
+        self.name = name
+        self.uri = uri
+    }
 }
 
 extension [ArtistRef] {
@@ -39,6 +45,11 @@ extension [ArtistRef] {
 public struct AlbumRef: Codable, Sendable, Hashable {
     public let name: String
     public let uri: String?
+
+    public init(name: String, uri: String? = nil) {
+        self.name = name
+        self.uri = uri
+    }
 }
 
 public struct Track: Codable, Sendable, Hashable {
@@ -50,6 +61,26 @@ public struct Track: Codable, Sendable, Hashable {
     public let popularity: Int?
     public let artists: [ArtistRef]
     public let album: AlbumRef?
+
+    public init(
+        name: String,
+        uri: String,
+        duration_ms: Int,
+        explicit: Bool? = nil,
+        is_playable: Bool? = true,
+        popularity: Int? = nil,
+        artists: [ArtistRef],
+        album: AlbumRef? = nil
+    ) {
+        self.name = name
+        self.uri = uri
+        self.duration_ms = duration_ms
+        self.explicit = explicit
+        self.is_playable = is_playable
+        self.popularity = popularity
+        self.artists = artists
+        self.album = album
+    }
 }
 
 public struct SavedTrack: Codable, Sendable, Hashable {
@@ -140,6 +171,11 @@ public struct CursorPaging<Item: Codable & Sendable & Hashable>: Codable, Sendab
 public struct PlayHistory: Codable, Sendable, Hashable {
     public let track: Track
     public let played_at: String
+
+    public init(track: Track, played_at: String) {
+        self.track = track
+        self.played_at = played_at
+    }
 }
 
 public struct SearchResults: Codable, Sendable, Hashable {

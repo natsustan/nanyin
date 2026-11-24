@@ -11,6 +11,7 @@ mod commands;
 mod engine;
 mod events;
 mod logging;
+mod pathfinder;
 mod queue;
 mod reads;
 mod requests;

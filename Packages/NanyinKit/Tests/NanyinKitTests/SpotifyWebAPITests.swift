@@ -96,6 +96,26 @@ struct SpotifyWebAPITests {
         let page = try JSONDecoder().decode(Paging<PlaylistItem>.self, from: Data(json.utf8))
         #expect(page.items.compactMap(\.playable?.name) == ["One", "Two"])
     }
+
+    @Test func requestsTopArtistsAndTracksWithTimeRange() async throws {
+        let seen = Requests()
+        let session = StubProtocol.session { request in
+            seen.append(request)
+            if request.url?.path.hasSuffix("/me/top/artists") == true {
+                return (200, [:], Data(#"{"items":[{"id":"ar1","name":"Artist","uri":"spotify:artist:ar1"}],"total":1}"#.utf8))
+            }
+            return (200, [:], Data(#"{"items":[{"name":"Song","uri":"spotify:track:t1","duration_ms":180000,"artists":[{"name":"Artist"}]}],"total":1}"#.utf8))
+        }
+        let api = SpotifyWebAPI(auth: try await signedIn(), session: session, cooldownStore: MemoryCooldown())
+        let artists = try await api.topArtists(timeRange: .mediumTerm, limit: 20)
+        let tracks = try await api.topTracks(timeRange: .longTerm, limit: 100)
+        #expect(artists.items.map(\.name) == ["Artist"])
+        #expect(tracks.items.map(\.name) == ["Song"])
+        #expect(seen.all.map { $0.url?.absoluteString } == [
+            "https://api.spotify.com/v1/me/top/artists?limit=20&time_range=medium_term",
+            "https://api.spotify.com/v1/me/top/tracks?limit=50&time_range=long_term",
+        ])
+    }
 }
 
 struct PlaylistEditingTests {

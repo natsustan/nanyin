@@ -23,6 +23,17 @@ pub enum Ask {
     TopTracks { id: String },
     /// A song's credits, read through the session.
     Credits { id: String },
+    /// New releases from followed artists, read through Pathfinder.
+    NewReleases {
+        #[serde(default)]
+        force: bool,
+    },
+    /// Personalized Home shelves (Made for you and Your top mixes).
+    MadeForYou {
+        timezone: String,
+        #[serde(default)]
+        force: bool,
+    },
 }
 
 impl Ask {
@@ -40,6 +51,15 @@ impl Ask {
             Self::Credits { id } => {
                 serde_json::to_value(reads.credits(&id).await.map_err(|e| e.to_string())?)
             }
+            Self::NewReleases { force } => {
+                serde_json::to_value(reads.new_releases(force).await.map_err(|e| e.to_string())?)
+            }
+            Self::MadeForYou { timezone, force } => serde_json::to_value(
+                reads
+                    .made_for_you(&timezone, force)
+                    .await
+                    .map_err(|e| e.to_string())?,
+            ),
         };
         answer.map_err(|e| e.to_string())
     }
@@ -70,5 +90,19 @@ mod tests {
         let request: Request =
             serde_json::from_str(r#"{"request":9,"ask":"credits","id":"abc"}"#).unwrap();
         assert_eq!(request.ask, Ask::Credits { id: "abc".into() });
+        let request: Request =
+            serde_json::from_str(r#"{"request":10,"ask":"new_releases","force":true}"#).unwrap();
+        assert_eq!(request.ask, Ask::NewReleases { force: true });
+        let request: Request = serde_json::from_str(
+            r#"{"request":11,"ask":"made_for_you","timezone":"Asia/Shanghai"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            request.ask,
+            Ask::MadeForYou {
+                timezone: "Asia/Shanghai".into(),
+                force: false
+            }
+        );
     }
 }

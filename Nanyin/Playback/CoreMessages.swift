@@ -1,4 +1,5 @@
 import Foundation
+import NanyinKit
 
 /// Events from the Rust core (`core/src/events.rs`).
 enum CoreEvent: Decodable, Equatable {
@@ -14,6 +15,7 @@ enum CoreEvent: Decodable, Equatable {
     case trackChanged(CoreTrack)
     case loading(uri: String, positionMs: Int)
     case playing(uri: String, positionMs: Int)
+    case position(uri: String, positionMs: Int)
     case paused(uri: String, positionMs: Int)
     case stopped
     case unavailable(uri: String)
@@ -56,6 +58,7 @@ enum CoreEvent: Decodable, Equatable {
         case "track_changed": self = .trackChanged(try c.decode(CoreTrack.self, forKey: .track))
         case "loading": self = .loading(uri: try uri(), positionMs: try position())
         case "playing": self = .playing(uri: try uri(), positionMs: try position())
+        case "position": self = .position(uri: try uri(), positionMs: try position())
         case "paused": self = .paused(uri: try uri(), positionMs: try position())
         case "stopped": self = .stopped
         case "unavailable": self = .unavailable(uri: try uri())
@@ -137,6 +140,17 @@ struct CoreCredits: Decodable, Equatable, Sendable {
     let sources: [String]
 }
 
+/// Personalized Home shelves read through Pathfinder (`core/src/pathfinder.rs`).
+struct CoreHomeShelves: Decodable, Equatable, Sendable {
+    let madeForYou: [Playlist]
+    let topMixes: [Playlist]
+
+    enum CodingKeys: String, CodingKey {
+        case madeForYou = "made_for_you"
+        case topMixes = "top_mixes"
+    }
+}
+
 /// Questions for the Rust core (`core/src/requests.rs`), each answered once.
 enum CoreAsk: Encodable, Sendable {
     /// Answered with a `SessionPlaylistPage`.
@@ -145,8 +159,14 @@ enum CoreAsk: Encodable, Sendable {
     case topTracks(artistID: String)
     /// Answered with `CoreCredits`.
     case credits(trackID: String)
+    /// Answered with `[AlbumSummary]`.
+    case newReleases(force: Bool)
+    /// Answered with `CoreHomeShelves`.
+    case madeForYou(timezone: String, force: Bool)
 
-    private enum Key: String, CodingKey { case ask, id, offset }
+    private enum Key: String, CodingKey {
+        case ask, id, offset, timezone, force
+    }
 
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: Key.self)
@@ -161,6 +181,13 @@ enum CoreAsk: Encodable, Sendable {
         case .credits(let trackID):
             try c.encode("credits", forKey: .ask)
             try c.encode(trackID, forKey: .id)
+        case .newReleases(let force):
+            try c.encode("new_releases", forKey: .ask)
+            try c.encode(force, forKey: .force)
+        case .madeForYou(let timezone, let force):
+            try c.encode("made_for_you", forKey: .ask)
+            try c.encode(timezone, forKey: .timezone)
+            try c.encode(force, forKey: .force)
         }
     }
 }
