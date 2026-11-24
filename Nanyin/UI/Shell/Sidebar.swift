@@ -251,9 +251,17 @@ private struct NowPlayingCover: View {
                         LinkText(parts: [(track.name, track.albumURI.flatMap(Route.init(uri:)))], color: Theme.text)
                             .font(AquaFont.bold(12))
                         if app.player.playingElsewhere {
-                            Text("Playing on another device")
-                                .font(AquaFont.regular(11))
-                                .foregroundStyle(Theme.secondaryText)
+                            HStack(spacing: 4) {
+                                Text("Playing elsewhere")
+                                    .font(AquaFont.regular(11))
+                                    .foregroundStyle(Theme.secondaryText)
+                                if app.session.isReady {
+                                    Button("Play Here") { app.connect.transferToThisMac() }
+                                        .buttonStyle(.link)
+                                        .font(AquaFont.bold(11))
+                                        .foregroundStyle(Theme.green)
+                                }
+                            }
                         } else {
                             LinkText(parts: track.artists.map { ($0.name, Route(uri: $0.uri)) }, color: Theme.secondaryText)
                                 .font(AquaFont.regular(11))

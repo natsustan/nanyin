@@ -130,6 +130,21 @@ public extension SpotifyWebAPI {
         try await send("PUT", "/playlists/\(id)", body: Body(name: name, description: description))
     }
 
+    /// Available Spotify Connect devices for the signed-in account.
+    func devices() async throws -> [ConnectDevice] {
+        struct Body: Decodable, Sendable { let devices: [ConnectDevice] }
+        return try await get("/me/player/devices", as: Body.self).devices
+    }
+
+    /// Transfers active Spotify Connect playback to `deviceID`.
+    func transferPlayback(deviceID: String, play: Bool? = nil) async throws {
+        struct Body: Encodable, Sendable {
+            let device_ids: [String]
+            let play: Bool?
+        }
+        try await send("PUT", "/me/player", body: Body(device_ids: [deviceID], play: play))
+    }
+
     /// Saves tracks, albums, artists or playlists by URI (2026 unified library).
     func save(_ uris: [String]) async throws {
         try await send("PUT", "/me/library", query: ["uris": uris.joined(separator: ",")])

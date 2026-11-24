@@ -13,6 +13,7 @@ final class AppModel {
     let account: Account
     let session: PlaybackSession
     let player: Player
+    let connect: ConnectDevices
     let library: Library
     let stars: Stars
     let history: PlayHistoryStore
@@ -60,6 +61,7 @@ final class AppModel {
             activateEngine: !secondaryInstance
         )
         player = Player(session: session, notices: notices)
+        connect = ConnectDevices(api: account.api, session: session, player: player, notices: notices)
         stars = Stars(api: account.api)
         history = PlayHistoryStore(bundleID: bundleID)
         library = Library(api: account.api, stars: stars, session: session, history: history, notices: notices)
@@ -173,6 +175,7 @@ final class AppModel {
         linkLookupTask = nil
         credits = nil
         showPlaybackOnboarding = false
+        connect.reset()
         player.signOut()
         session.signOut()
         history.unload()

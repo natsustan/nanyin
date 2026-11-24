@@ -37,6 +37,8 @@ public struct OAuthGrant: Sendable, Equatable {
                 "user-follow-read",
                 "user-library-modify",
                 "user-library-read",
+                "user-modify-playback-state",
+                "user-read-playback-state",
                 "user-read-private",
                 "user-read-recently-played",
                 "user-top-read",

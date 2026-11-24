@@ -1,8 +1,10 @@
+import NanyinKit
 import SwiftUI
 
 /// The graphite transport bar along the bottom of the window.
 struct PlayerBar: View {
     @Environment(AppModel.self) private var app
+    @State private var showDevices = false
     static let height: CGFloat = 46
 
     var body: some View {
@@ -30,6 +32,14 @@ struct PlayerBar: View {
                 }
                 .buttonStyle(GraphiteToggleStyle(isOn: player.repeatMode != .off))
                 .help("Repeat")
+                Button { showDevices.toggle() } label: {
+                    Image(systemName: "hifispeaker.2")
+                }
+                .buttonStyle(GraphiteToggleStyle(isOn: player.playingElsewhere || showDevices))
+                .help("Connect to a Device")
+                .popover(isPresented: $showDevices, arrowEdge: .top) {
+                    ConnectDevicesPopover(isPresented: $showDevices)
+                }
             }
         }
         .padding(.horizontal, 12)
@@ -137,6 +147,142 @@ private struct VolumeSlider: View {
         if fraction < 0.34 { return "speaker.wave.1.fill" }
         if fraction < 0.67 { return "speaker.wave.2.fill" }
         return "speaker.wave.3.fill"
+    }
+}
+
+private struct ConnectDevicesPopover: View {
+    @Environment(AppModel.self) private var app
+    @Binding var isPresented: Bool
+
+    var body: some View {
+        let connect = app.connect
+        let session = app.session
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Connect to a Device")
+                    .font(AquaFont.bold(12.5))
+                    .foregroundStyle(Theme.text)
+                Spacer()
+                if connect.isLoading {
+                    ProgressView().controlSize(.mini)
+                } else {
+                    Button { connect.refresh() } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(Theme.secondaryText)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Refresh Devices")
+                }
+            }
+
+            Divider().overlay(Theme.divider)
+
+            if session.isReady {
+                deviceRow(
+                    title: session.localDeviceName,
+                    subtitle: connect.localIsActive ? "Playing on this Mac" : "This Mac · Click to play here",
+                    icon: "laptopcomputer",
+                    isActive: connect.localIsActive,
+                    disabled: connect.isTransferring
+                ) {
+                    connect.transferToThisMac()
+                    isPresented = false
+                }
+            }
+
+            ForEach(connect.remoteDevices, id: \.stableID) { device in
+                deviceRow(
+                    title: device.name,
+                    subtitle: device.is_restricted
+                        ? "\(device.type) · Restricted"
+                        : device.is_active ? "Active" : device.type,
+                    icon: symbol(for: device.type),
+                    isActive: device.is_active,
+                    disabled: device.is_restricted || connect.isTransferring
+                ) {
+                    connect.transfer(to: device)
+                    isPresented = false
+                }
+            }
+
+            if connect.needsResignInForDevices {
+                Text("Sign out and sign in again to list and control other Spotify Connect devices.")
+                    .font(AquaFont.regular(11))
+                    .foregroundStyle(Theme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if let error = connect.error {
+                Text(error)
+                    .font(AquaFont.regular(11))
+                    .foregroundStyle(Theme.hex(0xF08B7D))
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if !connect.isLoading && connect.remoteDevices.isEmpty && !session.isReady {
+                Text("No active Spotify Connect devices found.")
+                    .font(AquaFont.regular(11.5))
+                    .foregroundStyle(Theme.secondaryText)
+            }
+        }
+        .padding(12)
+        .frame(width: 260)
+        .background(Theme.hex(0x2B2B2B))
+        .preferredColorScheme(.dark)
+        .onAppear { connect.refresh() }
+    }
+
+    private func deviceRow(
+        title: String,
+        subtitle: String,
+        icon: String,
+        isActive: Bool,
+        disabled: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.system(size: 13))
+                    .frame(width: 18)
+                    .foregroundStyle(isActive ? Theme.green : Theme.sidebarText)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .font(isActive ? AquaFont.bold(12) : AquaFont.regular(12))
+                        .foregroundStyle(isActive ? Theme.green : Theme.text)
+                        .lineLimit(1)
+                    Text(subtitle)
+                        .font(AquaFont.regular(10.5))
+                        .foregroundStyle(Theme.secondaryText)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                if isActive {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(Theme.green)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(isActive ? Theme.green.opacity(0.12) : Color.white.opacity(0.04))
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .opacity(disabled ? 0.5 : 1)
+    }
+
+    private func symbol(for deviceType: String) -> String {
+        switch deviceType.lowercased() {
+        case "computer": "laptopcomputer"
+        case "smartphone": "iphone"
+        case "tablet": "ipad"
+        case "speaker", "avr", "stb": "hifispeaker"
+        case "tv": "tv"
+        case "automobile": "car"
+        default: "hifispeaker.2"
+        }
     }
 }
 

@@ -243,6 +243,9 @@ final class Player {
         send(.clearQueue)
     }
 
+    func transferToThisMac() {
+        send(.transfer)
+    }
 
     func signOut() {
         resetListen()

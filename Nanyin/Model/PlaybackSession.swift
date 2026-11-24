@@ -38,6 +38,8 @@ final class PlaybackSession {
     private(set) var authorizeURL: URL?
     var isReady: Bool { state == .ready }
     var hasStoredCredentials: Bool { credentials != nil }
+    var localDeviceName: String { settings.effectiveDeviceName }
+    var localDeviceID: String { Self.deviceID }
     /// Fires when playback reaches `.ready`.
     var onReady: () -> Void = {}
     /// Player events (everything but the session's own).

@@ -32,6 +32,8 @@ pub enum Command {
     },
     /// Clears manually queued tracks while keeping context tracks.
     ClearQueue,
+    /// Takes over active Spotify Connect playback onto this Mac.
+    Transfer,
     /// Start playing a context (playlist, album, artist, Liked Songs) or an
     /// explicit list of tracks. Large lists belong in a context: Spotify
     /// resolves it server-side instead of this device uploading every URI.
@@ -92,6 +94,7 @@ impl Command {
             }
             Self::AddToQueue { uri } => spirc.add_to_queue(SpotifyUri::from_uri(&uri)?),
             Self::ClearQueue => spirc.clear_queue(),
+            Self::Transfer => spirc.transfer(None),
             Self::Load(load) => {
                 // Commands are ignored while this device is not the active
                 // one; activating while already active is a no-op.
@@ -113,6 +116,10 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<Command>(r#"{"cmd":"clear_queue"}"#).unwrap(),
             Command::ClearQueue
+        );
+        assert_eq!(
+            serde_json::from_str::<Command>(r#"{"cmd":"transfer"}"#).unwrap(),
+            Command::Transfer
         );
         let cmd: Command = serde_json::from_str(
             r#"{"cmd":"load","context_uri":"spotify:playlist:abc","start_uri":"spotify:track:x"}"#,
