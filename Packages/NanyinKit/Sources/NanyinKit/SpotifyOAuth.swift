@@ -109,11 +109,15 @@ public enum OAuthError: Error, Equatable, LocalizedError {
 
 /// Spotify's accounts service: the PKCE authorization-code flow.
 public struct SpotifyOAuth: Sendable {
-    let session: URLSession
+    let transport: HTTPTransport
     let tokenURL = URL(string: "https://accounts.spotify.com/api/token")!
 
     public init(session: URLSession = .shared) {
-        self.session = session
+        self.transport = HTTPTransport(session: session)
+    }
+
+    public init(transport: HTTPTransport) {
+        self.transport = transport
     }
 
     /// Runs the browser journey for `grant`. `open` is called with the
@@ -123,8 +127,14 @@ public struct SpotifyOAuth: Sendable {
         _ grant: OAuthGrant,
         open: @Sendable (URL) async -> Void
     ) async throws -> OAuthToken {
+        // Fail fast if the configured proxy is invalid, before opening the browser.
+        _ = try transport.currentSession()
         let pkce = PKCE()
-        let receiver = try await LoopbackReceiver.start(port: grant.port, path: OAuthGrant.redirectPath)
+        let receiver = try await LoopbackReceiver.start(
+            port: grant.port,
+            path: OAuthGrant.redirectPath,
+            expectedState: pkce.state
+        )
         defer { receiver.cancel() }
         await open(grant.authorizeURL(pkce: pkce))
         let items = try await receiver.callback()
@@ -141,15 +151,26 @@ public struct SpotifyOAuth: Sendable {
         ])
     }
 
-    /// `authorize` in the default browser. A cancelled wait surfaces as
-    /// `CancellationError`, so callers only handle real failures.
-    public func authorizeInBrowser(_ grant: OAuthGrant) async throws -> OAuthToken {
+    /// `authorize` in the default browser. `onOpenURL` receives the authorize
+    /// URL right before the browser opens so the UI can offer a "Reopen" link.
+    /// Brings Nanyin back to the foreground once Spotify redirects back.
+    /// A cancelled wait surfaces as `CancellationError`.
+    public func authorizeInBrowser(
+        _ grant: OAuthGrant,
+        onOpenURL: (@Sendable (URL) async -> Void)? = nil
+    ) async throws -> OAuthToken {
         do {
-            return try await authorize(grant) { url in
+            let token = try await authorize(grant) { url in
+                await onOpenURL?(url)
                 await MainActor.run { _ = NSWorkspace.shared.open(url) }
             }
+            await MainActor.run { NSApplication.shared.activate() }
+            return token
         } catch LoopbackReceiver.Failure.cancelled {
             throw CancellationError()
+        } catch {
+            await MainActor.run { NSApplication.shared.activate() }
+            throw error
         }
     }
 
@@ -196,6 +217,7 @@ public struct SpotifyOAuth: Sendable {
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         request.httpBody = Data(Self.formEncode(form).utf8)
+        let session = try transport.currentSession()
         let (data, response) = try await session.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard status == 200 else {

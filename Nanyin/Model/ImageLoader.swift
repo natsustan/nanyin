@@ -1,11 +1,14 @@
 import AppKit
+import NanyinKit
 
 /// Cover art, decoded once and kept in memory, shared by every view that
-/// shows it and by Now Playing. Downloads go through `URLCache.shared`.
+/// shows it and by Now Playing. Downloads go through `URLCache.shared` and
+/// the app's configured `HTTPTransport`.
 @MainActor
 final class ImageLoader {
     static let shared = ImageLoader()
 
+    var transport: HTTPTransport = .shared
     private let cache = NSCache<NSURL, NSImage>()
     private var loading: [URL: Task<NSImage?, Never>] = [:]
 
@@ -21,8 +24,10 @@ final class ImageLoader {
     func image(_ url: URL) async -> NSImage? {
         if let image = cached(url) { return image }
         if let task = loading[url] { return await task.value }
+        let transport = self.transport
         let task = Task<NSImage?, Never> {
-            guard let (data, _) = try? await URLSession.shared.data(from: url) else { return nil }
+            guard let session = try? transport.currentSession(),
+                  let (data, _) = try? await session.data(from: url) else { return nil }
             return NSImage(data: data)
         }
         loading[url] = task
