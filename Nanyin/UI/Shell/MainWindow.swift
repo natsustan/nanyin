@@ -103,9 +103,8 @@ private struct RouteView: View {
             GridPage(title: "Albums", pager: albums) { Tile(album: $0) }
         case (.artists, .artists(let artists)?):
             GridPage(title: "Artists", pager: artists) { Tile(artist: $0) }
-        case (.whatsNew, .tracks(let list)?):
-            TrackListPage(title: "What's New", subtitle: "Recently played", list: list,
-                          columns: [.star, .track, .artist, .time, .album])
+        case (.whatsNew, .whatsNew(let model)?):
+            WhatsNewPage(model: model)
         case (.likedSongs, .tracks(let list)?):
             TrackListPage(title: "Starred", list: list, columns: [.star, .track, .artist, .time, .album, .added])
         case (.playlist(let id), .tracks(let list)?):

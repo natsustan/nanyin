@@ -1,4 +1,5 @@
 import Foundation
+import NanyinKit
 import Observation
 
 /// What is playing on this Mac, and the controls for it.
@@ -50,6 +51,9 @@ final class Player {
     private(set) var volume = Player.savedVolume
     /// Set when another device took playback over.
     private(set) var playingElsewhere = false
+    /// Called once per play when the listener has heard enough of the track
+    /// for it to count in local play history.
+    @ObservationIgnored var onTrackCounted: (CoreTrack) -> Void = { _ in }
 
     private let session: PlaybackSession
     /// What was playing when the session dropped, when the core could not
@@ -59,6 +63,7 @@ final class Player {
     /// The track the core is loading; it becomes `track` only once loaded.
     @ObservationIgnored private var loadingURI: String?
     @ObservationIgnored private var volumeDrag: (lastSent: Date, pending: Task<Void, Never>?)?
+    @ObservationIgnored private var listen = ListenState()
 
     private static let volumeKey = "PlaybackVolume"
     static var savedVolume: UInt16 {
@@ -176,6 +181,19 @@ final class Player {
         send(.addToQueue(uri: uri))
     }
 
+    func signOut() {
+        resetListen()
+        resumePoint = nil
+        loadingURI = nil
+        requestedURI = nil
+        track = nil
+        upNext = TrackList(rows: [])
+        isPlaying = false
+        isLoading = false
+        playingElsewhere = false
+        position = Position(ms: 0, at: .now, advancing: false)
+    }
+
     @discardableResult
     private func send(_ command: CoreCommand) -> Bool {
         guard let error = session.send(command) else { return true }
@@ -190,10 +208,12 @@ final class Player {
         case .trackChanged(let track):
             self.track = track
             if requestedURI == track.uri { requestedURI = nil }
+            noteTrackChanged(track)
         case .loading(let uri, let ms):
             loadingURI = uri
             isLoading = true
             position = Position(ms: ms, at: .now, advancing: false)
+            noteNotPlaying()
         case .playing(let uri, let ms):
             resumePoint = nil
             loadingURI = nil
@@ -202,15 +222,18 @@ final class Player {
             playingElsewhere = false
             if requestedURI == uri { requestedURI = nil }
             position = Position(ms: ms, at: .now, advancing: true)
+            notePlaying(uri: uri)
         case .paused(_, let ms):
             isPlaying = false
             isLoading = false
             position = Position(ms: ms, at: .now, advancing: false)
+            noteNotPlaying()
         case .stopped:
             isPlaying = false
             isLoading = false
             requestedURI = nil
             position = position.continued(advancing: false)
+            resetListen()
         case .unavailable(let uri):
             if requestedURI == uri { requestedURI = nil }
             notices.report("This song is not available.")
@@ -235,6 +258,7 @@ final class Player {
             isLoading = false
             playingElsewhere = true
             position = position.continued(advancing: false)
+            noteNotPlaying()
         case .sessionEnded(resuming: true):
             // Our connection dropped and the core kept the song playing;
             // the next session takes it over. Nothing changes here.
@@ -254,6 +278,7 @@ final class Player {
     /// Play to load again. A drop during a track change leaves the next one
     /// loading: pick up there, from its start.
     private func holdForNextPlay() {
+        noteNotPlaying()
         if let track {
             let start = loadingURI ?? track.uri
             resumePoint = if let context = upNext.contextURI {
@@ -267,6 +292,84 @@ final class Player {
         isLoading = false
         requestedURI = nil
         position = position.continued(advancing: false)
+    }
+
+    // MARK: Local play counting
+
+    private struct ListenState {
+        var uri: String?
+        var accumulated: TimeInterval = 0
+        var startedAt: Date?
+        var recorded = false
+        var timer: Task<Void, Never>?
+    }
+
+    private func resetListen() {
+        listen.timer?.cancel()
+        listen = ListenState()
+    }
+
+    private func noteTrackChanged(_ track: CoreTrack) {
+        if listen.uri != track.uri || listen.recorded {
+            listen.timer?.cancel()
+            listen = ListenState(uri: track.uri)
+            if isPlaying {
+                listen.startedAt = .now
+                scheduleCountTimer(for: track)
+            }
+        } else if isPlaying && listen.timer == nil {
+            if listen.startedAt == nil { listen.startedAt = .now }
+            scheduleCountTimer(for: track)
+        }
+    }
+
+    private func notePlaying(uri: String) {
+        if listen.uri != uri {
+            listen.timer?.cancel()
+            listen = ListenState(uri: uri)
+        }
+        guard !listen.recorded else { return }
+        if listen.startedAt == nil {
+            listen.startedAt = .now
+        }
+        if let track, track.uri == uri {
+            scheduleCountTimer(for: track)
+        }
+    }
+
+    private func noteNotPlaying() {
+        listen.timer?.cancel()
+        listen.timer = nil
+        if let startedAt = listen.startedAt {
+            listen.accumulated += max(0, Date.now.timeIntervalSince(startedAt))
+            listen.startedAt = nil
+        }
+    }
+
+    private func scheduleCountTimer(for track: CoreTrack) {
+        listen.timer?.cancel()
+        let threshold = PlayHistoryMerger.countsAfter(durationMs: track.durationMs)
+        let elapsed = listen.accumulated + (listen.startedAt.map { max(0, Date.now.timeIntervalSince($0)) } ?? 0)
+        let remaining = threshold - elapsed
+        if remaining <= 0 {
+            recordCurrentTrack(track)
+            return
+        }
+        let uri = track.uri
+        listen.timer = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(remaining))
+            guard !Task.isCancelled, let self,
+                  self.isPlaying, self.listen.uri == uri, !self.listen.recorded,
+                  let current = self.track, current.uri == uri
+            else { return }
+            self.recordCurrentTrack(current)
+        }
+    }
+
+    private func recordCurrentTrack(_ track: CoreTrack) {
+        listen.recorded = true
+        listen.timer = nil
+        onTrackCounted(track)
     }
 }
 

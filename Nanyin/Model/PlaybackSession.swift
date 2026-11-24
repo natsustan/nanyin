@@ -142,6 +142,20 @@ final class PlaybackSession {
         return try await engine.request(.credits(trackID: trackID))
     }
 
+    /// Followed artists' new releases, read through Pathfinder on the session.
+    func readNewReleases(force: Bool = false) async throws -> [AlbumSummary] {
+        try await untilReady()
+        return try await engine.request(.newReleases(force: force))
+    }
+
+    /// Personalized Home shelves (Made for you and Your top mixes), read
+    /// through Pathfinder with the session and the verified Web API token.
+    func readMadeForYou(contextToken: String, force: Bool = false) async throws -> CoreHomeShelves {
+        try await untilReady()
+        return try await engine.request(
+            .madeForYou(contextToken: contextToken, timezone: TimeZone.current.identifier, force: force))
+    }
+
     /// Waits out a connection in progress (just after launch, or a
     /// reconnect); fails at once if none is coming.
     private func untilReady() async throws {

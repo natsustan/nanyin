@@ -21,9 +21,27 @@ enum DemoContent {
         let playlists: [Playlist] = playlistNames.enumerated().map { index, name in
             decode(#"{"id":"p\#(index)","name":"\#(name)","uri":"spotify:playlist:p\#(index)","owner":{"id":"demo"}}"#)
         }
+        let demoReleases: [AlbumSummary] = [
+            decode(#"{"id":"a1","name":"Harbour","uri":"spotify:album:a1","album_type":"album","artists":[{"name":"The Northern Lights"}],"release_date":"2026-10-16"}"#),
+            decode(#"{"id":"a2","name":"Static Bloom","uri":"spotify:album:a2","album_type":"album","artists":[{"name":"Mira Kell"}],"release_date":"2026-10-10"}"#),
+            decode(#"{"id":"a3","name":"Velvet Hours","uri":"spotify:album:a3","album_type":"single","artists":[{"name":"Oslo Dawn"}],"release_date":"2026-10-02"}"#),
+        ]
+        let demoArtists: [Artist] = [
+            decode(#"{"id":"ar1","name":"The Northern Lights","uri":"spotify:artist:ar1"}"#),
+            decode(#"{"id":"ar2","name":"Mira Kell","uri":"spotify:artist:ar2"}"#),
+            decode(#"{"id":"ar3","name":"Oslo Dawn","uri":"spotify:artist:ar3"}"#),
+        ]
+        let whatsNew = WhatsNewModel(
+            newReleases: demoReleases,
+            madeForYou: Array(playlists.prefix(4)),
+            topMixes: Array(playlists.dropFirst(4).prefix(3)),
+            topArtists: demoArtists,
+            recentlyPlayed: list,
+            topTracks: list
+        )
         app.library.showDemo(
             playlists: playlists,
-            pages: [.whatsNew: .tracks(list), .likedSongs: .tracks(list)])
+            pages: [.whatsNew: .whatsNew(whatsNew), .likedSongs: .tracks(list)])
         app.player.showDemo(
             CoreTrack(
                 uri: rows[4].uri, name: rows[4].name, artists: [.init(uri: "", name: rows[4].artistNames)],

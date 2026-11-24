@@ -1,4 +1,5 @@
 import Foundation
+import NanyinKit
 
 /// Events from the Rust core (`core/src/events.rs`).
 enum CoreEvent: Decodable, Equatable {
@@ -137,6 +138,17 @@ struct CoreCredits: Decodable, Equatable, Sendable {
     let sources: [String]
 }
 
+/// Personalized Home shelves read through Pathfinder (`core/src/pathfinder.rs`).
+struct CoreHomeShelves: Decodable, Equatable, Sendable {
+    let madeForYou: [Playlist]
+    let topMixes: [Playlist]
+
+    enum CodingKeys: String, CodingKey {
+        case madeForYou = "made_for_you"
+        case topMixes = "top_mixes"
+    }
+}
+
 /// Questions for the Rust core (`core/src/requests.rs`), each answered once.
 enum CoreAsk: Encodable, Sendable {
     /// Answered with a `SessionPlaylistPage`.
@@ -145,8 +157,15 @@ enum CoreAsk: Encodable, Sendable {
     case topTracks(artistID: String)
     /// Answered with `CoreCredits`.
     case credits(trackID: String)
+    /// Answered with `[AlbumSummary]`.
+    case newReleases(force: Bool)
+    /// Answered with `CoreHomeShelves`.
+    case madeForYou(contextToken: String, timezone: String, force: Bool)
 
-    private enum Key: String, CodingKey { case ask, id, offset }
+    private enum Key: String, CodingKey {
+        case ask, id, offset, timezone, force
+        case contextToken = "context_token"
+    }
 
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: Key.self)
@@ -161,6 +180,14 @@ enum CoreAsk: Encodable, Sendable {
         case .credits(let trackID):
             try c.encode("credits", forKey: .ask)
             try c.encode(trackID, forKey: .id)
+        case .newReleases(let force):
+            try c.encode("new_releases", forKey: .ask)
+            try c.encode(force, forKey: .force)
+        case .madeForYou(let contextToken, let timezone, let force):
+            try c.encode("made_for_you", forKey: .ask)
+            try c.encode(contextToken, forKey: .contextToken)
+            try c.encode(timezone, forKey: .timezone)
+            try c.encode(force, forKey: .force)
         }
     }
 }

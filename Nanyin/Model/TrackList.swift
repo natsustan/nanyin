@@ -150,11 +150,42 @@ extension TrackList {
         }
     }
 
-    static func recentlyPlayed(api: SpotifyWebAPI) -> TrackList {
+    static func recentlyPlayed(
+        api: SpotifyWebAPI,
+        history: PlayHistoryStore,
+        onRemote: @escaping @MainActor ([PlayHistory]) -> Void = { _ in }
+    ) -> TrackList {
         TrackList(contextURI: nil) { _ in
-            var seen = Set<String>()
-            let tracks = try await api.recentlyPlayed().map(\.track).filter { seen.insert($0.uri).inserted }
-            return (tracks.enumerated().map { TrackRow(index: $0.offset, track: $0.element) }, tracks.count, nil)
+            let remote: [PlayHistory]
+            do {
+                remote = try await api.recentlyPlayed()
+                onRemote(remote)
+            } catch {
+                guard !history.plays.isEmpty else { throw error }
+                remote = []
+            }
+            let rows = Self.recentRows(local: history.plays, remote: remote)
+            return (rows, rows.count, nil)
+        }
+    }
+
+    static func mergedRecentlyPlayed(local: [PlayHistory], remote: [PlayHistory]) -> TrackList {
+        TrackList(rows: recentRows(local: local, remote: remote))
+    }
+
+    private static func recentRows(local: [PlayHistory], remote: [PlayHistory]) -> [TrackRow] {
+        var seen = Set<String>()
+        let tracks = PlayHistoryMerger.merge(local: local, remote: remote)
+            .map(\.track)
+            .filter { seen.insert($0.uri).inserted }
+        return tracks.enumerated().map { TrackRow(index: $0.offset, track: $0.element) }
+    }
+
+    static func topTracks(api: SpotifyWebAPI, timeRange: TopTimeRange) -> TrackList {
+        TrackList(contextURI: nil) { _ in
+            let page = try await api.topTracks(timeRange: timeRange, limit: 50)
+            let rows = page.items.enumerated().map { TrackRow(index: $0.offset, track: $0.element) }
+            return (rows, page.total ?? rows.count, nil)
         }
     }
 }
