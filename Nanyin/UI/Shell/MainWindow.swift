@@ -6,8 +6,7 @@ struct MainWindow: View {
     var body: some View {
         VStack(spacing: 0) {
             MainToolbar()
-            switch app.account.state {
-            case .signedIn:
+            if app.showsLibrary {
                 HStack(spacing: 0) {
                     Sidebar()
                         .frame(width: sidebarWidth)
@@ -18,7 +17,7 @@ struct MainWindow: View {
                 }
                 PlaybackNotice()
                 PlayerBar()
-            default:
+            } else {
                 OnboardingView()
             }
         }
@@ -27,8 +26,9 @@ struct MainWindow: View {
         .ignoresSafeArea()
         .frame(minWidth: 780, minHeight: 480)
         .preferredColorScheme(.dark)
-        .onAppear { spaceKey.install { app.player.togglePlayPause() } }
+        .onAppear { spaceKey.install { if app.showsLibrary { app.player.togglePlayPause() } } }
         .sheet(item: Bindable(app).credits) { CreditsSheet(credits: $0) }
+        .sheet(isPresented: Bindable(app).showProxySheet) { ProxySettingsSheet() }
     }
 
     /// Live while dragging; saved when the drag ends.
@@ -129,43 +129,45 @@ private struct PlaybackNotice: View {
     var body: some View {
         let session = app.session
         var message: String?
-        var action: (title: String, run: () -> Void)?
+        var actions: [(title: String, run: () -> Void)] = []
         switch session.state {
         case .ready:
             break
         case .notSetUp:
             message = "To play music on this Mac, approve playback with Spotify once."
-            action = ("Set Up Playback…", session.authorize)
+            actions = [("Set Up Playback…", session.authorize)]
         case .authorizing:
             message = "Waiting for your approval in the browser…"
-            action = nil
+            if session.authorizeURL != nil {
+                actions.append(("Open Again", session.reopenAuthorizeURL))
+            }
+            actions.append(("Cancel", session.cancelAuthorize))
         case .connecting:
             message = "Connecting to Spotify…"
-            action = nil
         case .waiting(let until, let reason):
             message = "\(reason). Trying again \(until.formatted(.relative(presentation: .named)))."
-            action = ("Try Now", session.retry)
+            actions = [("Try Now", session.retry)]
         case .needsAuthorization(let reason):
             message = reason
-            action = ("Approve Playback…", session.authorize)
+            actions = [("Approve Playback…", session.authorize)]
         case .failed(let reason):
             message = reason
-            action = ("Try Again", session.retry)
+            actions = [("Try Again", session.retry)]
         }
         // A failed action outranks the standing state until dismissed.
         if let report = app.notices.message {
             message = report
-            action = ("Dismiss", app.notices.dismiss)
+            actions = [("Dismiss", app.notices.dismiss)]
         }
         return Group {
             if let message {
-                HStack(spacing: 10) {
+                HStack(spacing: 8) {
                     Text(message)
                         .font(AquaFont.regular(12))
                         .foregroundStyle(Theme.metalText)
                         .lineLimit(2)
                     Spacer()
-                    if let action {
+                    ForEach(actions, id: \.title) { action in
                         Button(action.title, action: action.run)
                             .buttonStyle(TexturedButtonStyle())
                     }

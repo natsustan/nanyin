@@ -155,3 +155,145 @@ struct GraphiteHeader<Content: View>: View {
             .hairline(.bottom, Theme.graphiteEdge)
     }
 }
+
+/// Rectangular Aqua text input (white inset field with focus halo), for forms
+/// like sign-in and proxy settings rather than the toolbar search capsule.
+struct AquaTextField: View {
+    @Binding var text: String
+    var prompt: String
+    var isSecure = false
+    var monospaced = false
+    var onSubmit: () -> Void = {}
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 4)
+        HStack(spacing: 4) {
+            Group {
+                if isSecure {
+                    SecureField(prompt, text: $text)
+                } else {
+                    TextField(prompt, text: $text)
+                }
+            }
+            .textFieldStyle(.plain)
+            .font(monospaced ? .system(size: 12, design: .monospaced) : AquaFont.regular(12))
+            .foregroundStyle(.black)
+            .focused($focused)
+            .onSubmit(onSubmit)
+
+            if !text.isEmpty {
+                Button {
+                    text = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.hex(0x8A8A8A))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 26)
+        .background(shape.fill(.white))
+        .overlay {
+            shape.stroke(.black.opacity(0.32), lineWidth: 2)
+                .blur(radius: 1)
+                .offset(y: 1)
+                .clipShape(shape)
+        }
+        .overlay(shape.strokeBorder(focused ? Theme.hex(0x5E8FD6) : Theme.hex(0x5A5A5A), lineWidth: 1))
+        .background {
+            if focused {
+                shape.stroke(Theme.hex(0x7EAAE8, 0.7), lineWidth: 5).blur(radius: 1.5)
+            }
+        }
+        .environment(\.colorScheme, .light)
+    }
+}
+
+/// The primary green Aqua action button for key sign-in / approval actions.
+struct AquaPrimaryButtonStyle: ButtonStyle {
+    var fullWidth = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        BodyView(configuration: configuration, fullWidth: fullWidth)
+    }
+
+    private struct BodyView: View {
+        let configuration: Configuration
+        let fullWidth: Bool
+        @Environment(\.isEnabled) private var isEnabled
+
+        var body: some View {
+            let shape = RoundedRectangle(cornerRadius: 5)
+            configuration.label
+                .font(AquaFont.bold(12.5))
+                .foregroundStyle(isEnabled ? Theme.hex(0x162200) : Theme.hex(0x2A2A2A, 0.55))
+                .shadow(color: .white.opacity(isEnabled ? 0.35 : 0), radius: 0, y: 1)
+                .frame(maxWidth: fullWidth ? .infinity : nil)
+                .frame(height: 30)
+                .padding(.horizontal, 14)
+                .background {
+                    if !isEnabled {
+                        shape.fill(LinearGradient(
+                            colors: [Theme.hex(0x6E6E6E), Theme.hex(0x585858)],
+                            startPoint: .top, endPoint: .bottom))
+                    } else if configuration.isPressed {
+                        shape.fill(LinearGradient(
+                            colors: [Theme.hex(0x699900), Theme.hex(0x7EB400)],
+                            startPoint: .top, endPoint: .bottom))
+                    } else {
+                        shape.fill(LinearGradient(
+                            colors: [Theme.hex(0xA4D62A), Theme.green, Theme.hex(0x6EA000)],
+                            startPoint: .top, endPoint: .bottom))
+                    }
+                }
+                .overlay(
+                    shape.strokeBorder(
+                        isEnabled ? Theme.hex(0x3D5900) : Theme.hex(0x3A3A3A),
+                        lineWidth: 1)
+                )
+                .overlay(alignment: .top) {
+                    if isEnabled && !configuration.isPressed {
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(.white.opacity(0.28))
+                            .frame(height: 1)
+                            .padding(.horizontal, 2)
+                            .padding(.top, 1)
+                    }
+                }
+                .shadow(color: .black.opacity(isEnabled ? 0.35 : 0.15), radius: 2, y: 1)
+                .contentShape(shape)
+        }
+    }
+}
+
+/// Small toggle segment button for dark graphite forms (e.g. Proxy Mode).
+struct DarkSegmentButtonStyle: ButtonStyle {
+    var selected: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 4)
+        configuration.label
+            .font(selected ? AquaFont.bold(11.5) : AquaFont.regular(11.5))
+            .foregroundStyle(selected ? Theme.hex(0x162200) : Theme.text)
+            .frame(height: 24)
+            .padding(.horizontal, 10)
+            .background {
+                if selected {
+                    shape.fill(LinearGradient(
+                        colors: [Theme.hex(0x9ED024), Theme.green],
+                        startPoint: .top, endPoint: .bottom))
+                } else {
+                    shape.fill(LinearGradient(
+                        colors: configuration.isPressed
+                            ? [Theme.hex(0x383838), Theme.hex(0x464646)]
+                            : [Theme.hex(0x4A4A4A), Theme.hex(0x3A3A3A)],
+                        startPoint: .top, endPoint: .bottom))
+                }
+            }
+            .overlay(shape.strokeBorder(selected ? Theme.hex(0x4A6B00) : Theme.hex(0x202020), lineWidth: 1))
+            .contentShape(shape)
+    }
+}
