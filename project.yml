@@ -50,7 +50,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.cosmoss.nanyin
         PRODUCT_NAME: Nanyin
         PRODUCT_MODULE_NAME: Nanyin
-        MARKETING_VERSION: "0.2.0"
+        MARKETING_VERSION: "0.4.0"
         CURRENT_PROJECT_VERSION: $(MARKETING_VERSION)
         INFOPLIST_FILE: Nanyin/Resources/Info.plist
         CODE_SIGN_STYLE: Manual
