@@ -20,7 +20,6 @@ struct MainToolbar: View {
             Text("Nanyin")
                 .font(AquaFont.regular(13))
                 .foregroundStyle(Theme.metalText.opacity(appearsActive ? 1 : 0.5))
-                .embossed()
                 .padding(.top, 4)
                 .allowsHitTesting(false)
             TrafficLights()

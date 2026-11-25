@@ -672,12 +672,10 @@ final class GraphiteCornerView: NSView {
 final class GraphiteHeaderCell: NSTableHeaderCell {
     private static let gradient = NSGradient(starting: Theme.nsGraphiteTop, ending: Theme.nsGraphiteBottom)
     private static let separator = Theme.ns(0x2A2A2A)
-    private static let attributes: [NSAttributedString.Key: Any] = {
-        let shadow = NSShadow()
-        shadow.shadowColor = .black.withAlphaComponent(0.6)
-        shadow.shadowOffset = NSSize(width: 0, height: 1)
-        return [.font: AquaFont.ns(12, bold: true), .foregroundColor: Theme.ns(0xE0E0E0), .shadow: shadow]
-    }()
+    private static let attributes: [NSAttributedString.Key: Any] = [
+        .font: AquaFont.ns(12, bold: true),
+        .foregroundColor: Theme.ns(0xE0E0E0),
+    ]
 
     static func drawBackground(in rect: NSRect) {
         gradient?.draw(in: rect, angle: -90)

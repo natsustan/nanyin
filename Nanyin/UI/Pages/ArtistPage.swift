@@ -165,7 +165,6 @@ struct ArtistPage: View {
         }
         .font(AquaFont.bold(11))
         .foregroundStyle(Theme.text)
-        .engraved()
         .frame(height: 21)
         .background(Theme.graphite)
         .hairline(.top, Theme.graphiteHighlight)
@@ -269,7 +268,6 @@ struct ArtistPage: View {
         Text(title)
             .font(AquaFont.bold(14))
             .foregroundStyle(Theme.green)
-            .engraved()
     }
 
     private func inlineStatus(message: String, minHeight: CGFloat = 64, retry: (() -> Void)? = nil) -> some View {

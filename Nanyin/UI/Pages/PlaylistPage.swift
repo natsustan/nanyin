@@ -152,7 +152,6 @@ struct PlaylistPage: View {
             Image(systemName: "ellipsis")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(Theme.hex(0xC8C8C8))
-                .engraved()
                 .frame(width: 24, height: 22)
         }
         .menuStyle(.borderlessButton)

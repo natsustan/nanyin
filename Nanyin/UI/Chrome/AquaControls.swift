@@ -35,7 +35,6 @@ struct TexturedButtonStyle: ButtonStyle {
             configuration.label
                 .font(.system(size: 11, weight: .bold))
                 .foregroundStyle(Theme.hex(0x3A3A3A).opacity(isEnabled ? 1 : 0.35))
-                .embossed()
                 .frame(width: width, height: 22)
                 .padding(.horizontal, width == nil ? 8 : 0)
                 .background {
@@ -116,7 +115,6 @@ struct GlossyRoundButtonStyle: ButtonStyle {
         configuration.label
             .font(.system(size: diameter * 0.38, weight: .black))
             .foregroundStyle(Theme.hex(0x2C2C2C))
-            .shadow(color: .white.opacity(0.7), radius: 0, y: 0.5)
             .frame(width: diameter, height: diameter)
             .background {
                 ZStack {
@@ -131,9 +129,9 @@ struct GlossyRoundButtonStyle: ButtonStyle {
                         .offset(y: -diameter * 0.2)
                 }
                 .clipShape(Circle())
+                .shadow(color: .black.opacity(0.5), radius: 1, y: 1)
             }
             .overlay(Circle().strokeBorder(.black.opacity(0.7), lineWidth: 1))
-            .shadow(color: .black.opacity(0.5), radius: 1, y: 1)
             .contentShape(Circle())
     }
 }
@@ -147,51 +145,8 @@ struct GraphiteToggleStyle: ButtonStyle {
             .font(.system(size: 12, weight: .semibold))
             .foregroundStyle(isOn ? Theme.green : Theme.hex(0xC8C8C8))
             .opacity(configuration.isPressed ? 0.6 : 1)
-            .engraved()
             .frame(width: 24, height: 22)
             .contentShape(Rectangle())
-    }
-}
-
-/// A toggle glyph sitting on the light brushed-metal player bar: embossed dark
-/// metal when off, recessed charcoal pill with glowing lime-green glyph when on.
-struct MetalBarToggleStyle: ButtonStyle {
-    var isOn: Bool
-
-    func makeBody(configuration: Configuration) -> some View {
-        BodyView(configuration: configuration, isOn: isOn)
-    }
-
-    private struct BodyView: View {
-        let configuration: Configuration
-        let isOn: Bool
-        @Environment(\.appearsActive) private var appearsActive
-
-        var body: some View {
-            let pill = RoundedRectangle(cornerRadius: 4)
-            configuration.label
-                .font(.system(size: 11.5, weight: .semibold))
-                .foregroundStyle(isOn ? Theme.green : Theme.metalText.opacity(appearsActive ? 0.88 : 0.55))
-                .shadow(
-                    color: isOn ? .black.opacity(0.65) : .white.opacity(0.55),
-                    radius: 0,
-                    y: isOn ? -1 : 1
-                )
-                .opacity(configuration.isPressed ? 0.65 : 1)
-                .frame(width: 26, height: 22)
-                .background {
-                    if isOn {
-                        pill.fill(LinearGradient(
-                            colors: [Theme.hex(0x3A3A3A), Theme.hex(0x4E4E4E)],
-                            startPoint: .top, endPoint: .bottom))
-                        .overlay(pill.strokeBorder(Theme.hex(0x282828), lineWidth: 1))
-                        .background(pill.fill(.white.opacity(0.35)).offset(y: 1))
-                    } else if configuration.isPressed {
-                        pill.fill(Theme.hex(0x000000, 0.12))
-                    }
-                }
-                .contentShape(Rectangle())
-        }
     }
 }
 
@@ -245,7 +200,6 @@ struct GraphiteActionButtonStyle: ButtonStyle {
             configuration.label
                 .font(AquaFont.bold(11))
                 .foregroundStyle(Theme.text.opacity(isEnabled ? 1 : 0.4))
-                .engraved()
                 .frame(height: 20)
                 .padding(.horizontal, 9)
                 .background {
@@ -278,7 +232,6 @@ struct GraphiteHeader<Content: View>: View {
         HStack(spacing: 6) { content }
             .font(AquaFont.bold(12))
             .foregroundStyle(Theme.hex(0xE6E6E6))
-            .engraved()
             .padding(.horizontal, 8)
             .frame(height: 22)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -331,19 +284,15 @@ struct MetalSubBarTitle: View {
                 Image(systemName: icon)
                     .font(.system(size: 10.5, weight: .semibold))
                     .foregroundStyle((iconTint ?? Theme.metalText).opacity(appearsActive ? 1 : 0.65))
-                    .shadow(color: .black.opacity(iconTint != nil ? 0.35 : 0), radius: 0, y: -0.5)
-                    .embossed()
             }
             Text(title)
                 .font(AquaFont.bold(12))
                 .foregroundStyle(Theme.metalText.opacity(appearsActive ? 1 : 0.65))
-                .embossed()
                 .lineLimit(1)
             if !detail.isEmpty {
                 Text("· \(detail)")
                     .font(AquaFont.regular(11))
                     .foregroundStyle(Theme.metalSecondaryText.opacity(appearsActive ? 1 : 0.65))
-                    .embossed()
                     .lineLimit(1)
             }
         }
@@ -381,7 +330,6 @@ struct MetalSubBarButtonStyle: ButtonStyle {
         var body: some View {
             configuration.label
                 .foregroundStyle(Theme.metalText.opacity(isEnabled ? (appearsActive ? 1 : 0.65) : 0.35))
-                .embossed()
                 .frame(width: width, height: Theme.subBarHeight)
                 .padding(.horizontal, width == nil ? 8 : 0)
                 .background {
@@ -405,7 +353,6 @@ struct MetalPillButtonStyle: ButtonStyle {
         configuration.label
             .font(AquaFont.bold(11))
             .foregroundStyle(Theme.metalText)
-            .embossed()
             .padding(.horizontal, 11)
             .frame(height: 20)
             .background {
@@ -414,9 +361,9 @@ struct MetalPillButtonStyle: ButtonStyle {
                         ? [Theme.pillPressedTop, Theme.pillPressedBottom]
                         : [Theme.pillTop, Theme.pillBottom],
                     startPoint: .top, endPoint: .bottom))
+                    .shadow(color: .black.opacity(0.4), radius: 1, y: 1)
             }
             .overlay(shape.strokeBorder(Theme.pillEdge, lineWidth: 1))
-            .shadow(color: .black.opacity(0.4), radius: 1, y: 1)
             .contentShape(shape)
             .environment(\.colorScheme, .light)
     }
@@ -503,24 +450,26 @@ struct AquaPrimaryButtonStyle: ButtonStyle {
             configuration.label
                 .font(AquaFont.bold(12.5))
                 .foregroundStyle(isEnabled ? Theme.hex(0x162200) : Theme.hex(0x2A2A2A, 0.55))
-                .shadow(color: .white.opacity(isEnabled ? 0.35 : 0), radius: 0, y: 1)
                 .frame(maxWidth: fullWidth ? .infinity : nil)
                 .frame(height: 30)
                 .padding(.horizontal, 14)
                 .background {
-                    if !isEnabled {
-                        shape.fill(LinearGradient(
-                            colors: [Theme.hex(0x6E6E6E), Theme.hex(0x585858)],
-                            startPoint: .top, endPoint: .bottom))
-                    } else if configuration.isPressed {
-                        shape.fill(LinearGradient(
-                            colors: [Theme.hex(0x699900), Theme.hex(0x7EB400)],
-                            startPoint: .top, endPoint: .bottom))
-                    } else {
-                        shape.fill(LinearGradient(
-                            colors: [Theme.hex(0xA4D62A), Theme.green, Theme.hex(0x6EA000)],
-                            startPoint: .top, endPoint: .bottom))
+                    Group {
+                        if !isEnabled {
+                            shape.fill(LinearGradient(
+                                colors: [Theme.hex(0x6E6E6E), Theme.hex(0x585858)],
+                                startPoint: .top, endPoint: .bottom))
+                        } else if configuration.isPressed {
+                            shape.fill(LinearGradient(
+                                colors: [Theme.hex(0x699900), Theme.hex(0x7EB400)],
+                                startPoint: .top, endPoint: .bottom))
+                        } else {
+                            shape.fill(LinearGradient(
+                                colors: [Theme.hex(0xA4D62A), Theme.green, Theme.hex(0x6EA000)],
+                                startPoint: .top, endPoint: .bottom))
+                        }
                     }
+                    .shadow(color: .black.opacity(isEnabled ? 0.35 : 0.15), radius: 2, y: 1)
                 }
                 .overlay(
                     shape.strokeBorder(
@@ -536,7 +485,6 @@ struct AquaPrimaryButtonStyle: ButtonStyle {
                             .padding(.top, 1)
                     }
                 }
-                .shadow(color: .black.opacity(isEnabled ? 0.35 : 0.15), radius: 2, y: 1)
                 .contentShape(shape)
         }
     }

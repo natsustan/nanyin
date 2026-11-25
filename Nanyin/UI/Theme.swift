@@ -94,7 +94,7 @@ enum Theme {
     static let vinylLabel = hex(0x3E3E3E)
     static let vinylSpindle = hex(0x222222)
 
-    // Graphite (pane action bars and column headers)
+    // Graphite (player bar, pane action bars and column headers)
     static let nsGraphiteTop = ns(0x585858)
     static let nsGraphiteBottom = ns(0x363636)
     static let nsGraphiteEdge = ns(0x1C1C1C)
@@ -122,15 +122,6 @@ enum Theme {
     static func rowColor(_ index: Int) -> Color { Color(nsColor: row(index)) }
     static let rowHover = hex(0xFFFFFF, 0.05)
 
-    // Bottom player bar (Snow Leopard / 2010 Spotify brushed aluminum)
-    static let playerBarEdge = hex(0x464646)
-    static let playerBarHighlight = hex(0xFFFFFF, 0.55)
-    static func playerBar(active: Bool) -> LinearGradient {
-        LinearGradient(
-            colors: active ? [hex(0xCECECE), hex(0x9C9C9C)] : [hex(0xE4E4E4), hex(0xC9C9C9)],
-            startPoint: .top, endPoint: .bottom)
-    }
-
     // Track table selection (2010 Snow Leopard / Spotify deep Aqua steel-blue)
     static let nsSelectionTop = ns(0x4F7CB6)
     static let nsSelectionBottom = ns(0x375E94)
@@ -156,15 +147,5 @@ extension View {
         overlay(alignment: edge == .top ? .top : .bottom) {
             Rectangle().fill(color).frame(height: 1)
         }
-    }
-
-    /// Light text pressed into a dark surface.
-    func engraved() -> some View {
-        shadow(color: .black.opacity(0.6), radius: 0, y: -1)
-    }
-
-    /// Dark text raised from a light metal surface.
-    func embossed() -> some View {
-        shadow(color: .white.opacity(0.6), radius: 0, y: 1)
     }
 }
