@@ -40,6 +40,10 @@ pub enum Ask {
         #[serde(default)]
         force: bool,
     },
+    /// An artist's monthly listeners, followers and popular track play counts.
+    ArtistOverview { id: String },
+    /// Related artists ("Fans also like"), read through Pathfinder.
+    RelatedArtists { id: String },
 }
 
 impl Ask {
@@ -69,6 +73,18 @@ impl Ask {
             Self::MadeForYou { timezone, force } => serde_json::to_value(
                 reads
                     .made_for_you(&timezone, force)
+                    .await
+                    .map_err(|e| e.to_string())?,
+            ),
+            Self::ArtistOverview { id } => serde_json::to_value(
+                reads
+                    .artist_overview(&id)
+                    .await
+                    .map_err(|e| e.to_string())?,
+            ),
+            Self::RelatedArtists { id } => serde_json::to_value(
+                reads
+                    .related_artists(&id)
                     .await
                     .map_err(|e| e.to_string())?,
             ),
@@ -127,5 +143,11 @@ mod tests {
                 force: false
             }
         );
+        let request: Request =
+            serde_json::from_str(r#"{"request":13,"ask":"artist_overview","id":"abc"}"#).unwrap();
+        assert_eq!(request.ask, Ask::ArtistOverview { id: "abc".into() });
+        let request: Request =
+            serde_json::from_str(r#"{"request":14,"ask":"related_artists","id":"abc"}"#).unwrap();
+        assert_eq!(request.ask, Ask::RelatedArtists { id: "abc".into() });
     }
 }

@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     events::Track,
-    pathfinder::{HomeShelves, Image, Pathfinder, ReleaseAlbum},
+    pathfinder::{ArtistOverview, HomeShelves, Image, Pathfinder, RelatedArtist, ReleaseAlbum},
 };
 
 /// Rows per page, as the Web API's limit.
@@ -154,6 +154,14 @@ impl Reads {
 
     pub async fn made_for_you(&self, timezone: &str, force: bool) -> Result<HomeShelves, Error> {
         self.pathfinder.made_for_you(timezone, force).await
+    }
+
+    pub async fn artist_overview(&self, id: &str) -> Result<ArtistOverview, Error> {
+        self.pathfinder.artist_overview(id).await
+    }
+
+    pub async fn related_artists(&self, id: &str) -> Result<Vec<RelatedArtist>, Error> {
+        self.pathfinder.related_artists(id).await
     }
 
     /// One page of a playlist's songs. The first page fetches the list afresh.
