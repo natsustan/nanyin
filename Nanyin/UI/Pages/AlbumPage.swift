@@ -71,10 +71,7 @@ struct ArtistPage: View {
             }
             if let message = detail.albumsError {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Albums and Singles")
-                        .font(AquaFont.bold(13.5))
-                        .foregroundStyle(Theme.green)
-                        .engraved()
+                    sectionHeading("Albums and Singles")
                         .padding(.horizontal, 18)
                         .padding(.top, 14)
                     PlaceholderText(message: message)
@@ -84,10 +81,7 @@ struct ArtistPage: View {
                 EtchedDivider()
             } else if !detail.albums.isEmpty {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Albums and Singles")
-                        .font(AquaFont.bold(13.5))
-                        .foregroundStyle(Theme.green)
-                        .engraved()
+                    sectionHeading("Albums and Singles")
                         .padding(.horizontal, 18)
                         .padding(.top, 14)
                     ScrollView(.horizontal) {
@@ -104,10 +98,7 @@ struct ArtistPage: View {
                 EtchedDivider()
             }
             HStack {
-                Text("Popular")
-                    .font(AquaFont.bold(13.5))
-                    .foregroundStyle(Theme.green)
-                    .engraved()
+                sectionHeading("Popular")
                 Spacer()
             }
             .padding(.horizontal, 18)
@@ -116,6 +107,13 @@ struct ArtistPage: View {
             .background(Theme.content)
             popular
         }
+    }
+
+    private func sectionHeading(_ title: String) -> some View {
+        Text(title)
+            .font(AquaFont.bold(13.5))
+            .foregroundStyle(Theme.green)
+            .engraved()
     }
 
     @ViewBuilder private var popular: some View {
@@ -138,6 +136,7 @@ struct Tile: View {
     let images: [SpotifyImage]?
     let route: Route
     var playURI: String? = nil
+    var openTitle = "Open"
     var size: CGFloat = 136
     @State private var hovering = false
 
@@ -190,7 +189,7 @@ struct Tile: View {
             if let playURI {
                 Button("Play") { app.player.play(contextURI: playURI) }
             }
-            Button("Open") { app.navigator.go(to: route) }
+            Button(openTitle) { app.navigator.go(to: route) }
             if let playURI {
                 Divider()
                 Button("Copy Spotify Link") {
@@ -206,19 +205,25 @@ extension Tile {
     init(album: AlbumSummary, subtitle: String, size: CGFloat = 136) {
         self.init(
             title: album.name, subtitle: subtitle, images: album.images,
-            route: .album(id: album.id), playURI: album.uri, size: size)
+            route: .album(id: album.id), playURI: album.uri, openTitle: "Open Album", size: size)
     }
 
     init(album: Album) {
         self.init(
             title: album.name, subtitle: album.artists.names, images: album.images,
-            route: .album(id: album.id), playURI: album.uri)
+            route: .album(id: album.id), playURI: album.uri, openTitle: "Open Album")
     }
 
-    init(artist: Artist) {
+    init(artist: Artist, subtitle: String = "", size: CGFloat = 136) {
         self.init(
-            title: artist.name, images: artist.images,
-            route: .artist(id: artist.id), playURI: artist.uri)
+            title: artist.name, subtitle: subtitle, images: artist.images,
+            route: .artist(id: artist.id), playURI: artist.uri, openTitle: "Open Artist", size: size)
+    }
+
+    init(playlist: Playlist, size: CGFloat = 136) {
+        self.init(
+            title: playlist.name, subtitle: playlist.owner.display_name ?? "Spotify", images: playlist.images,
+            route: .playlist(id: playlist.id), playURI: playlist.uri, openTitle: "Open Playlist", size: size)
     }
 }
 

@@ -1,4 +1,3 @@
-import AppKit
 import NanyinKit
 import SwiftUI
 
@@ -6,7 +5,6 @@ import SwiftUI
 /// flush with the sidebar header above airy cover grids with green headings
 /// and metallic "More" pills, alongside Recently Played and Top Tracks.
 struct WhatsNewPage: View {
-    @Environment(AppModel.self) private var app
     @Environment(\.appearsActive) private var appearsActive
     let model: WhatsNewModel
 
@@ -33,12 +31,15 @@ struct WhatsNewPage: View {
     }
 
     private var tabBar: some View {
-        MetalSubBar {
-            ForEach(WhatsNewModel.Tab.allCases, id: \.self) { tab in
+        let tabs = WhatsNewModel.Tab.allCases
+        return MetalSubBar {
+            ForEach(Array(tabs.enumerated()), id: \.element) { index, tab in
+                let nextSelected = index + 1 < tabs.count && model.tab == tabs[index + 1]
                 MetalTabButton(
                     title: tab.rawValue,
                     isSelected: model.tab == tab,
-                    isFirst: tab == WhatsNewModel.Tab.allCases.first,
+                    isFirst: index == 0,
+                    hideTrailingDivider: nextSelected,
                     activeWindow: appearsActive
                 ) {
                     model.selectTab(tab)
@@ -122,60 +123,20 @@ struct WhatsNewPage: View {
     @ViewBuilder private func sectionView(for section: SectionID, layout: GridMetrics) -> some View {
         switch section {
         case .newReleases:
-            coverSection(
-                id: .newReleases,
-                title: "New Releases",
-                items: model.newReleases,
-                collapsedRows: 2,
-                layout: layout
-            ) { album in
-                WhatsNewTile(
-                    title: album.name,
-                    subtitle: releaseSubtitle(album),
-                    images: album.images,
-                    size: layout.tileSize,
-                    onOpen: { app.navigator.go(to: .album(id: album.id)) },
-                    onPlay: { app.player.play(contextURI: album.uri) }
-                )
-                .contextMenu { tileMenu(uri: album.uri, openTitle: "Open Album", route: .album(id: album.id)) }
+            coverSection(id: .newReleases, title: "New Releases", items: model.newReleases, collapsedRows: 2, layout: layout) {
+                Tile(album: $0, subtitle: releaseSubtitle($0), size: layout.tileSize)
             }
         case .madeForYou:
-            coverSection(
-                id: .madeForYou,
-                title: "Made for You",
-                items: model.madeForYou,
-                collapsedRows: 1,
-                layout: layout
-            ) { playlist in
-                playlistTile(playlist, size: layout.tileSize)
+            coverSection(id: .madeForYou, title: "Made for You", items: model.madeForYou, collapsedRows: 1, layout: layout) {
+                Tile(playlist: $0, size: layout.tileSize)
             }
         case .topMixes:
-            coverSection(
-                id: .topMixes,
-                title: "Your Top Mixes",
-                items: model.topMixes,
-                collapsedRows: 1,
-                layout: layout
-            ) { playlist in
-                playlistTile(playlist, size: layout.tileSize)
+            coverSection(id: .topMixes, title: "Your Top Mixes", items: model.topMixes, collapsedRows: 1, layout: layout) {
+                Tile(playlist: $0, size: layout.tileSize)
             }
         case .topArtists:
-            coverSection(
-                id: .topArtists,
-                title: "Top Artists",
-                items: model.topArtists,
-                collapsedRows: 1,
-                layout: layout
-            ) { artist in
-                WhatsNewTile(
-                    title: artist.name,
-                    subtitle: "Artist",
-                    images: artist.images,
-                    size: layout.tileSize,
-                    onOpen: { app.navigator.go(to: .artist(id: artist.id)) },
-                    onPlay: { app.player.play(contextURI: artist.uri) }
-                )
-                .contextMenu { tileMenu(uri: artist.uri, openTitle: "Open Artist", route: .artist(id: artist.id)) }
+            coverSection(id: .topArtists, title: "Top Artists", items: model.topArtists, collapsedRows: 1, layout: layout) {
+                Tile(artist: $0, subtitle: "Artist", size: layout.tileSize)
             }
         }
     }
@@ -224,28 +185,6 @@ struct WhatsNewPage: View {
         }
     }
 
-    private func playlistTile(_ playlist: Playlist, size: CGFloat) -> some View {
-        WhatsNewTile(
-            title: playlist.name,
-            subtitle: playlist.owner.display_name ?? "Spotify",
-            images: playlist.images,
-            size: size,
-            onOpen: { app.navigator.go(to: .playlist(id: playlist.id)) },
-            onPlay: { app.player.play(contextURI: playlist.uri) }
-        )
-        .contextMenu { tileMenu(uri: playlist.uri, openTitle: "Open Playlist", route: .playlist(id: playlist.id)) }
-    }
-
-    @ViewBuilder private func tileMenu(uri: String, openTitle: String, route: Route) -> some View {
-        Button("Play") { app.player.play(contextURI: uri) }
-        Button(openTitle) { app.navigator.go(to: route) }
-        Divider()
-        Button("Copy Spotify Link") {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(Route.webLink(for: uri), forType: .string)
-        }
-    }
-
     @ViewBuilder private func trackTable(_ list: TrackList?, empty: String) -> some View {
         if let list {
             let pages = list.pages
@@ -286,70 +225,13 @@ private struct GridMetrics {
     }
 }
 
-/// A framed cover tile for What's New: opens on click, with a subtle retro
-/// play badge on hover so a release or mix can start in one click.
-private struct WhatsNewTile: View {
-    let title: String
-    let subtitle: String
-    let images: [SpotifyImage]?
-    let size: CGFloat
-    let onOpen: () -> Void
-    let onPlay: () -> Void
-
-    @State private var hovering = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            ZStack(alignment: .bottomTrailing) {
-                Button(action: onOpen) {
-                    CoverImage(url: images?.best(minimum: 260), size: size)
-                }
-                .buttonStyle(.plain)
-
-                if hovering {
-                    Button(action: onPlay) {
-                        Image(systemName: "play.fill")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(Theme.artworkButtonGlyph)
-                            .offset(x: 1)
-                            .frame(width: 24, height: 24)
-                            .background(Theme.artworkButton, in: Circle())
-                            .overlay(Circle().strokeBorder(Theme.artworkButtonEdge, lineWidth: 0.75))
-                            .shadow(color: .black.opacity(0.6), radius: 2, y: 1)
-                    }
-                    .buttonStyle(.plain)
-                    .padding(6)
-                    .help("Play")
-                    .transition(.opacity)
-                }
-            }
-            .animation(.easeOut(duration: 0.12), value: hovering)
-            Button(action: onOpen) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(AquaFont.bold(12))
-                        .foregroundStyle(Theme.text)
-                    Text(subtitle)
-                        .font(AquaFont.regular(11))
-                        .foregroundStyle(Theme.secondaryText)
-                }
-                .lineLimit(1)
-                .frame(width: size, alignment: .leading)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-        }
-        .frame(width: size, alignment: .leading)
-        .onHover { hovering = $0 }
-    }
-}
-
 /// A 2010 Spotify-style brushed-metal tab: when active, drops seamlessly into
 /// the dark charcoal content below; when inactive, sits in the light metal bar.
 private struct MetalTabButton: View {
     let title: String
     let isSelected: Bool
     let isFirst: Bool
+    let hideTrailingDivider: Bool
     let activeWindow: Bool
     let action: () -> Void
 
@@ -377,7 +259,7 @@ private struct MetalTabButton: View {
                     .frame(height: Theme.subBarHeight)
                 if isSelected {
                     Rectangle().fill(Theme.divider).frame(width: 1)
-                } else {
+                } else if !hideTrailingDivider {
                     MetalSubBarDivider()
                         .padding(.bottom, 1)
                 }

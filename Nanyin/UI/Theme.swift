@@ -21,6 +21,8 @@ enum Theme {
     // Accent
     static let nsGreen = ns(0x84BD00)
     static let green = Color(nsColor: nsGreen)
+    /// Darkened green legible on light brushed metal (e.g. "Play Here" link).
+    static let metalGreen = hex(0x3B6600)
     /// A starred song's star.
     static let nsStar = ns(0xF2C230)
     static let star = Color(nsColor: nsStar)
@@ -92,7 +94,7 @@ enum Theme {
     static let vinylLabel = hex(0x3E3E3E)
     static let vinylSpindle = hex(0x222222)
 
-    // Graphite (player bar, pane and column headers)
+    // Graphite (pane action bars and column headers)
     static let nsGraphiteTop = ns(0x585858)
     static let nsGraphiteBottom = ns(0x363636)
     static let nsGraphiteEdge = ns(0x1C1C1C)

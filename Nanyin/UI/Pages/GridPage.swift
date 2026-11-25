@@ -7,7 +7,7 @@ struct GridPage<Item: Identifiable & Sendable, Cursor: Sendable, Cell: View>: Vi
     @ViewBuilder let cell: (Item) -> Cell
 
     var body: some View {
-        let detail = pager.total.map { $0 == 1 ? "1 item" : "\($0)" } ?? ""
+        let detail = pager.total.map(String.init) ?? ""
         let status = pager.error ?? (pager.isLoading && pager.items.isEmpty ? "Loading…" : detail)
         VStack(spacing: 0) {
             MetalSubBar {

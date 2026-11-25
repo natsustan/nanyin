@@ -200,23 +200,7 @@ private struct EditPlaylistSheet: View {
                     Text("Description")
                         .font(AquaFont.bold(11))
                         .foregroundStyle(Theme.secondaryText)
-                    let shape = RoundedRectangle(cornerRadius: 4)
-                    TextField("Optional description", text: $description, axis: .vertical)
-                        .textFieldStyle(.plain)
-                        .font(AquaFont.regular(12))
-                        .foregroundStyle(.black)
-                        .lineLimit(3 ... 5)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 6)
-                        .background(shape.fill(.white))
-                        .overlay {
-                            shape.stroke(.black.opacity(0.32), lineWidth: 2)
-                                .blur(radius: 1)
-                                .offset(y: 1)
-                                .clipShape(shape)
-                        }
-                        .overlay(shape.strokeBorder(Theme.hex(0x5A5A5A), lineWidth: 1))
-                        .environment(\.colorScheme, .light)
+                    AquaTextField(text: $description, prompt: "Optional description", lineLimit: 3 ... 5)
                 }
                 Spacer(minLength: 0)
             }

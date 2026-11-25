@@ -200,23 +200,6 @@ extension FilterableTrackList where ExtraControls == EmptyView {
     }
 }
 
-/// A page header that reports a pager's loading and failure, with a way to
-/// try again.
-struct PagerHeader<Item: Sendable, Cursor: Sendable>: View {
-    let title: String
-    let pager: Pager<Item, Cursor>
-    var detail = ""
-
-    var body: some View {
-        let status = pager.error ?? (pager.isLoading && pager.items.isEmpty ? "Loading…" : detail)
-        PageHeader(title: title, subtitle: status) {
-            if pager.error != nil {
-                Button("Try Again", action: pager.retry).buttonStyle(TexturedButtonStyle())
-            }
-        }
-    }
-}
-
 /// A track table bound to a `TrackList`, playing rows within its context.
 struct TrackListTable: View {
     @Environment(AppModel.self) private var app

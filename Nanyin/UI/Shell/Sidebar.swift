@@ -517,7 +517,7 @@ private struct NowPlayingCover: View {
                                     Button("Play Here") { app.connect.transferToThisMac() }
                                         .buttonStyle(.link)
                                         .font(AquaFont.bold(10.5))
-                                        .foregroundStyle(Theme.hex(0x3B6600))
+                                        .foregroundStyle(Theme.metalGreen)
                                 }
                             }
                         } else {

@@ -423,21 +423,26 @@ struct MetalPillButtonStyle: ButtonStyle {
 }
 
 /// Rectangular Aqua text input (white inset field with focus halo), for forms
-/// like sign-in and proxy settings rather than the toolbar search capsule.
+/// like sign-in, proxy settings, and playlist details.
 struct AquaTextField: View {
     @Binding var text: String
     var prompt: String
     var isSecure = false
     var monospaced = false
+    var lineLimit: ClosedRange<Int>? = nil
     var onSubmit: () -> Void = {}
     @FocusState private var focused: Bool
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: 4)
-        HStack(spacing: 4) {
+        let isMultiline = lineLimit != nil
+        HStack(alignment: isMultiline ? .top : .center, spacing: 4) {
             Group {
                 if isSecure {
                     SecureField(prompt, text: $text)
+                } else if let lineLimit {
+                    TextField(prompt, text: $text, axis: .vertical)
+                        .lineLimit(lineLimit)
                 } else {
                     TextField(prompt, text: $text)
                 }
@@ -448,7 +453,7 @@ struct AquaTextField: View {
             .focused($focused)
             .onSubmit(onSubmit)
 
-            if !text.isEmpty {
+            if !text.isEmpty && !isMultiline {
                 Button {
                     text = ""
                 } label: {
@@ -460,7 +465,9 @@ struct AquaTextField: View {
             }
         }
         .padding(.horizontal, 8)
-        .frame(height: 26)
+        .padding(.vertical, isMultiline ? 6 : 0)
+        .frame(minHeight: 26)
+        .frame(height: isMultiline ? nil : 26)
         .background(shape.fill(.white))
         .overlay {
             shape.stroke(.black.opacity(0.32), lineWidth: 2)
