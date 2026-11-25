@@ -3,10 +3,7 @@
 
 use std::{
     path::PathBuf,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicU64, Ordering},
-    },
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -473,10 +470,25 @@ impl Deck {
         let mut events = self.player.get_player_event_channel();
         let route = self.route.clone();
         let now = self.now.clone();
-        let relink_gen = Arc::new(AtomicU64::new(0));
         tokio::spawn(async move {
             let mut pairer = RelinkPairer::default();
-            while let Some(event) = events.recv().await {
+            let mut relink_gen: u64 = 0;
+            let (relink_tx, mut relink_rx) =
+                tokio::sync::mpsc::unbounded_channel::<(u64, Track)>();
+            loop {
+                let event = tokio::select! {
+                    biased;
+                    maybe_event = events.recv() => match maybe_event {
+                        Some(event) => event,
+                        None => break,
+                    },
+                    Some((generation, track)) = relink_rx.recv() => {
+                        if generation == relink_gen {
+                            emit(Event::TrackChanged { track });
+                        }
+                        continue;
+                    }
+                };
                 now.lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner())
                     .note(&event);
@@ -513,7 +525,7 @@ impl Deck {
                 };
                 match event {
                     PlayerEvent::TrackChanged { audio_item } => {
-                        relink_gen.fetch_add(1, Ordering::SeqCst);
+                        relink_gen = relink_gen.wrapping_add(1);
                         if let Some(track) = pairer.on_track_changed(Track::from_item(&audio_item))
                         {
                             emit(Event::TrackChanged { track });
@@ -533,12 +545,13 @@ impl Deck {
                                 provisional,
                             }) => {
                                 emit(Event::TrackChanged { track: provisional });
+                                relink_gen = relink_gen.wrapping_add(1);
                                 spawn_relink_lookup(
                                     reads,
                                     context_uri,
                                     playable,
-                                    &relink_gen,
-                                    emit.clone(),
+                                    relink_gen,
+                                    relink_tx.clone(),
                                 );
                             }
                             None => {}
@@ -549,7 +562,7 @@ impl Deck {
                     | PlayerEvent::Unavailable { .. }
                     | PlayerEvent::EndOfTrack { .. }
                     | PlayerEvent::SessionDisconnected { .. } => {
-                        relink_gen.fetch_add(1, Ordering::SeqCst);
+                        relink_gen = relink_gen.wrapping_add(1);
                         if let Some(track) = pairer.flush() {
                             emit(Event::TrackChanged { track });
                         }
@@ -644,14 +657,14 @@ impl RelinkPairer {
 }
 
 /// Resolves the original track metadata for a relinked song when it was not
-/// already in `Reads`'s cache, guarded by `relink_gen` so a stale lookup can
-/// never overwrite a newer track.
+/// already in `Reads`'s cache and sends the result back to `forward_events`
+/// so generation checks and `TrackChanged` emissions stay strictly serialized.
 fn spawn_relink_lookup(
     reads: Arc<Reads>,
     context_uri: String,
     playable: Track,
-    relink_gen: &Arc<AtomicU64>,
-    emit: Emit,
+    generation: u64,
+    tx: tokio::sync::mpsc::UnboundedSender<(u64, Track)>,
 ) {
     let Ok(uri) = SpotifyUri::from_uri(&context_uri) else {
         return;
@@ -659,18 +672,12 @@ fn spawn_relink_lookup(
     if !matches!(uri, SpotifyUri::Track { .. }) {
         return;
     }
-    let generation = relink_gen.fetch_add(1, Ordering::SeqCst) + 1;
-    let relink_gen = relink_gen.clone();
     tokio::spawn(async move {
         let Ok(mut found) = reads.tracks(&[uri]).await else {
             return;
         };
-        if relink_gen.load(Ordering::SeqCst) == generation
-            && let Some(Some(original)) = found.pop()
-        {
-            emit(Event::TrackChanged {
-                track: Track::relinked_from(original, &playable),
-            });
+        if let Some(Some(original)) = found.pop() {
+            let _ = tx.send((generation, Track::relinked_from(original, &playable)));
         }
     });
 }
