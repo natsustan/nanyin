@@ -104,8 +104,12 @@ struct WhatsNewPage: View {
             .background(
                 GeometryReader { proxy in
                     Color.clear
-                        .onAppear { contentWidth = proxy.size.width }
-                        .onChange(of: proxy.size.width) { _, width in contentWidth = width }
+                        .onAppear {
+                            if proxy.size.width > 0 { contentWidth = proxy.size.width }
+                        }
+                        .onChange(of: proxy.size.width) { _, width in
+                            if width > 0 { contentWidth = width }
+                        }
                 }
             )
         }
@@ -206,22 +210,23 @@ struct WhatsNewPage: View {
 }
 
 /// Computes an even column count and cover size so collapsed rows fill the
-/// pane cleanly without orphan gaps or oversized covers.
+/// pane cleanly without orphan gaps, oversized covers, or horizontal clipping
+/// when the pane narrows (e.g. with Lyrics open).
 private struct GridMetrics {
     let columns: Int
     let tileSize: CGFloat
     let gap: CGFloat = 18
-    let padding: CGFloat = 22
+    let padding: CGFloat
 
     static func compute(width: CGFloat) -> GridMetrics {
         let gap: CGFloat = 18
-        let padding: CGFloat = 22
+        let padding: CGFloat = width < 320 ? 14 : 22
         let minTile: CGFloat = 136
         let maxTile: CGFloat = 172
-        let inner = max(320, width - padding * 2)
-        let columns = max(3, Int((inner + gap) / (minTile + gap)))
+        let inner = max(80, width - padding * 2)
+        let columns = max(1, Int((inner + gap) / (minTile + gap)))
         let rawTile = floor((inner - gap * CGFloat(columns - 1)) / CGFloat(columns))
-        return GridMetrics(columns: columns, tileSize: min(maxTile, max(108, rawTile)))
+        return GridMetrics(columns: columns, tileSize: min(maxTile, max(80, rawTile)), padding: padding)
     }
 }
 
