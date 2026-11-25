@@ -25,11 +25,23 @@ enum DemoContent {
             decode(#"{"id":"a1","name":"Harbour","uri":"spotify:album:a1","album_type":"album","artists":[{"name":"The Northern Lights"}],"release_date":"2026-10-16"}"#),
             decode(#"{"id":"a2","name":"Static Bloom","uri":"spotify:album:a2","album_type":"album","artists":[{"name":"Mira Kell"}],"release_date":"2026-10-10"}"#),
             decode(#"{"id":"a3","name":"Velvet Hours","uri":"spotify:album:a3","album_type":"single","artists":[{"name":"Oslo Dawn"}],"release_date":"2026-10-02"}"#),
+            decode(#"{"id":"a4","name":"Blue Afternoon","uri":"spotify:album:a4","album_type":"album","artists":[{"name":"Kingfisher Lane"}],"release_date":"2026-09-28"}"#),
+            decode(#"{"id":"a5","name":"Signal","uri":"spotify:album:a5","album_type":"album","artists":[{"name":"Bright Machines"}],"release_date":"2026-09-21"}"#),
+            decode(#"{"id":"a6","name":"Night Music","uri":"spotify:album:a6","album_type":"album","artists":[{"name":"Linnea Saar"}],"release_date":"2026-09-14"}"#),
+            decode(#"{"id":"a7","name":"Summer Radio","uri":"spotify:album:a7","album_type":"album","artists":[{"name":"Edward Grey"}],"release_date":"2026-09-09"}"#),
+            decode(#"{"id":"a8","name":"Love Attack!!!","uri":"spotify:album:a8","album_type":"album","artists":[{"name":"Empire Dogs"}],"release_date":"2026-09-03"}"#),
+            decode(#"{"id":"a9","name":"Paper Lanterns","uri":"spotify:album:a9","album_type":"single","artists":[{"name":"The Northern Lights"}],"release_date":"2026-08-26"}"#),
+            decode(#"{"id":"a10","name":"Quiet Harbour","uri":"spotify:album:a10","album_type":"album","artists":[{"name":"Nordic Drift"}],"release_date":"2026-08-19"}"#),
+            decode(#"{"id":"a11","name":"Silver Lining","uri":"spotify:album:a11","album_type":"album","artists":[{"name":"Klara Holm"}],"release_date":"2026-08-12"}"#),
+            decode(#"{"id":"a12","name":"Midnight Ferry","uri":"spotify:album:a12","album_type":"single","artists":[{"name":"Vesterbro"}],"release_date":"2026-08-04"}"#),
         ]
         let demoArtists: [Artist] = [
             decode(#"{"id":"ar1","name":"The Northern Lights","uri":"spotify:artist:ar1"}"#),
             decode(#"{"id":"ar2","name":"Mira Kell","uri":"spotify:artist:ar2"}"#),
             decode(#"{"id":"ar3","name":"Oslo Dawn","uri":"spotify:artist:ar3"}"#),
+            decode(#"{"id":"ar4","name":"Kingfisher Lane","uri":"spotify:artist:ar4"}"#),
+            decode(#"{"id":"ar5","name":"Bright Machines","uri":"spotify:artist:ar5"}"#),
+            decode(#"{"id":"ar6","name":"Linnea Saar","uri":"spotify:artist:ar6"}"#),
         ]
         let whatsNew = WhatsNewModel(
             newReleases: demoReleases,

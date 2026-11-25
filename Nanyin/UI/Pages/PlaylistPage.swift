@@ -189,23 +189,18 @@ private struct EditPlaylistSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             PageHeader(title: "Edit Playlist", subtitle: playlist.name)
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Name")
                         .font(AquaFont.bold(11))
                         .foregroundStyle(Theme.secondaryText)
-                    TextField("Playlist name", text: $name)
-                        .textFieldStyle(.roundedBorder)
-                        .font(AquaFont.regular(12))
+                    AquaTextField(text: $name, prompt: "Playlist name")
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Description")
                         .font(AquaFont.bold(11))
                         .foregroundStyle(Theme.secondaryText)
-                    TextField("Optional description", text: $description, axis: .vertical)
-                        .textFieldStyle(.roundedBorder)
-                        .font(AquaFont.regular(12))
-                        .lineLimit(3 ... 5)
+                    AquaTextField(text: $description, prompt: "Optional description", lineLimit: 3 ... 5)
                 }
                 Spacer(minLength: 0)
             }

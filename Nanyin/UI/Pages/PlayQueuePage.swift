@@ -9,11 +9,17 @@ struct PlayQueuePage: View {
         let player = app.player
         let upNext = player.upNext
         VStack(spacing: 0) {
-            PageHeader(title: "Play Queue", subtitle: subtitle) {
+            MetalSubBar {
+                MetalSubBarTitle(title: "Play Queue", detail: subtitle)
+                Spacer(minLength: 8)
                 if player.hasManualQueue && !player.playingElsewhere {
-                    Button("Clear Queue") { player.clearQueue() }
-                        .buttonStyle(TexturedButtonStyle())
-                        .help("Remove manually added songs from the queue")
+                    MetalSubBarDivider()
+                    Button { player.clearQueue() } label: {
+                        Text("Clear Queue")
+                            .font(AquaFont.bold(11))
+                    }
+                    .buttonStyle(MetalSubBarButtonStyle(width: nil))
+                    .help("Remove manually added songs from the queue")
                 }
             }
 

@@ -1,9 +1,10 @@
 import NanyinKit
 import SwiftUI
 
-/// The graphite transport bar along the bottom of the window.
+/// The Snow Leopard brushed-metal transport bar along the bottom of the window.
 struct PlayerBar: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.appearsActive) private var appearsActive
     @State private var showDevices = false
     static let height: CGFloat = 46
 
@@ -25,22 +26,22 @@ struct PlayerBar: View {
             ProgressScrubber()
             HStack(spacing: 2) {
                 Button(action: player.toggleShuffle) { Image(systemName: "shuffle") }
-                    .buttonStyle(GraphiteToggleStyle(isOn: player.shuffle))
+                    .buttonStyle(MetalBarToggleStyle(isOn: player.shuffle))
                     .help("Shuffle")
                 Button(action: player.cycleRepeat) {
                     Image(systemName: player.repeatMode == .track ? "repeat.1" : "repeat")
                 }
-                .buttonStyle(GraphiteToggleStyle(isOn: player.repeatMode != .off))
+                .buttonStyle(MetalBarToggleStyle(isOn: player.repeatMode != .off))
                 .help("Repeat")
                 Button { app.showLyrics.toggle() } label: {
-                    Image(systemName: "quote.bubble")
+                    Image(systemName: "quote.bubble.fill")
                 }
-                .buttonStyle(GraphiteToggleStyle(isOn: app.showLyrics))
+                .buttonStyle(MetalBarToggleStyle(isOn: app.showLyrics))
                 .help(app.showLyrics ? "Hide Lyrics" : "Show Lyrics")
                 Button { showDevices.toggle() } label: {
-                    Image(systemName: "hifispeaker.2")
+                    Image(systemName: "hifispeaker.2.fill")
                 }
-                .buttonStyle(GraphiteToggleStyle(isOn: player.playingElsewhere || showDevices))
+                .buttonStyle(MetalBarToggleStyle(isOn: player.playingElsewhere || showDevices))
                 .help("Connect to a Device")
                 .popover(isPresented: $showDevices, arrowEdge: .top) {
                     ConnectDevicesPopover(isPresented: $showDevices)
@@ -49,10 +50,10 @@ struct PlayerBar: View {
         }
         .padding(.horizontal, 12)
         .frame(height: Self.height)
-        .background(Theme.graphite)
-        .hairline(.top, Theme.graphiteHighlight)
+        .background(Theme.playerBar(active: appearsActive))
+        .hairline(.top, Theme.playerBarHighlight)
         .padding(.top, 1)
-        .hairline(.top, Theme.graphiteEdge)
+        .hairline(.top, Theme.playerBarEdge)
     }
 }
 
@@ -113,20 +114,22 @@ private struct PositionSchedule: TimelineSchedule {
 }
 
 private struct TimeLabel: View {
+    @Environment(\.appearsActive) private var appearsActive
     let ms: Int
 
     var body: some View {
         Text(TrackRow.format(ms: ms))
             .font(AquaFont.regular(11))
             .monospacedDigit()
-            .foregroundStyle(Theme.hex(0xD6D6D6))
-            .engraved()
+            .foregroundStyle(Theme.metalText.opacity(appearsActive ? 0.9 : 0.55))
+            .embossed()
             .frame(width: 38)
     }
 }
 
 private struct VolumeSlider: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.appearsActive) private var appearsActive
 
     var body: some View {
         let player = app.player
@@ -134,9 +137,13 @@ private struct VolumeSlider: View {
         HStack(spacing: 4) {
             Button(action: player.toggleMute) {
                 Image(systemName: speakerSymbol(muted: player.isMuted, fraction: fraction))
-                    .font(.system(size: 10))
-                    .foregroundStyle(player.isMuted ? Theme.secondaryText : Theme.hex(0xC8C8C8))
-                    .frame(width: 14, height: 14)
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(
+                        (player.isMuted ? Theme.metalSecondaryText : Theme.metalText)
+                            .opacity(appearsActive ? 0.9 : 0.55)
+                    )
+                    .embossed()
+                    .frame(width: 15, height: 15)
             }
             .buttonStyle(.plain)
             .help(player.isMuted ? "Unmute" : "Mute")
@@ -162,11 +169,9 @@ private struct ConnectDevicesPopover: View {
     var body: some View {
         let connect = app.connect
         let session = app.session
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
+        VStack(alignment: .leading, spacing: 0) {
+            GraphiteHeader {
                 Text("Connect to a Device")
-                    .font(AquaFont.bold(12.5))
-                    .foregroundStyle(Theme.text)
                 Spacer()
                 if connect.isLoading {
                     ProgressView().controlSize(.mini)
@@ -174,62 +179,66 @@ private struct ConnectDevicesPopover: View {
                     Button { connect.refresh() } label: {
                         Image(systemName: "arrow.clockwise")
                             .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(Theme.secondaryText)
+                            .foregroundStyle(Theme.hex(0xD8D8D8))
                     }
                     .buttonStyle(.plain)
                     .help("Refresh Devices")
                 }
             }
 
-            Divider().overlay(Theme.divider)
-
-            if session.isReady {
-                deviceRow(
-                    title: session.localDeviceName,
-                    subtitle: connect.localIsActive ? "Playing on this Mac" : "This Mac · Click to play here",
-                    icon: "laptopcomputer",
-                    isActive: connect.localIsActive,
-                    disabled: connect.localIsActive || connect.isTransferring
-                ) {
-                    connect.transferToThisMac()
-                    isPresented = false
+            VStack(alignment: .leading, spacing: 0) {
+                if session.isReady {
+                    deviceRow(
+                        title: session.localDeviceName,
+                        subtitle: connect.localIsActive ? "Playing on this Mac" : "This Mac · Click to play here",
+                        icon: "laptopcomputer",
+                        index: 0,
+                        isActive: connect.localIsActive,
+                        disabled: connect.localIsActive || connect.isTransferring
+                    ) {
+                        connect.transferToThisMac()
+                        isPresented = false
+                    }
                 }
-            }
 
-            ForEach(connect.remoteDevices, id: \.stableID) { device in
-                deviceRow(
-                    title: device.name,
-                    subtitle: device.is_restricted
-                        ? "\(device.type) · Restricted"
-                        : device.is_active ? "Active" : device.type,
-                    icon: symbol(for: device.type),
-                    isActive: device.is_active,
-                    disabled: device.is_active || device.is_restricted || connect.isTransferring
-                ) {
-                    connect.transfer(to: device)
-                    isPresented = false
+                ForEach(Array(connect.remoteDevices.enumerated()), id: \.element.stableID) { offset, device in
+                    deviceRow(
+                        title: device.name,
+                        subtitle: device.is_restricted
+                            ? "\(device.type) · Restricted"
+                            : device.is_active ? "Active" : device.type,
+                        icon: symbol(for: device.type),
+                        index: offset + (session.isReady ? 1 : 0),
+                        isActive: device.is_active,
+                        disabled: device.is_active || device.is_restricted || connect.isTransferring
+                    ) {
+                        connect.transfer(to: device)
+                        isPresented = false
+                    }
                 }
-            }
 
-            if connect.needsResignInForDevices {
-                Text("Sign out and sign in again to list and control other Spotify Connect devices.")
-                    .font(AquaFont.regular(11))
-                    .foregroundStyle(Theme.secondaryText)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else if let error = connect.error {
-                Text(error)
-                    .font(AquaFont.regular(11))
-                    .foregroundStyle(Theme.hex(0xF08B7D))
-                    .fixedSize(horizontal: false, vertical: true)
-            } else if !connect.isLoading && connect.remoteDevices.isEmpty && !session.isReady {
-                Text("No active Spotify Connect devices found.")
-                    .font(AquaFont.regular(11.5))
-                    .foregroundStyle(Theme.secondaryText)
+                if connect.needsResignInForDevices {
+                    Text("Sign out and sign in again to list and control other Spotify Connect devices.")
+                        .font(AquaFont.regular(11))
+                        .foregroundStyle(Theme.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(10)
+                } else if let error = connect.error {
+                    Text(error)
+                        .font(AquaFont.regular(11))
+                        .foregroundStyle(Theme.hex(0xF08B7D))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(10)
+                } else if !connect.isLoading && connect.remoteDevices.isEmpty && !session.isReady {
+                    Text("No active Spotify Connect devices found.")
+                        .font(AquaFont.regular(11.5))
+                        .foregroundStyle(Theme.secondaryText)
+                        .padding(10)
+                }
             }
         }
-        .padding(12)
         .frame(width: 260)
-        .background(Theme.hex(0x2B2B2B))
+        .background(Theme.content)
         .preferredColorScheme(.dark)
         .onAppear { connect.refresh() }
     }
@@ -238,6 +247,7 @@ private struct ConnectDevicesPopover: View {
         title: String,
         subtitle: String,
         icon: String,
+        index: Int,
         isActive: Bool,
         disabled: Bool,
         action: @escaping () -> Void
@@ -245,7 +255,7 @@ private struct ConnectDevicesPopover: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Image(systemName: icon)
-                    .font(.system(size: 13))
+                    .font(.system(size: 12, weight: .semibold))
                     .frame(width: 18)
                     .foregroundStyle(isActive ? Theme.green : Theme.sidebarText)
                 VStack(alignment: .leading, spacing: 1) {
@@ -260,17 +270,15 @@ private struct ConnectDevicesPopover: View {
                 }
                 Spacer(minLength: 0)
                 if isActive {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 10, weight: .bold))
+                    Image(systemName: "speaker.wave.2.fill")
+                        .font(.system(size: 10))
                         .foregroundStyle(Theme.green)
                 }
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(
-                RoundedRectangle(cornerRadius: 5)
-                    .fill(isActive ? Theme.green.opacity(0.12) : Color.white.opacity(0.04))
-            )
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color(nsColor: Theme.row(index)))
+            .hairline(.bottom, Theme.divider)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -304,17 +312,21 @@ struct AquaTrack: View {
             let clamped = min(max(fraction, 0), 1)
             let groove = Capsule()
             ZStack(alignment: .leading) {
-                groove.fill(LinearGradient(colors: [Theme.hex(0x161616), Theme.hex(0x3A3A3A)], startPoint: .top, endPoint: .bottom))
+                groove.fill(.white.opacity(0.45))
                     .frame(height: 6)
-                    .overlay(groove.strokeBorder(.black.opacity(0.6), lineWidth: 0.5))
+                    .offset(y: 1)
+                groove.fill(LinearGradient(colors: [Theme.hex(0x2A2A2A), Theme.hex(0x4E4E4E)], startPoint: .top, endPoint: .bottom))
+                    .frame(height: 6)
+                    .overlay(groove.strokeBorder(.black.opacity(0.55), lineWidth: 0.75))
                 groove.fill(LinearGradient(colors: [Theme.hex(0xA6D82E), Theme.hex(0x6E9E00)], startPoint: .top, endPoint: .bottom))
                     .frame(width: max(6, width * clamped), height: 6)
+                    .overlay(groove.strokeBorder(Theme.hex(0x3D5900, 0.7), lineWidth: 0.5))
                     .opacity(clamped > 0 ? 1 : 0)
                 if knob {
                     Circle()
                         .fill(LinearGradient(colors: [Theme.hex(0xFAFAFA), Theme.hex(0xB5B5B5)], startPoint: .top, endPoint: .bottom))
-                        .overlay(Circle().strokeBorder(.black.opacity(0.65), lineWidth: 0.75))
-                        .shadow(color: .black.opacity(0.5), radius: 1, y: 1)
+                        .overlay(Circle().strokeBorder(.black.opacity(0.6), lineWidth: 0.75))
+                        .shadow(color: .black.opacity(0.45), radius: 1, y: 1)
                         .frame(width: 11, height: 11)
                         .offset(x: (width - 11) * clamped)
                 }

@@ -23,29 +23,25 @@ struct LyricsPanel: View {
     }
 
     private func header(track: CoreTrack?, state: LyricsModel.State) -> some View {
-        GraphiteHeader {
-            Text("Lyrics")
-            if case .loaded(let lyrics) = state {
-                Text("· \(lyrics.source)")
-                    .font(AquaFont.regular(11))
-                    .foregroundStyle(Theme.secondaryText)
-            }
-            Spacer()
+        let source: String = if case .loaded(let lyrics) = state { lyrics.source } else { "" }
+        return MetalSubBar {
+            MetalSubBarTitle(title: "Lyrics", detail: source)
+            Spacer(minLength: 4)
             if let track {
+                MetalSubBarDivider()
                 Button { app.lyrics.load(for: track, force: true) } label: {
                     Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(Theme.hex(0xC8C8C8))
+                        .font(.system(size: 10, weight: .bold))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(MetalSubBarButtonStyle(width: 24))
                 .help("Reload Lyrics")
             }
+            MetalSubBarDivider()
             Button { app.showLyrics = false } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(Theme.hex(0xC8C8C8))
+                    .font(.system(size: 9.5, weight: .bold))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(MetalSubBarButtonStyle(width: 24))
             .help("Close Lyrics")
         }
     }

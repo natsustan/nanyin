@@ -257,7 +257,7 @@ final class SearchResultsModel {
 @Observable
 final class WhatsNewModel {
     enum Tab: String, CaseIterable, Hashable {
-        case overview = "Overview"
+        case overview = "What's New"
         case recentlyPlayed = "Recently Played"
         case topTracks = "Top Tracks"
     }

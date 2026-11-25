@@ -116,11 +116,11 @@ struct FilterableTrackList<ExtraControls: View>: View {
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: isPlayingHere ? "pause.fill" : "play.fill")
-                        .font(.system(size: 9, weight: .bold))
+                        .font(.system(size: 8.5, weight: .bold))
                     Text(isPlayingHere ? "Pause" : "Play")
                 }
             }
-            .buttonStyle(TexturedButtonStyle())
+            .buttonStyle(GraphiteActionButtonStyle())
             .disabled(contextURI == nil || (!controlsCurrent && !canPlay))
 
             Button(action: player.toggleShuffle) {
@@ -133,13 +133,13 @@ struct FilterableTrackList<ExtraControls: View>: View {
 
             Spacer(minLength: 8)
 
-            AquaSearchField(text: $filter, prompt: "Filter")
+            DarkFilterField(text: $filter, prompt: "Filter")
                 .frame(width: 170)
 
             sortMenu
         }
-        .padding(.horizontal, 12)
-        .frame(height: 32)
+        .padding(.horizontal, 10)
+        .frame(height: 28)
         .background(Theme.graphite)
         .hairline(.top, Theme.graphiteHighlight)
         .hairline(.bottom, Theme.graphiteEdge)
@@ -161,10 +161,10 @@ struct FilterableTrackList<ExtraControls: View>: View {
             }
         } label: {
             Text(sort.buttonLabel(ascending: sortAscending))
-                .font(AquaFont.regular(11))
+                .font(AquaFont.bold(11))
         }
         .menuStyle(.button)
-        .buttonStyle(TexturedButtonStyle())
+        .buttonStyle(GraphiteActionButtonStyle())
         .fixedSize()
     }
 
@@ -197,23 +197,6 @@ extension FilterableTrackList where ExtraControls == EmptyView {
         columns: [TrackTable.Column] = TrackTable.Column.standard
     ) {
         self.init(list: list, contextURI: contextURI, columns: columns, extraControls: { EmptyView() })
-    }
-}
-
-/// A page header that reports a pager's loading and failure, with a way to
-/// try again.
-struct PagerHeader<Item: Sendable, Cursor: Sendable>: View {
-    let title: String
-    let pager: Pager<Item, Cursor>
-    var detail = ""
-
-    var body: some View {
-        let status = pager.error ?? (pager.isLoading && pager.items.isEmpty ? "Loading…" : detail)
-        PageHeader(title: title, subtitle: status) {
-            if pager.error != nil {
-                Button("Try Again", action: pager.retry).buttonStyle(TexturedButtonStyle())
-            }
-        }
     }
 }
 

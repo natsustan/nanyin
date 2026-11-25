@@ -21,9 +21,13 @@ enum Theme {
     // Accent
     static let nsGreen = ns(0x84BD00)
     static let green = Color(nsColor: nsGreen)
+    /// Darkened green legible on light brushed metal (e.g. "Play Here" link).
+    static let metalGreen = hex(0x3B6600)
     /// A starred song's star.
     static let nsStar = ns(0xF2C230)
     static let star = Color(nsColor: nsStar)
+    /// The Library house tint in the 2010 rsms sidebar.
+    static let sidebarLibraryTint = hex(0x76C4E8)
 
     // The small button laid over artwork
     static let artworkButton = hex(0x000000, 0.6)
@@ -32,6 +36,7 @@ enum Theme {
 
     // Metal (title bar, unified toolbar, buttons on it)
     static let metalText = hex(0x262626)
+    static let metalSecondaryText = hex(0x525252)
     static let metalEdge = hex(0x4E4E4E)
     static func metal(active: Bool) -> LinearGradient {
         LinearGradient(
@@ -39,7 +44,57 @@ enum Theme {
             startPoint: .top, endPoint: .bottom)
     }
 
-    // Graphite (player bar, pane and column headers)
+    // Sub-bar (the 24-pt brushed metal header shared by the sidebar, What's New tabs, and lyrics pane)
+    static let subBarHeight: CGFloat = 24
+    static let subBarDividerDark = hex(0x6E6E6E)
+    static let subBarDividerLight = hex(0xFFFFFF, 0.38)
+    static let subBarHighlight = hex(0xFFFFFF, 0.45)
+    static let subBarHover = hex(0xFFFFFF, 0.16)
+    static let subBarPressed = LinearGradient(
+        colors: [hex(0x888888), hex(0xA4A4A4)],
+        startPoint: .top, endPoint: .bottom)
+    static let subBarActiveTab = LinearGradient(
+        colors: [hex(0x323232), hex(0x2A2A2A)],
+        startPoint: .top, endPoint: .bottom)
+    static let subBarActiveTabHighlight = hex(0x3E3E3E)
+    static func subBar(active: Bool) -> LinearGradient {
+        LinearGradient(
+            colors: active ? [hex(0xC9C9C9), hex(0x9E9E9E)] : [hex(0xDEDEDE), hex(0xC6C6C6)],
+            startPoint: .top, endPoint: .bottom)
+    }
+
+    // Compact metallic pill button (e.g. "More" on dark charcoal pages)
+    static let pillTop = hex(0xEDEDED)
+    static let pillBottom = hex(0xBABABA)
+    static let pillPressedTop = hex(0x9E9E9E)
+    static let pillPressedBottom = hex(0xBDBDBD)
+    static let pillEdge = hex(0x161616)
+
+    // Etched horizontal grooves on charcoal surfaces
+    static let grooveDark = hex(0x1E1E1E)
+    static let grooveLight = hex(0xFFFFFF, 0.06)
+
+    // Sidebar source-list selection (2010 Spotify / Aqua cool ice-blue metal)
+    static let sidebarSelectionText = hex(0x1A2633)
+    static let sidebarSelectionEdgeTop = hex(0xFFFFFF, 0.45)
+    static let sidebarSelectionEdgeBottom = hex(0x1B2530, 0.75)
+    static func sidebarSelection(active: Bool) -> LinearGradient {
+        LinearGradient(
+            colors: active
+                ? [hex(0xC5D8EC), hex(0x98B5D4)]
+                : [hex(0x9A9FA5), hex(0x7E848A)],
+            startPoint: .top, endPoint: .bottom)
+    }
+
+    // Vinyl disc placeholder (rsms 2010 bottom-left record silhouette)
+    static let vinylBackground = hex(0x272727)
+    static let vinylDiscOuter = hex(0x363636)
+    static let vinylDiscInner = hex(0x2D2D2D)
+    static let vinylGroove = hex(0xFFFFFF, 0.05)
+    static let vinylLabel = hex(0x3E3E3E)
+    static let vinylSpindle = hex(0x222222)
+
+    // Graphite (pane action bars and column headers)
     static let nsGraphiteTop = ns(0x585858)
     static let nsGraphiteBottom = ns(0x363636)
     static let nsGraphiteEdge = ns(0x1C1C1C)
@@ -65,8 +120,18 @@ enum Theme {
     /// Zebra stripe colour of row `index`.
     static func row(_ index: Int) -> NSColor { nsRows[index & 1] }
 
-    static let nsSelectionTop = ns(0x767676)
-    static let nsSelectionBottom = ns(0x5C5C5C)
+    // Bottom player bar (Snow Leopard / 2010 Spotify brushed aluminum)
+    static let playerBarEdge = hex(0x464646)
+    static let playerBarHighlight = hex(0xFFFFFF, 0.55)
+    static func playerBar(active: Bool) -> LinearGradient {
+        LinearGradient(
+            colors: active ? [hex(0xCECECE), hex(0x9C9C9C)] : [hex(0xE4E4E4), hex(0xC9C9C9)],
+            startPoint: .top, endPoint: .bottom)
+    }
+
+    // Track table selection (2010 Snow Leopard / Spotify deep Aqua steel-blue)
+    static let nsSelectionTop = ns(0x4F7CB6)
+    static let nsSelectionBottom = ns(0x375E94)
     static let selection = LinearGradient(
         colors: [Color(nsColor: nsSelectionTop), Color(nsColor: nsSelectionBottom)], startPoint: .top, endPoint: .bottom)
 }

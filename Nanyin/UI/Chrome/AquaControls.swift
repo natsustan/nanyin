@@ -2,21 +2,36 @@ import SwiftUI
 
 /// The "textured rounded" button of Snow Leopard toolbars: a light metal
 /// gradient with a dark rim, pressed darker. Always drawn light, wherever
-/// it sits.
+/// it sits. Pass `segment` to join adjacent controls into one segmented pill.
 struct TexturedButtonStyle: ButtonStyle {
+    enum Segment {
+        case standalone, leading, middle, trailing
+
+        var radii: RectangleCornerRadii {
+            switch self {
+            case .standalone: .init(topLeading: 4, bottomLeading: 4, bottomTrailing: 4, topTrailing: 4)
+            case .leading: .init(topLeading: 4, bottomLeading: 4, bottomTrailing: 0, topTrailing: 0)
+            case .middle: .init(topLeading: 0, bottomLeading: 0, bottomTrailing: 0, topTrailing: 0)
+            case .trailing: .init(topLeading: 0, bottomLeading: 0, bottomTrailing: 4, topTrailing: 4)
+            }
+        }
+    }
+
     var width: CGFloat? = nil
+    var segment: Segment = .standalone
 
     func makeBody(configuration: Configuration) -> some View {
-        TexturedButtonBody(configuration: configuration, width: width)
+        TexturedButtonBody(configuration: configuration, width: width, segment: segment)
     }
 
     private struct TexturedButtonBody: View {
         let configuration: Configuration
         let width: CGFloat?
+        let segment: Segment
         @Environment(\.isEnabled) private var isEnabled
 
         var body: some View {
-            let shape = RoundedRectangle(cornerRadius: 4)
+            let shape = UnevenRoundedRectangle(cornerRadii: segment.radii, style: .continuous)
             configuration.label
                 .font(.system(size: 11, weight: .bold))
                 .foregroundStyle(Theme.hex(0x3A3A3A).opacity(isEnabled ? 1 : 0.35))
@@ -138,6 +153,123 @@ struct GraphiteToggleStyle: ButtonStyle {
     }
 }
 
+/// A toggle glyph sitting on the light brushed-metal player bar: embossed dark
+/// metal when off, recessed charcoal pill with glowing lime-green glyph when on.
+struct MetalBarToggleStyle: ButtonStyle {
+    var isOn: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        BodyView(configuration: configuration, isOn: isOn)
+    }
+
+    private struct BodyView: View {
+        let configuration: Configuration
+        let isOn: Bool
+        @Environment(\.appearsActive) private var appearsActive
+
+        var body: some View {
+            let pill = RoundedRectangle(cornerRadius: 4)
+            configuration.label
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundStyle(isOn ? Theme.green : Theme.metalText.opacity(appearsActive ? 0.88 : 0.55))
+                .shadow(
+                    color: isOn ? .black.opacity(0.65) : .white.opacity(0.55),
+                    radius: 0,
+                    y: isOn ? -1 : 1
+                )
+                .opacity(configuration.isPressed ? 0.65 : 1)
+                .frame(width: 26, height: 22)
+                .background {
+                    if isOn {
+                        pill.fill(LinearGradient(
+                            colors: [Theme.hex(0x3A3A3A), Theme.hex(0x4E4E4E)],
+                            startPoint: .top, endPoint: .bottom))
+                        .overlay(pill.strokeBorder(Theme.hex(0x282828), lineWidth: 1))
+                        .background(pill.fill(.white.opacity(0.35)).offset(y: 1))
+                    } else if configuration.isPressed {
+                        pill.fill(Theme.hex(0x000000, 0.12))
+                    }
+                }
+                .contentShape(Rectangle())
+        }
+    }
+}
+
+/// A recessed dark filter capsule for charcoal/graphite bars (so in-page
+/// filtering blends naturally without a glaring white box over dark chrome).
+struct DarkFilterField: View {
+    @Binding var text: String
+    var prompt = "Filter"
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        let shape = Capsule()
+        HStack(spacing: 4) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Theme.secondaryText)
+            TextField(prompt, text: $text)
+                .textFieldStyle(.plain)
+                .font(AquaFont.regular(11.5))
+                .foregroundStyle(Theme.text)
+                .focused($focused)
+            if !text.isEmpty {
+                Button { text = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(Theme.secondaryText)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 20)
+        .background(shape.fill(Theme.hex(0x222222)))
+        .overlay(shape.strokeBorder(focused ? Theme.green.opacity(0.85) : Theme.hex(0x141414), lineWidth: 1))
+        .background(shape.fill(.white.opacity(0.1)).offset(y: 1))
+    }
+}
+
+/// Compact graphite action button for dark in-page toolbars (Play, Sort).
+struct GraphiteActionButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        BodyView(configuration: configuration)
+    }
+
+    private struct BodyView: View {
+        let configuration: Configuration
+        @Environment(\.isEnabled) private var isEnabled
+
+        var body: some View {
+            let shape = RoundedRectangle(cornerRadius: 4)
+            configuration.label
+                .font(AquaFont.bold(11))
+                .foregroundStyle(Theme.text.opacity(isEnabled ? 1 : 0.4))
+                .engraved()
+                .frame(height: 20)
+                .padding(.horizontal, 9)
+                .background {
+                    shape.fill(LinearGradient(
+                        colors: configuration.isPressed
+                            ? [Theme.hex(0x2E2E2E), Theme.hex(0x3D3D3D)]
+                            : [Theme.hex(0x555555), Theme.hex(0x393939)],
+                        startPoint: .top, endPoint: .bottom))
+                }
+                .overlay(shape.strokeBorder(Theme.hex(0x1C1C1C), lineWidth: 1))
+                .overlay(alignment: .top) {
+                    if !configuration.isPressed {
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(.white.opacity(0.14))
+                            .frame(height: 1)
+                            .padding(.horizontal, 2)
+                            .padding(.top, 1)
+                    }
+                }
+                .contentShape(shape)
+        }
+    }
+}
+
 /// A pane header in the graphite gradient, like the column bar of a list.
 struct GraphiteHeader<Content: View>: View {
     @ViewBuilder var content: Content
@@ -156,22 +288,161 @@ struct GraphiteHeader<Content: View>: View {
     }
 }
 
+/// The shared 24-pt brushed-metal sub-bar spanning the top of the sidebar,
+/// top-level library pages, What's New tabs, and lyrics pane.
+struct MetalSubBar<Content: View>: View {
+    @Environment(\.appearsActive) private var appearsActive
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        HStack(spacing: 0) { content }
+            .frame(maxWidth: .infinity)
+            .frame(height: Theme.subBarHeight)
+            .background {
+                Theme.subBar(active: appearsActive)
+                    .hairline(.top, Theme.subBarHighlight)
+                    .hairline(.bottom, Theme.divider)
+            }
+    }
+}
+
+/// Vertical etched separator inside a 24-pt brushed-metal sub-bar.
+struct MetalSubBarDivider: View {
+    var body: some View {
+        HStack(spacing: 0) {
+            Rectangle().fill(Theme.subBarDividerDark).frame(width: 1)
+            Rectangle().fill(Theme.subBarDividerLight).frame(width: 1)
+        }
+    }
+}
+
+/// A title + optional muted detail inside a `MetalSubBar` (for Play Queue,
+/// Starred, Albums, Artists, Search).
+struct MetalSubBarTitle: View {
+    @Environment(\.appearsActive) private var appearsActive
+    let title: String
+    var detail = ""
+    var icon: String? = nil
+    var iconTint: Color? = nil
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if let icon {
+                Image(systemName: icon)
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle((iconTint ?? Theme.metalText).opacity(appearsActive ? 1 : 0.65))
+                    .shadow(color: .black.opacity(iconTint != nil ? 0.35 : 0), radius: 0, y: -0.5)
+                    .embossed()
+            }
+            Text(title)
+                .font(AquaFont.bold(12))
+                .foregroundStyle(Theme.metalText.opacity(appearsActive ? 1 : 0.65))
+                .embossed()
+                .lineLimit(1)
+            if !detail.isEmpty {
+                Text("· \(detail)")
+                    .font(AquaFont.regular(11))
+                    .foregroundStyle(Theme.metalSecondaryText.opacity(appearsActive ? 1 : 0.65))
+                    .embossed()
+                    .lineLimit(1)
+            }
+        }
+        .padding(.leading, 10)
+        .padding(.trailing, 8)
+    }
+}
+
+/// Subtle etched horizontal groove on charcoal surfaces (sidebar & What's New).
+struct EtchedDivider: View {
+    var body: some View {
+        VStack(spacing: 0) {
+            Rectangle().fill(Theme.grooveDark).frame(height: 1)
+            Rectangle().fill(Theme.grooveLight).frame(height: 1)
+        }
+    }
+}
+
+/// A flat brushed-metal button inside a 24-pt sub-bar (e.g. Sidebar `+`,
+/// What's New Refresh, Lyrics close), recessed darker while pressed.
+struct MetalSubBarButtonStyle: ButtonStyle {
+    var width: CGFloat? = 26
+
+    func makeBody(configuration: Configuration) -> some View {
+        BodyView(configuration: configuration, width: width)
+    }
+
+    private struct BodyView: View {
+        let configuration: Configuration
+        let width: CGFloat?
+        @Environment(\.isEnabled) private var isEnabled
+        @Environment(\.appearsActive) private var appearsActive
+        @State private var hovering = false
+
+        var body: some View {
+            configuration.label
+                .foregroundStyle(Theme.metalText.opacity(isEnabled ? (appearsActive ? 1 : 0.65) : 0.35))
+                .embossed()
+                .frame(width: width, height: Theme.subBarHeight)
+                .padding(.horizontal, width == nil ? 8 : 0)
+                .background {
+                    if configuration.isPressed {
+                        Theme.subBarPressed
+                    } else if hovering && isEnabled {
+                        Theme.subBarHover
+                    }
+                }
+                .contentShape(Rectangle())
+                .onHover { hovering = $0 }
+        }
+    }
+}
+
+/// A compact light-metal Aqua pill button on dark charcoal content
+/// (matching the 2010 "More" button on What's New).
+struct MetalPillButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        let shape = Capsule()
+        configuration.label
+            .font(AquaFont.bold(11))
+            .foregroundStyle(Theme.metalText)
+            .embossed()
+            .padding(.horizontal, 11)
+            .frame(height: 20)
+            .background {
+                shape.fill(LinearGradient(
+                    colors: configuration.isPressed
+                        ? [Theme.pillPressedTop, Theme.pillPressedBottom]
+                        : [Theme.pillTop, Theme.pillBottom],
+                    startPoint: .top, endPoint: .bottom))
+            }
+            .overlay(shape.strokeBorder(Theme.pillEdge, lineWidth: 1))
+            .shadow(color: .black.opacity(0.4), radius: 1, y: 1)
+            .contentShape(shape)
+            .environment(\.colorScheme, .light)
+    }
+}
+
 /// Rectangular Aqua text input (white inset field with focus halo), for forms
-/// like sign-in and proxy settings rather than the toolbar search capsule.
+/// like sign-in, proxy settings, and playlist details.
 struct AquaTextField: View {
     @Binding var text: String
     var prompt: String
     var isSecure = false
     var monospaced = false
+    var lineLimit: ClosedRange<Int>? = nil
     var onSubmit: () -> Void = {}
     @FocusState private var focused: Bool
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: 4)
-        HStack(spacing: 4) {
+        let isMultiline = lineLimit != nil
+        HStack(alignment: isMultiline ? .top : .center, spacing: 4) {
             Group {
                 if isSecure {
                     SecureField(prompt, text: $text)
+                } else if let lineLimit {
+                    TextField(prompt, text: $text, axis: .vertical)
+                        .lineLimit(lineLimit)
                 } else {
                     TextField(prompt, text: $text)
                 }
@@ -182,7 +453,7 @@ struct AquaTextField: View {
             .focused($focused)
             .onSubmit(onSubmit)
 
-            if !text.isEmpty {
+            if !text.isEmpty && !isMultiline {
                 Button {
                     text = ""
                 } label: {
@@ -194,7 +465,9 @@ struct AquaTextField: View {
             }
         }
         .padding(.horizontal, 8)
-        .frame(height: 26)
+        .padding(.vertical, isMultiline ? 6 : 0)
+        .frame(minHeight: 26)
+        .frame(height: isMultiline ? nil : 26)
         .background(shape.fill(.white))
         .overlay {
             shape.stroke(.black.opacity(0.32), lineWidth: 2)
