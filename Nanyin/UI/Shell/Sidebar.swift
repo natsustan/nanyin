@@ -31,14 +31,14 @@ struct Sidebar: View {
                                 go(item.route, false)
                             }
                         }
-                        SidebarLibraryHeader()
+                        EtchedDivider()
+                            .padding(.vertical, 6)
                         ForEach(Self.libraryItems, id: \.route) { item in
                             let itemPlaying = item.route == .likedSongs && starredURI != nil && activeContext == starredURI
                             SidebarRow(
                                 title: item.title,
                                 icon: item.icon,
                                 iconTint: item.tint,
-                                indent: 12,
                                 isSelected: current == item.route,
                                 isPlayingContext: itemPlaying,
                                 isPlaybackActive: isPlaying,
@@ -274,26 +274,6 @@ struct Sidebar: View {
     ]
 }
 
-/// The non-interactive "Library" parent row with the 2010 rsms sky-blue house
-/// icon, sitting above indented Starred / Albums / Artists rows.
-private struct SidebarLibraryHeader: View {
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "house.fill")
-                .font(.system(size: 11, weight: .semibold))
-                .frame(width: 14)
-                .foregroundStyle(Theme.sidebarLibraryTint)
-            Text("Library")
-                .font(AquaFont.regular(12))
-                .foregroundStyle(Theme.sidebarText)
-                .lineLimit(1)
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 10)
-        .frame(height: 22)
-    }
-}
-
 /// The 24-pt brushed-metal bar at the top of the sidebar (matching the 2010
 /// Spotify-for-Mac mockup): the listener's name as an account menu on the
 /// left, and a recessed square retro `+` button on the right to create a
@@ -416,7 +396,6 @@ private struct SidebarRow: View {
     let title: String
     let icon: String
     var iconTint: Color? = nil
-    var indent: CGFloat = 0
     let isSelected: Bool
     var isDropTargeted = false
     var isPlayingContext = false
@@ -446,8 +425,7 @@ private struct SidebarRow: View {
                     .foregroundStyle(isSelected ? selectedInk : Theme.green)
             }
         }
-        .padding(.leading, 10 + indent)
-        .padding(.trailing, 10)
+        .padding(.horizontal, 10)
         .frame(height: 22)
         .background {
             if isSelected {

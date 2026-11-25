@@ -26,8 +26,6 @@ enum Theme {
     /// A starred song's star.
     static let nsStar = ns(0xF2C230)
     static let star = Color(nsColor: nsStar)
-    /// The Library house tint in the 2010 rsms sidebar.
-    static let sidebarLibraryTint = hex(0x76C4E8)
 
     // The small button laid over artwork
     static let artworkButton = hex(0x000000, 0.6)
