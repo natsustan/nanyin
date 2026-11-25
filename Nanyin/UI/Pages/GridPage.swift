@@ -23,7 +23,7 @@ struct GridPage<Item: Identifiable & Sendable, Cursor: Sendable, Cell: View>: Vi
                 }
             }
             ScrollView {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 136), spacing: 18, alignment: .top)], spacing: 20) {
+                LazyVGrid(columns: CoverGridMetrics.adaptiveColumns, alignment: .leading, spacing: 20) {
                     ForEach(Array(pager.items.enumerated()), id: \.element.id) { index, item in
                         cell(item).onAppear { pager.appeared(index) }
                     }

@@ -6,7 +6,7 @@ import SwiftUI
 /// ticks stay local to this pane and stop completely while paused.
 struct LyricsPanel: View {
     @Environment(AppModel.self) private var app
-    static let width: CGFloat = 300
+    nonisolated static let width: CGFloat = 300
 
     var body: some View {
         let track = app.player.track
@@ -15,7 +15,7 @@ struct LyricsPanel: View {
             header(track: track, state: lyricsModel.state)
             content(track: track, state: lyricsModel.state)
         }
-        .frame(width: Self.width)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.hex(0x282828))
         .overlay(alignment: .leading) { Rectangle().fill(Theme.divider).frame(width: 1) }
         .onAppear { lyricsModel.load(for: track) }

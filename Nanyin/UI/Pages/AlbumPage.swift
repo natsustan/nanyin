@@ -43,6 +43,7 @@ struct AlbumPage: View {
 }
 
 /// A cover with a caption that opens a page, for grids and shelves.
+/// Expands to fill its grid column width with a square cover.
 struct Tile: View {
     @Environment(AppModel.self) private var app
     let title: String
@@ -51,14 +52,13 @@ struct Tile: View {
     let route: Route
     var playURI: String? = nil
     var openTitle = "Open"
-    var size: CGFloat = 136
     @State private var hovering = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             ZStack(alignment: .bottomTrailing) {
                 Button { app.navigator.go(to: route) } label: {
-                    CoverImage(url: images?.best(minimum: 260), size: size)
+                    CoverImage(url: images?.best(minimum: 260))
                 }
                 .buttonStyle(.plain)
                 if hovering, let playURI {
@@ -92,12 +92,12 @@ struct Tile: View {
                     }
                 }
                 .lineLimit(1)
-                .frame(width: size, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
         }
-        .frame(width: size, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .onHover { hovering = $0 }
         .contextMenu {
             if let playURI {
@@ -116,10 +116,10 @@ struct Tile: View {
 }
 
 extension Tile {
-    init(album: AlbumSummary, subtitle: String, size: CGFloat = 136) {
+    init(album: AlbumSummary, subtitle: String) {
         self.init(
             title: album.name, subtitle: subtitle, images: album.images,
-            route: .album(id: album.id), playURI: album.uri, openTitle: "Open Album", size: size)
+            route: .album(id: album.id), playURI: album.uri, openTitle: "Open Album")
     }
 
     init(album: Album) {
@@ -128,63 +128,74 @@ extension Tile {
             route: .album(id: album.id), playURI: album.uri, openTitle: "Open Album")
     }
 
-    init(artist: Artist, subtitle: String = "", size: CGFloat = 136) {
+    init(artist: Artist, subtitle: String = "") {
         self.init(
             title: artist.name, subtitle: subtitle, images: artist.images,
-            route: .artist(id: artist.id), playURI: artist.uri, openTitle: "Open Artist", size: size)
+            route: .artist(id: artist.id), playURI: artist.uri, openTitle: "Open Artist")
     }
 
-    init(playlist: Playlist, size: CGFloat = 136) {
+    init(playlist: Playlist) {
         self.init(
             title: playlist.name, subtitle: playlist.owner.display_name ?? "Spotify", images: playlist.images,
-            route: .playlist(id: playlist.id), playURI: playlist.uri, openTitle: "Open Playlist", size: size)
+            route: .playlist(id: playlist.id), playURI: playlist.uri, openTitle: "Open Playlist")
     }
 }
 
-/// Computes an even column count and cover size so cover grids fill the pane
-/// cleanly without orphan gaps or horizontal clipping when the pane narrows.
-struct CoverGridMetrics {
+/// Computes discrete column counts and horizontal padding for responsive cover
+/// grids. Uses `.flexible(minimum: 0)` columns so `LazyVGrid` scales smoothly
+/// during window resize and never locks a pane's minimum width.
+struct CoverGridMetrics: Equatable {
+    static let gap: CGFloat = 18
+    static let minTile: CGFloat = 136
+    static let maxTile: CGFloat = 172
+
     let columns: Int
-    let tileSize: CGFloat
-    let gap: CGFloat = 18
     let padding: CGFloat
 
     var gridColumns: [GridItem] {
-        Array(repeating: GridItem(.fixed(tileSize), spacing: gap, alignment: .top), count: columns)
+        Array(repeating: GridItem(.flexible(minimum: 0, maximum: Self.maxTile), spacing: Self.gap, alignment: .top), count: columns)
+    }
+
+    static var adaptiveColumns: [GridItem] {
+        [GridItem(.adaptive(minimum: minTile, maximum: maxTile), spacing: gap, alignment: .top)]
     }
 
     static func compute(width: CGFloat) -> CoverGridMetrics {
-        let gap: CGFloat = 18
         let padding: CGFloat = width < 320 ? 14 : 22
-        let minTile: CGFloat = 136
-        let maxTile: CGFloat = 172
         let inner = max(80, width - padding * 2)
         let columns = max(1, Int((inner + gap) / (minTile + gap)))
-        let rawTile = floor((inner - gap * CGFloat(columns - 1)) / CGFloat(columns))
-        return CoverGridMetrics(columns: columns, tileSize: min(maxTile, max(80, rawTile)), padding: padding)
+        return CoverGridMetrics(columns: columns, padding: padding)
     }
 }
 
 /// Album art with a thin dark frame and subtle inner highlight, the way the
-/// 2010 client framed covers.
+/// 2010 client framed covers. Pass `size` for fixed headers/thumbnails, or omit
+/// it to fill the surrounding grid column as a 1:1 square.
 struct CoverImage: View {
     let url: URL?
-    let size: CGFloat
+    var size: CGFloat? = nil
     var fallbackSymbol: String?
 
     var body: some View {
-        ZStack {
-            Artwork(url: url, placeholder: Theme.vinylBackground) {
-                if let fallbackSymbol {
-                    Image(systemName: fallbackSymbol)
-                        .font(.system(size: size * 0.32, weight: .light))
-                        .foregroundStyle(Theme.secondaryText.opacity(0.45))
-                } else {
-                    VinylPlaceholder(insetRatio: 0.14)
-                }
+        let art = Artwork(url: url, placeholder: Theme.vinylBackground) {
+            if let fallbackSymbol {
+                Image(systemName: fallbackSymbol)
+                    .font(.system(size: (size ?? 140) * 0.32, weight: .light))
+                    .foregroundStyle(Theme.secondaryText.opacity(0.45))
+            } else {
+                VinylPlaceholder(insetRatio: 0.14)
             }
         }
-        .frame(width: size, height: size)
+        Group {
+            if let size {
+                ZStack { art }
+                    .frame(width: size, height: size)
+            } else {
+                Color.clear
+                    .aspectRatio(1, contentMode: .fit)
+                    .overlay { art }
+            }
+        }
         .clipped()
         .overlay(Rectangle().strokeBorder(.white.opacity(0.08), lineWidth: 1).padding(1))
         .overlay(Rectangle().strokeBorder(.black.opacity(0.65), lineWidth: 1))

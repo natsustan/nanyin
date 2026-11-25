@@ -7,16 +7,27 @@ struct MainWindow: View {
         VStack(spacing: 0) {
             MainToolbar()
             if app.showsLibrary {
-                HStack(spacing: 0) {
+                ThreePaneLayout(preferredSidebar: sidebarWidth) {
                     Sidebar()
-                        .frame(width: sidebarWidth)
-                    SidebarDivider(width: $sidebarWidth) { savedSidebarWidth = sidebarWidth }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .clipped()
+                    SidebarDivider(
+                        width: $sidebarWidth,
+                        showsLyrics: app.showLyrics,
+                        shellMetrics: shellMetrics
+                    ) { savedSidebarWidth = sidebarWidth }
+                        .zIndex(1)
                     RouteView(route: app.navigator.current)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .background(Theme.content)
+                        .clipped()
                     if app.showLyrics {
                         LyricsPanel()
+                            .clipped()
                     }
+                }
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
+                    shellMetrics.width = width
                 }
                 PlaybackNotice()
                 PlayerBar()
@@ -36,13 +47,94 @@ struct MainWindow: View {
     /// Live while dragging; saved when the drag ends.
     @State private var sidebarWidth = UserDefaults.standard.object(forKey: "SidebarWidth") as? Double ?? 200
     @AppStorage("SidebarWidth") private var savedSidebarWidth = 200.0
+    @State private var shellMetrics = ShellMetrics()
     @State private var spaceKey = SpaceKeyMonitor()
+}
+
+/// Non-observed width holder so `SidebarDivider` can clamp against the current
+/// window width during drags without invalidating `MainWindow` on every resize pixel.
+@MainActor
+private final class ShellMetrics {
+    var width: CGFloat = 1100
+}
+
+/// Strictly parent-driven three-pane shell (sidebar, 1-pt divider, main page,
+/// optional lyrics pane). Never lets wide page content push sibling panes off
+/// screen, and dynamically clamps side panes in narrow windows while keeping
+/// the listener's saved sidebar width intact.
+private struct ThreePaneLayout: Layout {
+    static let minSidebar: CGFloat = 150
+    static let maxSidebar: CGFloat = 360
+    static let dividerWidth: CGFloat = 1
+    static let minContent: CGFloat = 360
+    static let preferredLyrics: CGFloat = LyricsPanel.width
+    static let minLyrics: CGFloat = 240
+
+    let preferredSidebar: CGFloat
+
+    struct Allocation: Equatable {
+        let sidebar: CGFloat
+        let content: CGFloat
+        let lyrics: CGFloat
+    }
+
+    static func maxSidebarWidth(total: CGFloat, showsLyrics: Bool) -> CGFloat {
+        let available = max(0, total - dividerWidth)
+        let reservedLyrics = showsLyrics ? minLyrics : 0
+        return min(maxSidebar, max(minSidebar, available - minContent - reservedLyrics))
+    }
+
+    static func allocate(total: CGFloat, preferredSidebar: CGFloat, showsLyrics: Bool) -> Allocation {
+        let available = max(0, total - dividerWidth)
+        let desiredSidebar = min(max(preferredSidebar, minSidebar), maxSidebar)
+
+        guard showsLyrics else {
+            let sidebar = min(desiredSidebar, maxSidebarWidth(total: total, showsLyrics: false), available)
+            return Allocation(sidebar: sidebar, content: max(0, available - sidebar), lyrics: 0)
+        }
+
+        let sideBudget = max(0, available - minContent)
+        guard sideBudget >= minSidebar + minLyrics else {
+            let sidebar = min(minSidebar, floor(available * 0.25))
+            let lyrics = min(minLyrics, floor(available * 0.30))
+            return Allocation(sidebar: sidebar, content: max(0, available - sidebar - lyrics), lyrics: lyrics)
+        }
+
+        // Preserve the user's chosen sidebar width up to `maxSidebarWidth`:
+        // narrow lyrics toward its floor first, then clamp the sidebar.
+        let lyrics = min(preferredLyrics, max(minLyrics, sideBudget - desiredSidebar))
+        let sidebar = min(desiredSidebar, max(minSidebar, sideBudget - lyrics))
+        return Allocation(sidebar: sidebar, content: max(0, available - sidebar - lyrics), lyrics: lyrics)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        proposal.replacingUnspecifiedDimensions(by: CGSize(width: 1100, height: 700))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard subviews.count >= 3 else { return }
+        let hasLyrics = subviews.count >= 4
+        let widths = Self.allocate(total: bounds.width, preferredSidebar: preferredSidebar, showsLyrics: hasLyrics)
+
+        let slotWidths = [widths.sidebar, Self.dividerWidth, widths.content] + (hasLyrics ? [widths.lyrics] : [])
+        var x = bounds.minX
+        for (subview, width) in zip(subviews, slotWidths) {
+            subview.place(
+                at: CGPoint(x: x, y: bounds.minY),
+                anchor: .topLeading,
+                proposal: ProposedViewSize(width: width, height: bounds.height)
+            )
+            x += width
+        }
+    }
 }
 
 /// The 1-pt line between the sidebar and the page, draggable to resize the
 /// sidebar as the 2010 client's was.
 private struct SidebarDivider: View {
     @Binding var width: Double
+    let showsLyrics: Bool
+    let shellMetrics: ShellMetrics
     let onEnd: () -> Void
     @State private var start: Double?
 
@@ -54,12 +146,25 @@ private struct SidebarDivider: View {
                 Color.clear
                     .frame(width: 7)
                     .contentShape(Rectangle())
-                    .columnResizePointer()
+                    .pointerStyle(.columnResize)
                     .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
                         .onChanged { drag in
-                            let origin = start ?? width
-                            start = origin
-                            width = min(max(origin + drag.translation.width, 150), 360)
+                            let origin: Double
+                            if let existing = start {
+                                origin = existing
+                            } else {
+                                origin = ThreePaneLayout.allocate(
+                                    total: shellMetrics.width,
+                                    preferredSidebar: width,
+                                    showsLyrics: showsLyrics
+                                ).sidebar
+                                start = origin
+                            }
+                            let upper = ThreePaneLayout.maxSidebarWidth(
+                                total: shellMetrics.width,
+                                showsLyrics: showsLyrics
+                            )
+                            width = min(max(origin + drag.translation.width, ThreePaneLayout.minSidebar), upper)
                         }
                         .onEnded { _ in
                             start = nil
