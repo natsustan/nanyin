@@ -239,8 +239,21 @@ struct TrackListTable: View {
     }
 
     private func menu(for rows: [TrackRow]) -> [TrackMenuItem] {
+        app.trackMenu(for: rows, play: play, editablePlaylist: editablePlaylist, list: list)
+    }
+}
+
+extension AppModel {
+    /// Context menu for one or more track rows: Play, Queue, Add to Playlist,
+    /// optional playlist removal, Show Album / Artist / Credits, Copy Link.
+    func trackMenu(
+        for rows: [TrackRow],
+        play: @escaping (TrackRow) -> Void,
+        editablePlaylist: Playlist? = nil,
+        list: TrackList? = nil
+    ) -> [TrackMenuItem] {
         guard let first = rows.first else { return [] }
-        let (player, library) = (app.player, app.library)
+        let (player, library) = (player, library)
         var items = [
             TrackMenuItem(title: "Play") { play(first) },
             TrackMenuItem(title: "Add to Play Queue") { rows.forEach { player.addToQueue($0.uri) } },
@@ -251,22 +264,20 @@ struct TrackListTable: View {
                 TrackMenuItem(title: playlist.name) { library.add(rows.map(\.uri), to: playlist) }
             }))
         }
-        if let editablePlaylist {
+        if let editablePlaylist, let list {
             items.append(TrackMenuItem(title: "Remove from This Playlist") {
                 library.removeTracks(rows, from: editablePlaylist, list: list)
             })
         }
         items.append(.separator)
-        items += app.songMenu(uri: first.uri, name: first.name, album: first.albumRoute, artists: first.artists)
+        items += songMenu(uri: first.uri, name: first.name, album: first.albumRoute, artists: first.artists)
         items.append(TrackMenuItem(title: "Copy Spotify Link") {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(rows.map { Route.webLink(for: $0.uri) }.joined(separator: "\n"), forType: .string)
         })
         return items
     }
-}
 
-extension AppModel {
     /// "Show Album", "Show Artist" (a submenu when there are several) and
     /// "Show Credits" for a song, as far as Spotify gives their pages.
     func songMenu(uri: String, name: String, album: Route?, artists: [TrackRow.Artist]) -> [TrackMenuItem] {

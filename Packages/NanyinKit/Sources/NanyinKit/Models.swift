@@ -231,12 +231,37 @@ public struct SavedAlbum: Codable, Sendable, Hashable {
     public let album: Album
 }
 
+public struct Followers: Codable, Sendable, Hashable {
+    public let total: Int
+
+    public init(total: Int) {
+        self.total = total
+    }
+}
+
 public struct Artist: Codable, Sendable, Hashable, Identifiable {
     public let id: String
     public let name: String
     public let uri: String
     public let images: [SpotifyImage]?
     public let genres: [String]?
+    public let followers: Followers?
+
+    public init(
+        id: String,
+        name: String,
+        uri: String,
+        images: [SpotifyImage]? = nil,
+        genres: [String]? = nil,
+        followers: Followers? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.uri = uri
+        self.images = images
+        self.genres = genres
+        self.followers = followers
+    }
 }
 
 public struct Paging<Item: Codable & Sendable & Hashable>: Codable, Sendable, Hashable {
@@ -280,17 +305,64 @@ public struct SearchResults: Codable, Sendable, Hashable {
     }
 }
 
+/// Discography filter groups for `/artists/{id}/albums`.
+public enum ArtistAlbumGroup: String, CaseIterable, Sendable, Hashable {
+    case all
+    case albums
+    case singles
+    case compilations
+    case appearsOn
+
+    public var label: String {
+        switch self {
+        case .all: "All"
+        case .albums: "Albums"
+        case .singles: "Singles & EPs"
+        case .compilations: "Compilations"
+        case .appearsOn: "Appears On"
+        }
+    }
+
+    public var includeGroups: String {
+        switch self {
+        case .all: "album,single,compilation"
+        case .albums: "album"
+        case .singles: "single"
+        case .compilations: "compilation"
+        case .appearsOn: "appears_on"
+        }
+    }
+}
+
 /// Search and artist pages list albums without their tracks.
 public struct AlbumSummary: Codable, Sendable, Hashable, Identifiable {
     public let id: String
     public let name: String
     public let uri: String
     public let album_type: String?
+    public let album_group: String?
+    public let total_tracks: Int?
     public let images: [SpotifyImage]?
     public let artists: [ArtistRef]
     public let release_date: String?
 
     public var releaseYear: String? { release_date.map { String($0.prefix(4)) } }
+
+    /// Human-readable release category ("Album", "Single", "EP", "Compilation").
+    public var kindLabel: String? {
+        switch (album_type ?? album_group)?.lowercased() {
+        case "album": "Album"
+        case "single": "Single"
+        case "ep": "EP"
+        case "compilation": "Compilation"
+        default: nil
+        }
+    }
+
+    /// "2024 · Album" or whichever portion is available.
+    public var releaseSubtitle: String {
+        [releaseYear, kindLabel].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+    }
 }
 
 /// A Spotify Connect device returned by `GET /me/player/devices`.

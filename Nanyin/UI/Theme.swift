@@ -119,6 +119,8 @@ enum Theme {
     private static let nsRows = [ns(0x2D2D2D), ns(0x323232)]
     /// Zebra stripe colour of row `index`.
     static func row(_ index: Int) -> NSColor { nsRows[index & 1] }
+    static func rowColor(_ index: Int) -> Color { Color(nsColor: row(index)) }
+    static let rowHover = hex(0xFFFFFF, 0.05)
 
     // Bottom player bar (Snow Leopard / 2010 Spotify brushed aluminum)
     static let playerBarEdge = hex(0x464646)

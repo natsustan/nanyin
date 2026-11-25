@@ -77,8 +77,18 @@ public extension SpotifyWebAPI {
         try await get("/artists/\(id)")
     }
 
-    func artistAlbums(_ id: String) async throws -> Paging<AlbumSummary> {
-        try await get("/artists/\(id)/albums", query: ["include_groups": "album,single", "limit": "10"])
+    func artistAlbums(
+        _ id: String,
+        groups: ArtistAlbumGroup = .all,
+        offset: Int = 0,
+        limit: Int = 10
+    ) async throws -> Paging<AlbumSummary> {
+        let clamped = min(max(limit, 1), 10)
+        return try await get("/artists/\(id)/albums", query: [
+            "include_groups": groups.includeGroups,
+            "limit": "\(clamped)",
+            "offset": "\(max(offset, 0))",
+        ])
     }
 
     func search(_ text: String, types: [String] = ["track", "artist", "album", "playlist"]) async throws -> SearchResults {
