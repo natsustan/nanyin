@@ -23,6 +23,7 @@ enum Theme {
     static let green = Color(nsColor: nsGreen)
     /// A starred song's star.
     static let nsStar = ns(0xF2C230)
+    static let star = Color(nsColor: nsStar)
 
     // The small button laid over artwork
     static let artworkButton = hex(0x000000, 0.6)

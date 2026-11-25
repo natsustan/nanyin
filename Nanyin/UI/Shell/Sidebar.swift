@@ -333,7 +333,9 @@ private struct NowPlayingCover: View {
     @State private var hovering = false
 
     var body: some View {
+        let _ = app.stars.version
         if let track = app.player.track {
+            let starred = track.isTrack ? app.stars.isStarred(track.uri) : nil
             VStack(spacing: 0) {
                 HStack(spacing: 7) {
                     if !large {
@@ -366,6 +368,19 @@ private struct NowPlayingCover: View {
                     }
                     .lineLimit(1)
                     Spacer(minLength: 0)
+                    if track.isTrack {
+                        let isStarred = starred == true
+                        Button { app.stars.toggle(track.uri) } label: {
+                            Image(systemName: isStarred ? "star.fill" : "star")
+                                .font(.system(size: 12))
+                                .foregroundStyle(isStarred ? Theme.star : Theme.secondaryText.opacity(starred == nil ? 0.35 : 0.75))
+                                .engraved()
+                                .frame(width: 22, height: 22)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help(isStarred ? "Remove from Starred" : "Add to Starred")
+                    }
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 5)
@@ -393,6 +408,13 @@ private struct NowPlayingCover: View {
     }
 
     @ViewBuilder private func menu(_ track: CoreTrack) -> some View {
+        if track.isTrack {
+            let isStarred = app.stars.isStarred(track.uri) == true
+            Button(isStarred ? "Remove from Starred" : "Add to Starred") {
+                app.stars.toggle(track.uri)
+            }
+            Divider()
+        }
         TrackMenuContent(items: app.songMenu(
             uri: track.uri, name: track.name, album: track.albumURI.flatMap(Route.init(uri:)),
             artists: track.artists.map(TrackRow.Artist.init)))
