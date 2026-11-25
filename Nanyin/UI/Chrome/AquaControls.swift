@@ -156,6 +156,24 @@ struct GraphiteHeader<Content: View>: View {
     }
 }
 
+/// The shared 24-pt brushed-metal sub-bar spanning the top of the sidebar,
+/// top-level library pages, What's New tabs, and lyrics pane.
+struct MetalSubBar<Content: View>: View {
+    @Environment(\.appearsActive) private var appearsActive
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        HStack(spacing: 0) { content }
+            .frame(maxWidth: .infinity)
+            .frame(height: Theme.subBarHeight)
+            .background {
+                Theme.subBar(active: appearsActive)
+                    .hairline(.top, Theme.subBarHighlight)
+                    .hairline(.bottom, Theme.divider)
+            }
+    }
+}
+
 /// Vertical etched separator inside a 24-pt brushed-metal sub-bar.
 struct MetalSubBarDivider: View {
     var body: some View {
@@ -163,6 +181,42 @@ struct MetalSubBarDivider: View {
             Rectangle().fill(Theme.subBarDividerDark).frame(width: 1)
             Rectangle().fill(Theme.subBarDividerLight).frame(width: 1)
         }
+    }
+}
+
+/// A title + optional muted detail inside a `MetalSubBar` (for Play Queue,
+/// Starred, Albums, Artists, Search).
+struct MetalSubBarTitle: View {
+    @Environment(\.appearsActive) private var appearsActive
+    let title: String
+    var detail = ""
+    var icon: String? = nil
+    var iconTint: Color? = nil
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if let icon {
+                Image(systemName: icon)
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle((iconTint ?? Theme.metalText).opacity(appearsActive ? 1 : 0.65))
+                    .shadow(color: .black.opacity(iconTint != nil ? 0.35 : 0), radius: 0, y: -0.5)
+                    .embossed()
+            }
+            Text(title)
+                .font(AquaFont.bold(12))
+                .foregroundStyle(Theme.metalText.opacity(appearsActive ? 1 : 0.65))
+                .embossed()
+                .lineLimit(1)
+            if !detail.isEmpty {
+                Text("· \(detail)")
+                    .font(AquaFont.regular(11))
+                    .foregroundStyle(Theme.metalSecondaryText.opacity(appearsActive ? 1 : 0.65))
+                    .embossed()
+                    .lineLimit(1)
+            }
+        }
+        .padding(.leading, 10)
+        .padding(.trailing, 8)
     }
 }
 

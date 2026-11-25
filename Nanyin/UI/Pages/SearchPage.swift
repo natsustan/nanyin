@@ -8,10 +8,12 @@ struct SearchPage: View {
     let results: SearchResultsModel
 
     var body: some View {
+        let status = results.error ?? (results.tracks == nil ? "Searching for “\(query)”…" : "Results for “\(query)”")
         VStack(spacing: 0) {
-            PageHeader(
-                title: "Search",
-                subtitle: results.error ?? (results.tracks == nil ? "Searching for “\(query)”…" : "Results for “\(query)”"))
+            MetalSubBar {
+                MetalSubBarTitle(title: "Search", detail: status)
+                Spacer(minLength: 0)
+            }
             if !results.artists.isEmpty || !results.albums.isEmpty || !results.playlists.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     if !results.artists.isEmpty {

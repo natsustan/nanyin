@@ -6,7 +6,6 @@ import SwiftUI
 /// ticks stay local to this pane and stop completely while paused.
 struct LyricsPanel: View {
     @Environment(AppModel.self) private var app
-    @Environment(\.appearsActive) private var appearsActive
     static let width: CGFloat = 300
 
     var body: some View {
@@ -24,21 +23,9 @@ struct LyricsPanel: View {
     }
 
     private func header(track: CoreTrack?, state: LyricsModel.State) -> some View {
-        HStack(spacing: 0) {
-            HStack(spacing: 5) {
-                Text("Lyrics")
-                    .font(AquaFont.bold(12))
-                    .foregroundStyle(Theme.metalText.opacity(appearsActive ? 1 : 0.65))
-                    .embossed()
-                if case .loaded(let lyrics) = state {
-                    Text("· \(lyrics.source)")
-                        .font(AquaFont.regular(10.5))
-                        .foregroundStyle(Theme.metalSecondaryText.opacity(appearsActive ? 1 : 0.65))
-                        .embossed()
-                        .lineLimit(1)
-                }
-            }
-            .padding(.leading, 9)
+        let source: String = if case .loaded(let lyrics) = state { lyrics.source } else { "" }
+        return MetalSubBar {
+            MetalSubBarTitle(title: "Lyrics", detail: source)
             Spacer(minLength: 4)
             if let track {
                 MetalSubBarDivider()
@@ -57,10 +44,6 @@ struct LyricsPanel: View {
             .buttonStyle(MetalSubBarButtonStyle(width: 24))
             .help("Close Lyrics")
         }
-        .frame(height: Theme.subBarHeight)
-        .background(Theme.subBar(active: appearsActive))
-        .hairline(.top, Theme.subBarHighlight)
-        .hairline(.bottom, Theme.divider)
     }
 
     @ViewBuilder

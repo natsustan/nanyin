@@ -5,8 +5,21 @@ struct StarredPage: View {
     let list: TrackList
 
     var body: some View {
+        let pages = list.pages
+        let status = pages.error ?? (pages.isLoading && pages.items.isEmpty ? "Loading…" : count)
         VStack(spacing: 0) {
-            PagerHeader(title: "Starred", pager: list.pages, detail: count)
+            MetalSubBar {
+                MetalSubBarTitle(title: "Starred", detail: status, icon: "star.fill", iconTint: Theme.star)
+                Spacer(minLength: 8)
+                if pages.error != nil {
+                    MetalSubBarDivider()
+                    Button { pages.retry() } label: {
+                        Text("Try Again")
+                            .font(AquaFont.bold(11))
+                    }
+                    .buttonStyle(MetalSubBarButtonStyle(width: nil))
+                }
+            }
             FilterableTrackList(
                 list: list,
                 contextURI: list.contextURI,

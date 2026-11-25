@@ -70,6 +70,26 @@ enum Theme {
     static let grooveDark = hex(0x1E1E1E)
     static let grooveLight = hex(0xFFFFFF, 0.06)
 
+    // Sidebar source-list selection (2010 Spotify / Aqua cool ice-blue metal)
+    static let sidebarSelectionText = hex(0x1A2633)
+    static let sidebarSelectionEdgeTop = hex(0xFFFFFF, 0.45)
+    static let sidebarSelectionEdgeBottom = hex(0x1B2530, 0.75)
+    static func sidebarSelection(active: Bool) -> LinearGradient {
+        LinearGradient(
+            colors: active
+                ? [hex(0xC5D8EC), hex(0x98B5D4)]
+                : [hex(0x9A9FA5), hex(0x7E848A)],
+            startPoint: .top, endPoint: .bottom)
+    }
+
+    // Vinyl disc placeholder (rsms 2010 bottom-left record silhouette)
+    static let vinylBackground = hex(0x272727)
+    static let vinylDiscOuter = hex(0x363636)
+    static let vinylDiscInner = hex(0x2D2D2D)
+    static let vinylGroove = hex(0xFFFFFF, 0.05)
+    static let vinylLabel = hex(0x3E3E3E)
+    static let vinylSpindle = hex(0x222222)
+
     // Graphite (player bar, pane and column headers)
     static let nsGraphiteTop = ns(0x585858)
     static let nsGraphiteBottom = ns(0x363636)

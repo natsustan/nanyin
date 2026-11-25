@@ -13,6 +13,9 @@ struct Sidebar: View {
         // selection changed.
         let current = app.navigator.current
         let go = app.navigator.go
+        let activeContext = app.player.contextURI
+        let isPlaying = app.player.isPlaying
+        let starredURI = app.account.profile.map { "spotify:user:\($0.id):collection" }
         VStack(spacing: 0) {
             SidebarHeaderBar()
             ScrollViewReader { scrollProxy in
@@ -20,11 +23,17 @@ struct Sidebar: View {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(Self.fixed, id: \.route) { item in
                             if let heading = item.heading { SidebarHeading(title: heading) }
+                            let itemPlaying = item.route == .likedSongs && starredURI != nil && activeContext == starredURI
                             SidebarRow(
                                 title: item.title,
                                 icon: item.icon,
                                 iconTint: item.tint,
-                                isSelected: current == item.route
+                                isSelected: current == item.route,
+                                isPlayingContext: itemPlaying,
+                                isPlaybackActive: isPlaying,
+                                onDoubleClick: item.route == .likedSongs ? {
+                                    if let starredURI { app.player.play(contextURI: starredURI) }
+                                } : nil
                             ) {
                                 go(item.route, false)
                             }
@@ -64,7 +73,10 @@ struct Sidebar: View {
                                     title: playlist.name,
                                     icon: "music.note.list",
                                     isSelected: current == route,
-                                    isDropTargeted: dropTargetPlaylistID == playlist.id
+                                    isDropTargeted: dropTargetPlaylistID == playlist.id,
+                                    isPlayingContext: activeContext == playlist.uri,
+                                    isPlaybackActive: isPlaying,
+                                    onDoubleClick: { app.player.play(contextURI: playlist.uri) }
                                 ) {
                                     go(route, false)
                                 }
@@ -257,7 +269,7 @@ private struct SidebarHeaderBar: View {
     @State private var hoveringAccount = false
 
     var body: some View {
-        HStack(spacing: 0) {
+        MetalSubBar {
             Menu {
                 if let profile = app.account.profile {
                     Text(profile.isPremium ? "\(profile.name) · Premium" : profile.name)
@@ -269,11 +281,19 @@ private struct SidebarHeaderBar: View {
                 Divider()
                 Button("Sign Out") { Task { await app.signOut() } }
             } label: {
-                Text(app.account.profile?.name ?? "Library")
-                    .font(AquaFont.bold(12))
-                    .foregroundStyle(Theme.metalText.opacity(appearsActive ? 1 : 0.65))
-                    .embossed()
-                    .lineLimit(1)
+                HStack(spacing: 4) {
+                    Text(app.account.profile?.name ?? "Library")
+                        .font(AquaFont.bold(12))
+                        .foregroundStyle(Theme.metalText.opacity(appearsActive ? 1 : 0.65))
+                        .embossed()
+                        .lineLimit(1)
+                    if hoveringAccount {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 7.5, weight: .bold))
+                            .foregroundStyle(Theme.metalSecondaryText)
+                            .embossed()
+                    }
+                }
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
@@ -298,11 +318,6 @@ private struct SidebarHeaderBar: View {
             .disabled(!app.library.canEditPlaylists)
             .help("New Playlist (⌘N)")
         }
-        .frame(maxWidth: .infinity)
-        .frame(height: Theme.subBarHeight)
-        .background(Theme.subBar(active: appearsActive))
-        .hairline(.top, Theme.subBarHighlight)
-        .hairline(.bottom, Theme.divider)
     }
 }
 
@@ -377,46 +392,70 @@ private struct SidebarHeading: View {
 }
 
 private struct SidebarRow: View {
+    @Environment(\.appearsActive) private var appearsActive
     let title: String
     let icon: String
     var iconTint: Color? = nil
     let isSelected: Bool
     var isDropTargeted = false
+    var isPlayingContext = false
+    var isPlaybackActive = false
+    var onDoubleClick: (() -> Void)? = nil
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                Image(systemName: icon)
-                    .font(.system(size: 11))
-                    .frame(width: 14)
-                    .foregroundStyle(isSelected ? .white : (iconTint ?? Theme.sidebarHeading))
-                Text(title)
-                    .font(isSelected ? AquaFont.bold(12) : AquaFont.regular(12))
-                    .foregroundStyle(isSelected ? .white : Theme.sidebarText)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
+        let selectedInk = Theme.sidebarSelectionText
+        let row = HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 11))
+                .frame(width: 14)
+                .foregroundStyle(
+                    isSelected
+                        ? (iconTint ?? selectedInk)
+                        : (iconTint ?? Theme.sidebarHeading)
+                )
+            Text(title)
+                .font(isSelected ? AquaFont.bold(12) : AquaFont.regular(12))
+                .foregroundStyle(isSelected ? selectedInk : Theme.sidebarText)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            if isPlayingContext {
+                Image(systemName: isPlaybackActive ? "speaker.wave.2.fill" : "speaker.wave.1.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(isSelected ? selectedInk : Theme.green)
             }
-            .shadow(color: .black.opacity(isSelected ? 0.5 : 0.3), radius: 0, y: 1)
-            .padding(.horizontal, 10)
-            .frame(height: 22)
-            .background {
-                if isSelected {
-                    Theme.selection
-                        .hairline(.top, .white.opacity(0.18))
-                        .hairline(.bottom, .black.opacity(0.4))
-                } else if isDropTargeted {
-                    Theme.green.opacity(0.22)
-                }
-            }
-            .overlay {
-                if isDropTargeted {
-                    Rectangle().strokeBorder(Theme.green, lineWidth: 1)
-                }
-            }
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .shadow(
+            color: isSelected ? .white.opacity(0.45) : .black.opacity(0.35),
+            radius: 0,
+            y: 1
+        )
+        .padding(.horizontal, 10)
+        .frame(height: 22)
+        .background {
+            if isSelected {
+                Theme.sidebarSelection(active: appearsActive)
+                    .hairline(.top, Theme.sidebarSelectionEdgeTop)
+                    .hairline(.bottom, Theme.sidebarSelectionEdgeBottom)
+            } else if isDropTargeted {
+                Theme.green.opacity(0.22)
+            }
+        }
+        .overlay {
+            if isDropTargeted {
+                Rectangle().strokeBorder(Theme.green, lineWidth: 1)
+            }
+        }
+        .contentShape(Rectangle())
+
+        if let onDoubleClick {
+            Button(action: action) { row }
+                .buttonStyle(.plain)
+                .simultaneousGesture(TapGesture(count: 2).onEnded { onDoubleClick() })
+        } else {
+            Button(action: action) { row }
+                .buttonStyle(.plain)
+        }
     }
 }
 
@@ -482,20 +521,23 @@ private struct NowPlayingCover: View {
                 .padding(.vertical, 5)
                 .background(Theme.graphite)
                 .hairline(.top, Theme.graphiteEdge)
+                .hairline(.bottom, Theme.divider)
                 if large {
-                    Artwork(url: track.coverURL, placeholder: Theme.content)
-                        .aspectRatio(1, contentMode: .fit)
-                        .clipped()
-                        .overlay(alignment: .topTrailing) {
-                            if hovering {
-                                Button { large = false } label: {
-                                    ArtworkToggle(symbol: "arrow.down.right.and.arrow.up.left")
-                                }
-                                .buttonStyle(.plain)
-                                .help("Hide Large Artwork")
-                                .padding(6)
+                    Artwork(url: track.coverURL, placeholder: Theme.vinylBackground) {
+                        VinylPlaceholder(insetRatio: 0.09)
+                    }
+                    .aspectRatio(1, contentMode: .fit)
+                    .clipped()
+                    .overlay(alignment: .topTrailing) {
+                        if hovering {
+                            Button { large = false } label: {
+                                ArtworkToggle(symbol: "arrow.down.right.and.arrow.up.left")
                             }
+                            .buttonStyle(.plain)
+                            .help("Hide Large Artwork")
+                            .padding(6)
                         }
+                    }
                 }
             }
             .onHover { hovering = $0 }

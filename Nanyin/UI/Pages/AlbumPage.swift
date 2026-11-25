@@ -1,3 +1,4 @@
+import AppKit
 import NanyinKit
 import SwiftUI
 
@@ -108,41 +109,93 @@ struct Tile: View {
     var subtitle = ""
     let images: [SpotifyImage]?
     let route: Route
-    var size: CGFloat = 130
+    var playURI: String? = nil
+    var size: CGFloat = 136
+    @State private var hovering = false
 
     var body: some View {
-        Button { app.navigator.go(to: route) } label: {
-            VStack(alignment: .leading, spacing: 3) {
-                CoverImage(url: images?.best(minimum: 200), size: size)
-                Text(title)
-                    .font(AquaFont.regular(12))
-                    .foregroundStyle(Theme.text)
-                Text(subtitle)
-                    .font(AquaFont.regular(11))
-                    .foregroundStyle(Theme.secondaryText)
+        VStack(alignment: .leading, spacing: 7) {
+            ZStack(alignment: .bottomTrailing) {
+                Button { app.navigator.go(to: route) } label: {
+                    CoverImage(url: images?.best(minimum: 260), size: size)
+                }
+                .buttonStyle(.plain)
+                if hovering, let playURI {
+                    Button { app.player.play(contextURI: playURI) } label: {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(Theme.artworkButtonGlyph)
+                            .offset(x: 1)
+                            .frame(width: 24, height: 24)
+                            .background(Theme.artworkButton, in: Circle())
+                            .overlay(Circle().strokeBorder(Theme.artworkButtonEdge, lineWidth: 0.75))
+                            .shadow(color: .black.opacity(0.6), radius: 2, y: 1)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(6)
+                    .help("Play")
+                    .transition(.opacity)
+                }
             }
-            .lineLimit(1)
-            .frame(width: size, alignment: .leading)
+            .animation(.easeOut(duration: 0.12), value: hovering)
+
+            Button { app.navigator.go(to: route) } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(AquaFont.bold(12))
+                        .foregroundStyle(Theme.text)
+                    if !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(AquaFont.regular(11))
+                            .foregroundStyle(Theme.secondaryText)
+                    }
+                }
+                .lineLimit(1)
+                .frame(width: size, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
+        .frame(width: size, alignment: .leading)
+        .onHover { hovering = $0 }
+        .contextMenu {
+            if let playURI {
+                Button("Play") { app.player.play(contextURI: playURI) }
+            }
+            Button("Open") { app.navigator.go(to: route) }
+            if let playURI {
+                Divider()
+                Button("Copy Spotify Link") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(Route.webLink(for: playURI), forType: .string)
+                }
+            }
+        }
     }
 }
 
 extension Tile {
-    init(album: AlbumSummary, subtitle: String, size: CGFloat = 130) {
-        self.init(title: album.name, subtitle: subtitle, images: album.images, route: .album(id: album.id), size: size)
+    init(album: AlbumSummary, subtitle: String, size: CGFloat = 136) {
+        self.init(
+            title: album.name, subtitle: subtitle, images: album.images,
+            route: .album(id: album.id), playURI: album.uri, size: size)
     }
 
     init(album: Album) {
-        self.init(title: album.name, subtitle: album.artists.names, images: album.images, route: .album(id: album.id))
+        self.init(
+            title: album.name, subtitle: album.artists.names, images: album.images,
+            route: .album(id: album.id), playURI: album.uri)
     }
 
     init(artist: Artist) {
-        self.init(title: artist.name, images: artist.images, route: .artist(id: artist.id))
+        self.init(
+            title: artist.name, images: artist.images,
+            route: .artist(id: artist.id), playURI: artist.uri)
     }
 }
 
-/// Album art with a thin dark frame, the way the 2010 client framed covers.
+/// Album art with a thin dark frame and subtle inner highlight, the way the
+/// 2010 client framed covers.
 struct CoverImage: View {
     let url: URL?
     let size: CGFloat
@@ -150,24 +203,70 @@ struct CoverImage: View {
 
     var body: some View {
         ZStack {
-            Artwork(url: url, placeholder: Theme.hex(0x404040))
-            if url == nil, let fallbackSymbol {
-                Image(systemName: fallbackSymbol)
-                    .font(.system(size: size * 0.34, weight: .light))
-                    .foregroundStyle(Theme.secondaryText.opacity(0.6))
+            Artwork(url: url, placeholder: Theme.vinylBackground) {
+                if let fallbackSymbol {
+                    Image(systemName: fallbackSymbol)
+                        .font(.system(size: size * 0.32, weight: .light))
+                        .foregroundStyle(Theme.secondaryText.opacity(0.45))
+                } else {
+                    VinylPlaceholder(insetRatio: 0.14)
+                }
             }
         }
         .frame(width: size, height: size)
         .clipped()
-        .overlay(Rectangle().strokeBorder(.black.opacity(0.6), lineWidth: 1))
+        .overlay(Rectangle().strokeBorder(.white.opacity(0.08), lineWidth: 1).padding(1))
+        .overlay(Rectangle().strokeBorder(.black.opacity(0.65), lineWidth: 1))
         .shadow(color: .black.opacity(0.5), radius: 2, y: 1)
     }
 }
 
+/// The quiet dark vinyl record silhouette shown when album art is missing or
+/// loading, inspired by rsms's 2010 Spotify-for-Mac Now Playing cover slot.
+struct VinylPlaceholder: View {
+    var insetRatio: CGFloat = 0.08
+
+    var body: some View {
+        GeometryReader { proxy in
+            let side = min(proxy.size.width, proxy.size.height)
+            let disc = side * (1 - insetRatio * 2)
+            ZStack {
+                Theme.vinylBackground
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            colors: [Theme.vinylDiscInner, Theme.vinylDiscOuter, Theme.vinylDiscInner],
+                            center: .center,
+                            startRadius: disc * 0.12,
+                            endRadius: disc * 0.5
+                        )
+                    )
+                    .frame(width: disc, height: disc)
+                    .overlay(Circle().strokeBorder(.black.opacity(0.45), lineWidth: 1))
+                ForEach([0.84, 0.72, 0.60], id: \.self) { ratio in
+                    Circle()
+                        .strokeBorder(Theme.vinylGroove, lineWidth: 0.75)
+                        .frame(width: disc * ratio, height: disc * ratio)
+                }
+                Circle()
+                    .fill(Theme.vinylLabel)
+                    .frame(width: disc * 0.34, height: disc * 0.34)
+                    .overlay(Circle().strokeBorder(.black.opacity(0.4), lineWidth: 1))
+                Circle()
+                    .fill(Theme.vinylSpindle)
+                    .frame(width: max(4, disc * 0.08), height: max(4, disc * 0.08))
+                    .overlay(Circle().strokeBorder(.white.opacity(0.08), lineWidth: 0.5))
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+}
+
 /// An image from `ImageLoader`, filling its frame; shown at once when cached.
-struct Artwork: View {
+struct Artwork<Fallback: View>: View {
     let url: URL?
     let placeholder: Color
+    @ViewBuilder var fallback: () -> Fallback
     @State private var loaded: (url: URL, image: NSImage)?
 
     var body: some View {
@@ -176,13 +275,22 @@ struct Artwork: View {
             if let image {
                 Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
             } else {
-                placeholder
+                ZStack {
+                    placeholder
+                    fallback()
+                }
             }
         }
         .task(id: url) {
             guard let url, ImageLoader.shared.cached(url) == nil, let image = await ImageLoader.shared.image(url) else { return }
             loaded = (url, image)
         }
+    }
+}
+
+extension Artwork where Fallback == EmptyView {
+    init(url: URL?, placeholder: Color) {
+        self.init(url: url, placeholder: placeholder, fallback: { EmptyView() })
     }
 }
 

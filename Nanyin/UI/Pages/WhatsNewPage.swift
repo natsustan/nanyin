@@ -33,7 +33,7 @@ struct WhatsNewPage: View {
     }
 
     private var tabBar: some View {
-        HStack(spacing: 0) {
+        MetalSubBar {
             ForEach(WhatsNewModel.Tab.allCases, id: \.self) { tab in
                 MetalTabButton(
                     title: tab.rawValue,
@@ -59,15 +59,18 @@ struct WhatsNewPage: View {
             Button { model.refresh() } label: {
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: 10.5, weight: .bold))
+                    .opacity(isRefreshing ? 0.5 : 1)
             }
             .buttonStyle(MetalSubBarButtonStyle(width: 26))
             .help("Refresh")
         }
-        .frame(height: Theme.subBarHeight)
-        .background {
-            Theme.subBar(active: appearsActive)
-                .hairline(.top, Theme.subBarHighlight)
-                .hairline(.bottom, Theme.divider)
+    }
+
+    private var isRefreshing: Bool {
+        switch model.tab {
+        case .overview: model.isLoadingOverview
+        case .recentlyPlayed: model.recentlyPlayed?.pages.isLoading == true
+        case .topTracks: model.topTracks?.pages.isLoading == true
         }
     }
 
@@ -210,6 +213,7 @@ struct WhatsNewPage: View {
                         }
                     }
                     .buttonStyle(MetalPillButtonStyle())
+                    .help(isExpanded ? "Show fewer items" : "Show all \(items.count) items")
                 }
             }
             LazyVGrid(columns: columns, alignment: .leading, spacing: 18) {
@@ -295,7 +299,7 @@ private struct WhatsNewTile: View {
     @State private var hovering = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 7) {
             ZStack(alignment: .bottomTrailing) {
                 Button(action: onOpen) {
                     CoverImage(url: images?.best(minimum: 260), size: size)
@@ -316,8 +320,10 @@ private struct WhatsNewTile: View {
                     .buttonStyle(.plain)
                     .padding(6)
                     .help("Play")
+                    .transition(.opacity)
                 }
             }
+            .animation(.easeOut(duration: 0.12), value: hovering)
             Button(action: onOpen) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
