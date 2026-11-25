@@ -8,7 +8,12 @@ struct ArtistPage: View {
     @Environment(AppModel.self) private var app
     let detail: ArtistDetail
 
-    @State private var contentWidth: CGFloat = 720
+    private struct PageMetrics: Equatable {
+        var grid = CoverGridMetrics.compute(width: 720)
+        var showAlbum = true
+    }
+
+    @State private var metrics = PageMetrics()
     @State private var expandedRelated = false
 
     var body: some View {
@@ -38,33 +43,29 @@ struct ArtistPage: View {
                 }
             }
 
-            let layout = CoverGridMetrics.compute(width: contentWidth)
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
                     popularSection
                     EtchedDivider()
-                    discographySection(layout: layout)
+                    discographySection(layout: metrics.grid)
                     if !detail.relatedArtists.isEmpty {
                         EtchedDivider()
-                        relatedSection(layout: layout)
+                        relatedSection(layout: metrics.grid)
                     }
                 }
-                .padding(.horizontal, layout.padding)
+                .padding(.horizontal, metrics.grid.padding)
                 .padding(.top, 18)
                 .padding(.bottom, 26)
             }
             .background(Theme.content)
-            .background(
-                GeometryReader { proxy in
-                    Color.clear
-                        .onAppear {
-                            if proxy.size.width > 0 { contentWidth = proxy.size.width }
-                        }
-                        .onChange(of: proxy.size.width) { _, width in
-                            if width > 0 { contentWidth = width }
-                        }
-                }
+        }
+        .onGeometryChange(for: PageMetrics.self) { proxy in
+            PageMetrics(
+                grid: CoverGridMetrics.compute(width: proxy.size.width),
+                showAlbum: proxy.size.width >= 520
             )
+        } action: { newMetrics in
+            metrics = newMetrics
         }
     }
 
@@ -94,7 +95,7 @@ struct ArtistPage: View {
         let rows = pages.items
         let displayed = detail.showAllTopTracks ? rows : Array(rows.prefix(5))
         let hasPlays = rows.contains { detail.playCount(for: $0.uri) != nil }
-        let showAlbum = contentWidth >= 520
+        let showAlbum = metrics.showAlbum
 
         return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .center, spacing: 8) {
@@ -207,7 +208,7 @@ struct ArtistPage: View {
             } else {
                 LazyVGrid(columns: layout.gridColumns, alignment: .leading, spacing: 18) {
                     ForEach(albums) { album in
-                        Tile(album: album, subtitle: album.releaseSubtitle, size: layout.tileSize)
+                        Tile(album: album, subtitle: album.releaseSubtitle)
                     }
                 }
                 if pager?.isLoading == true {
@@ -256,7 +257,7 @@ struct ArtistPage: View {
             }
             LazyVGrid(columns: layout.gridColumns, alignment: .leading, spacing: 18) {
                 ForEach(displayed) { artist in
-                    Tile(artist: artist, subtitle: "Artist", size: layout.tileSize)
+                    Tile(artist: artist, subtitle: "Artist")
                 }
             }
         }
@@ -370,7 +371,7 @@ private struct PopularTrackRow: View {
                         }
                         .buttonStyle(.plain)
                         .onHover { hoveringAlbum = $0 }
-                        .linkPointer(hoveringAlbum)
+                        .pointerStyle(hoveringAlbum ? .link : nil)
                     } else {
                         Text(row.album)
                             .font(AquaFont.regular(11.5))

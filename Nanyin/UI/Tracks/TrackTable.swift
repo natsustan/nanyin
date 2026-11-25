@@ -40,6 +40,10 @@ struct TrackTable: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSScrollView, context: Context) -> CGSize? {
+        proposal.replacingUnspecifiedDimensions()
+    }
+
     func makeNSView(context: Context) -> NSScrollView {
         let table = TrackTableView()
         table.headerView = GraphiteHeaderView()

@@ -8,7 +8,7 @@ struct WhatsNewPage: View {
     @Environment(\.appearsActive) private var appearsActive
     let model: WhatsNewModel
 
-    @State private var contentWidth: CGFloat = 720
+    @State private var grid = CoverGridMetrics.compute(width: 720)
     @State private var expanded: Set<SectionID> = []
 
     private enum SectionID: Hashable {
@@ -28,6 +28,11 @@ struct WhatsNewPage: View {
             }
         }
         .background(Theme.content)
+        .onGeometryChange(for: CoverGridMetrics.self) { proxy in
+            CoverGridMetrics.compute(width: proxy.size.width)
+        } action: { metrics in
+            grid = metrics
+        }
     }
 
     private var tabBar: some View {
@@ -45,16 +50,24 @@ struct WhatsNewPage: View {
                     model.selectTab(tab)
                 }
             }
-            Spacer(minLength: 8)
             if model.tab == .topTracks {
-                HStack(spacing: 2) {
-                    ForEach(TopTimeRange.allCases, id: \.self) { range in
-                        MetalRangePill(title: range.label, isSelected: model.topRange == range) {
-                            model.setTopRange(range)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 2) {
+                        ForEach(TopTimeRange.allCases, id: \.self) { range in
+                            MetalRangePill(title: range.label, isSelected: model.topRange == range) {
+                                model.setTopRange(range)
+                            }
                         }
                     }
+                    .fixedSize()
+                    rangeMenu(compact: false)
+                    rangeMenu(compact: true)
                 }
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .padding(.leading, 6)
                 .padding(.trailing, 8)
+            } else {
+                Spacer(minLength: 0)
             }
             MetalSubBarDivider()
             Button { model.refresh() } label: {
@@ -65,6 +78,44 @@ struct WhatsNewPage: View {
             .buttonStyle(MetalSubBarButtonStyle(width: 26))
             .help("Refresh")
         }
+    }
+
+    private func rangeMenu(compact: Bool) -> some View {
+        Menu {
+            ForEach(TopTimeRange.allCases, id: \.self) { range in
+                Button {
+                    model.setTopRange(range)
+                } label: {
+                    Text(model.topRange == range ? "✓ \(range.label)" : range.label)
+                }
+            }
+        } label: {
+            HStack(spacing: 3) {
+                if compact {
+                    Image(systemName: "clock")
+                        .font(.system(size: 9, weight: .bold))
+                } else {
+                    Text(model.topRange.label)
+                        .font(AquaFont.bold(10.5))
+                        .lineLimit(1)
+                }
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 7, weight: .bold))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, compact ? 5 : 7)
+            .frame(height: 16)
+            .background(
+                Capsule()
+                    .fill(Theme.selection)
+                    .overlay(Capsule().strokeBorder(Theme.divider, lineWidth: 0.75))
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .environment(\.colorScheme, .light)
+        .help("Time Range: \(model.topRange.label)")
     }
 
     private var isRefreshing: Bool {
@@ -85,7 +136,6 @@ struct WhatsNewPage: View {
                 PlaceholderText(message: "Nothing new to show yet.") { model.refresh() }
             }
         } else {
-            let layout = CoverGridMetrics.compute(width: contentWidth)
             let sections = visibleSections
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
@@ -93,25 +143,14 @@ struct WhatsNewPage: View {
                         if index > 0 {
                             EtchedDivider()
                         }
-                        sectionView(for: section, layout: layout)
+                        sectionView(for: section, layout: grid)
                     }
                 }
-                .padding(.horizontal, layout.padding)
+                .padding(.horizontal, grid.padding)
                 .padding(.top, 18)
                 .padding(.bottom, 26)
             }
             .background(Theme.content)
-            .background(
-                GeometryReader { proxy in
-                    Color.clear
-                        .onAppear {
-                            if proxy.size.width > 0 { contentWidth = proxy.size.width }
-                        }
-                        .onChange(of: proxy.size.width) { _, width in
-                            if width > 0 { contentWidth = width }
-                        }
-                }
-            )
         }
     }
 
@@ -128,19 +167,19 @@ struct WhatsNewPage: View {
         switch section {
         case .newReleases:
             coverSection(id: .newReleases, title: "New Releases", items: model.newReleases, collapsedRows: 2, layout: layout) {
-                Tile(album: $0, subtitle: releaseSubtitle($0), size: layout.tileSize)
+                Tile(album: $0, subtitle: releaseSubtitle($0))
             }
         case .madeForYou:
             coverSection(id: .madeForYou, title: "Made for You", items: model.madeForYou, collapsedRows: 1, layout: layout) {
-                Tile(playlist: $0, size: layout.tileSize)
+                Tile(playlist: $0)
             }
         case .topMixes:
             coverSection(id: .topMixes, title: "Your Top Mixes", items: model.topMixes, collapsedRows: 1, layout: layout) {
-                Tile(playlist: $0, size: layout.tileSize)
+                Tile(playlist: $0)
             }
         case .topArtists:
             coverSection(id: .topArtists, title: "Top Artists", items: model.topArtists, collapsedRows: 1, layout: layout) {
-                Tile(artist: $0, subtitle: "Artist", size: layout.tileSize)
+                Tile(artist: $0, subtitle: "Artist")
             }
         }
     }
@@ -229,6 +268,7 @@ private struct MetalTabButton: View {
                             ? Color.white
                             : Theme.metalText.opacity(activeWindow ? 1 : 0.65)
                     )
+                    .lineLimit(1)
                     .padding(.horizontal, 14)
                     .frame(height: Theme.subBarHeight)
                 if isSelected {

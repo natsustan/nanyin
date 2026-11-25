@@ -134,9 +134,14 @@ struct Sidebar: View {
                     }
                 }
             }
-            NowPlayingCover()
+            NowPlayingCover(maxArtworkHeight: maxArtworkHeight)
         }
         .background(Theme.sidebar)
+        .onGeometryChange(for: CGFloat.self) { proxy in
+            max(96, floor(proxy.size.height * 0.42 / 8) * 8)
+        } action: { maxHeight in
+            maxArtworkHeight = maxHeight
+        }
         .alert(
             "Delete “\(deleting?.name ?? "")”?",
             isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
@@ -151,6 +156,7 @@ struct Sidebar: View {
 
     @State private var deleting: Playlist?
     @State private var dropTargetPlaylistID: String?
+    @State private var maxArtworkHeight: CGFloat = 240
 
     private var library: Library { app.library }
 
@@ -476,6 +482,7 @@ private struct SidebarRow: View {
 private struct NowPlayingCover: View {
     @Environment(AppModel.self) private var app
     @Environment(\.appearsActive) private var appearsActive
+    let maxArtworkHeight: CGFloat
     @AppStorage("NowPlayingArtworkLarge") private var large = true
     @State private var hovering = false
 
@@ -543,21 +550,27 @@ private struct NowPlayingCover: View {
                 .hairline(.bottom, Theme.divider)
                 .environment(\.colorScheme, .light)
                 if large {
-                    Artwork(url: track.coverURL, placeholder: Theme.vinylBackground) {
-                        VinylPlaceholder(insetRatio: 0.09)
-                    }
-                    .aspectRatio(1, contentMode: .fit)
-                    .clipped()
-                    .overlay(alignment: .topTrailing) {
-                        if hovering {
-                            Button { large = false } label: {
-                                ArtworkToggle(symbol: "arrow.down.right.and.arrow.up.left")
+                    Color.clear
+                        .frame(maxWidth: maxArtworkHeight, maxHeight: maxArtworkHeight)
+                        .aspectRatio(1, contentMode: .fit)
+                        .overlay {
+                            Artwork(url: track.coverURL, placeholder: Theme.vinylBackground) {
+                                VinylPlaceholder(insetRatio: 0.09)
                             }
-                            .buttonStyle(.plain)
-                            .help("Hide Large Artwork")
-                            .padding(6)
                         }
-                    }
+                        .clipped()
+                        .frame(maxWidth: .infinity)
+                        .background(Theme.vinylBackground)
+                        .overlay(alignment: .topTrailing) {
+                            if hovering {
+                                Button { large = false } label: {
+                                    ArtworkToggle(symbol: "arrow.down.right.and.arrow.up.left")
+                                }
+                                .buttonStyle(.plain)
+                                .help("Hide Large Artwork")
+                                .padding(6)
+                            }
+                        }
                 }
             }
             .onHover { hovering = $0 }

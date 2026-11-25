@@ -118,9 +118,11 @@ struct FilterableTrackList<ExtraControls: View>: View {
                     Image(systemName: isPlayingHere ? "pause.fill" : "play.fill")
                         .font(.system(size: 8.5, weight: .bold))
                     Text(isPlayingHere ? "Pause" : "Play")
+                        .lineLimit(1)
                 }
             }
             .buttonStyle(GraphiteActionButtonStyle())
+            .fixedSize()
             .disabled(contextURI == nil || (!controlsCurrent && !canPlay))
 
             Button(action: player.toggleShuffle) {
@@ -131,10 +133,10 @@ struct FilterableTrackList<ExtraControls: View>: View {
 
             extraControls()
 
-            Spacer(minLength: 8)
+            Spacer(minLength: 4)
 
             DarkFilterField(text: $filter, prompt: "Filter")
-                .frame(width: 170)
+                .frame(minWidth: 72, idealWidth: 160, maxWidth: 170)
 
             sortMenu
         }
