@@ -114,6 +114,7 @@ private struct RouteView: View {
             AlbumPage(detail: detail)
         case (_, .artist(let detail)?):
             ArtistPage(detail: detail)
+                .id(detail.artistID)
         case (.search(let query), .search(let results)?):
             SearchPage(query: query, results: results)
         default:

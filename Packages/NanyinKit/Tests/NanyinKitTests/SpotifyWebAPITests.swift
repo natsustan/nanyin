@@ -150,6 +150,27 @@ struct SpotifyWebAPITests {
         let images = try await api.playlistImages("p1")
         #expect(images.best(minimum: 200)?.absoluteString == "https://mosaic.scdn.co/640/abc")
     }
+
+    @Test func paginatesArtistAlbumsByGroupAndDecodesReleaseMetadata() async throws {
+        let seen = Requests()
+        let session = StubProtocol.session { request in
+            seen.append(request)
+            let body = #"{"items":[{"id":"al1","name":"Harbour","uri":"spotify:album:al1","album_type":"single","album_group":"single","total_tracks":2,"artists":[{"name":"Artist"}],"release_date":"2026-05-01"}],"total":24,"next":"https://api.spotify.com/v1/artists/ar1/albums?offset=20&limit=10"}"#
+            return (200, [:], Data(body.utf8))
+        }
+        let api = SpotifyWebAPI(auth: try await signedIn(), session: session, cooldownStore: MemoryCooldown())
+        let page = try await api.artistAlbums("ar1", groups: .singles, offset: 10, limit: 50)
+        #expect(page.total == 24)
+        #expect(page.next != nil)
+        #expect(page.items.first?.kindLabel == "Single")
+        #expect(page.items.first?.releaseSubtitle == "2026 · Single")
+        #expect(seen.all.first?.url?.absoluteString
+            == "https://api.spotify.com/v1/artists/ar1/albums?include_groups=single&limit=10&offset=10")
+
+        let artistJSON = #"{"id":"ar1","name":"Artist","uri":"spotify:artist:ar1","genres":["indie"],"followers":{"total":12345}}"#
+        let artist = try JSONDecoder().decode(Artist.self, from: Data(artistJSON.utf8))
+        #expect(artist.followers?.total == 12345)
+    }
 }
 
 struct PlaylistEditingTests {

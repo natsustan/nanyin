@@ -97,18 +97,26 @@ final class AlbumDetail {
     }
 }
 
-/// An artist page: the artist, popular tracks and releases. Each is read
-/// on its own, so one refused read leaves the others on the page.
+/// An artist page: header stats, popular tracks with play counts, categorized
+/// paginated discography, and related artists. Each read is independent so one
+/// unavailable feed never blocks the rest of the page.
 @MainActor
 @Observable
 final class ArtistDetail {
+    let artistID: String
     private(set) var artist: Artist?
     private(set) var error: String?
-    private(set) var albums: [AlbumSummary] = []
-    private(set) var albumsError: String?
+    private(set) var monthlyListeners: UInt64?
+    private(set) var overviewFollowers: UInt64?
+    private(set) var playCounts: [String: UInt64] = [:]
+    private(set) var relatedArtists: [Artist] = []
+    private(set) var selectedGroup: ArtistAlbumGroup = .all
+    private(set) var showAllTopTracks = false
     private(set) var libraryStatus: LibraryStatus = .loading
     private(set) var isUpdatingFollow = false
     let topTracks: TrackList
+
+    private var discographyPagers: [ArtistAlbumGroup: Pager<AlbumSummary, Int>] = [:]
 
     @ObservationIgnored private let api: SpotifyWebAPI
     @ObservationIgnored private let notices: Notices
@@ -123,11 +131,62 @@ final class ArtistDetail {
         isCurrentAccount: @escaping () -> Bool = { true },
         onLibraryChanged: @escaping () -> Void = {}
     ) {
+        self.artistID = id
         self.api = api
         self.notices = notices
         self.isCurrentAccount = isCurrentAccount
         self.onLibraryChanged = onLibraryChanged
         topTracks = .topTracks(session: session, artistID: id)
+        discographyPagers[.all] = makeDiscographyPager(for: .all)
+
+        loadArtist()
+        Task {
+            guard let overview = try? await session.readArtistOverview(artistID: id),
+                  isCurrentAccount() else { return }
+            self.monthlyListeners = overview.monthlyListeners
+            self.overviewFollowers = overview.followers
+            self.playCounts = overview.playCounts
+        }
+        Task {
+            guard let related = try? await session.readRelatedArtists(artistID: id),
+                  isCurrentAccount() else { return }
+            self.relatedArtists = related
+        }
+    }
+
+    var followersCount: UInt64? {
+        if let total = artist?.followers?.total, total >= 0 {
+            return UInt64(total)
+        }
+        return overviewFollowers
+    }
+
+    /// Always non-mutating: `init` seeds `.all` and `selectGroup(_:)` seeds
+    /// any newly selected group before switching `selectedGroup`.
+    var currentDiscography: Pager<AlbumSummary, Int>? {
+        discographyPagers[selectedGroup]
+    }
+
+    /// Deduplicates duplicate regional/clean editions while keeping distinct
+    /// album vs single releases with the same title.
+    var visibleDiscography: [AlbumSummary] {
+        guard let pager = currentDiscography else { return [] }
+        var seen = Set<String>()
+        return pager.items.filter { album in
+            let title = album.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let kind = (album.album_type ?? album.album_group ?? "").lowercased()
+            return seen.insert("\(title)|\(kind)").inserted
+        }
+    }
+
+    func retryArtist() {
+        guard artist == nil, error != nil else { return }
+        error = nil
+        loadArtist()
+    }
+
+    private func loadArtist() {
+        let id = artistID
         Task {
             do {
                 let artist = try await api.artist(id)
@@ -139,15 +198,33 @@ final class ArtistDetail {
                 self.error = error.localizedDescription
             }
         }
-        Task {
-            do {
-                let items = try await api.artistAlbums(id).items
-                guard isCurrentAccount() else { return }
-                albums = items
-            } catch {
-                guard isCurrentAccount() else { return }
-                albumsError = error.localizedDescription
-            }
+    }
+
+    func selectGroup(_ group: ArtistAlbumGroup) {
+        if discographyPagers[group] == nil {
+            discographyPagers[group] = makeDiscographyPager(for: group)
+        }
+        guard group != selectedGroup else { return }
+        selectedGroup = group
+    }
+
+    func toggleShowAllTopTracks() {
+        showAllTopTracks.toggle()
+    }
+
+    func playCount(for trackURI: String) -> UInt64? {
+        playCounts[trackURI]
+    }
+
+    private func makeDiscographyPager(for group: ArtistAlbumGroup) -> Pager<AlbumSummary, Int> {
+        let id = artistID
+        let api = api
+        let isCurrentAccount = isCurrentAccount
+        return Pager(first: 0) { offset in
+            let page = try await api.artistAlbums(id, groups: group, offset: offset, limit: 10)
+            guard isCurrentAccount() else { return ([], nil, nil) }
+            let next = (page.next == nil || page.items.isEmpty) ? nil : offset + page.items.count
+            return (page.items, page.total, next)
         }
     }
 

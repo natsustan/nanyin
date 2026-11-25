@@ -171,6 +171,19 @@ struct CoreHomeShelves: Decodable, Equatable, Sendable {
     }
 }
 
+/// Artist overview metadata read through Pathfinder (`core/src/pathfinder.rs`).
+struct CoreArtistOverview: Decodable, Equatable, Sendable {
+    let monthlyListeners: UInt64?
+    let followers: UInt64?
+    let playCounts: [String: UInt64]
+
+    enum CodingKeys: String, CodingKey {
+        case monthlyListeners = "monthly_listeners"
+        case followers
+        case playCounts = "play_counts"
+    }
+}
+
 /// Questions for the Rust core (`core/src/requests.rs`), each answered once.
 enum CoreAsk: Encodable, Sendable {
     /// Answered with a `SessionPlaylistPage`.
@@ -185,6 +198,10 @@ enum CoreAsk: Encodable, Sendable {
     case newReleases(force: Bool)
     /// Answered with `CoreHomeShelves`.
     case madeForYou(timezone: String, force: Bool)
+    /// Answered with `CoreArtistOverview`.
+    case artistOverview(artistID: String)
+    /// Answered with `[Artist]`.
+    case relatedArtists(artistID: String)
 
     private enum Key: String, CodingKey {
         case ask, id, offset, timezone, force
@@ -215,6 +232,12 @@ enum CoreAsk: Encodable, Sendable {
             try c.encode("made_for_you", forKey: .ask)
             try c.encode(timezone, forKey: .timezone)
             try c.encode(force, forKey: .force)
+        case .artistOverview(let artistID):
+            try c.encode("artist_overview", forKey: .ask)
+            try c.encode(artistID, forKey: .id)
+        case .relatedArtists(let artistID):
+            try c.encode("related_artists", forKey: .ask)
+            try c.encode(artistID, forKey: .id)
         }
     }
 }

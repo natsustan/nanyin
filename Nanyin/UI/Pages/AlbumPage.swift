@@ -42,92 +42,6 @@ struct AlbumPage: View {
     }
 }
 
-struct ArtistPage: View {
-    @Environment(AppModel.self) private var app
-    let detail: ArtistDetail
-
-    var body: some View {
-        VStack(spacing: 0) {
-            PageHeader(
-                title: detail.artist?.name ?? "Artist",
-                subtitle: detail.error ?? detail.artist?.genres?.prefix(3).joined(separator: ", ") ?? ""
-            ) {
-                CoverImage(url: detail.artist?.images?.best(minimum: 200), size: 72)
-            } accessory: {
-                if let artist = detail.artist {
-                    HStack(spacing: 6) {
-                        LibraryToggleButton(
-                            status: detail.libraryStatus,
-                            addedTitle: "Following",
-                            addTitle: "Follow",
-                            disabled: detail.isUpdatingFollow,
-                            toggle: detail.toggleFollow,
-                            retry: detail.retryLibraryStatus
-                        )
-                        Button("Play") { app.player.play(contextURI: artist.uri) }
-                            .buttonStyle(TexturedButtonStyle())
-                    }
-                }
-            }
-            if let message = detail.albumsError {
-                VStack(alignment: .leading, spacing: 6) {
-                    sectionHeading("Albums and Singles")
-                        .padding(.horizontal, 18)
-                        .padding(.top, 14)
-                    PlaceholderText(message: message)
-                        .frame(height: 54)
-                }
-                .background(Theme.content)
-                EtchedDivider()
-            } else if !detail.albums.isEmpty {
-                VStack(alignment: .leading, spacing: 10) {
-                    sectionHeading("Albums and Singles")
-                        .padding(.horizontal, 18)
-                        .padding(.top, 14)
-                    ScrollView(.horizontal) {
-                        LazyHStack(alignment: .top, spacing: 16) {
-                            ForEach(detail.albums) { Tile(album: $0, subtitle: $0.releaseYear ?? "", size: 120) }
-                        }
-                        .padding(.horizontal, 18)
-                        .padding(.bottom, 14)
-                    }
-                    .scrollIndicators(.hidden)
-                    .frame(height: 174)
-                }
-                .background(Theme.content)
-                EtchedDivider()
-            }
-            HStack {
-                sectionHeading("Popular")
-                Spacer()
-            }
-            .padding(.horizontal, 18)
-            .padding(.top, 12)
-            .padding(.bottom, 8)
-            .background(Theme.content)
-            popular
-        }
-    }
-
-    private func sectionHeading(_ title: String) -> some View {
-        Text(title)
-            .font(AquaFont.bold(13.5))
-            .foregroundStyle(Theme.green)
-            .engraved()
-    }
-
-    @ViewBuilder private var popular: some View {
-        let pages = detail.topTracks.pages
-        if pages.items.isEmpty {
-            PlaceholderText(
-                message: pages.error ?? (pages.isLoading ? "Loading…" : "No popular songs."),
-                retry: pages.error == nil ? nil : { pages.retry() })
-        } else {
-            TrackListTable(list: detail.topTracks, columns: [.star, .track, .time, .popularity, .album])
-        }
-    }
-}
-
 /// A cover with a caption that opens a page, for grids and shelves.
 struct Tile: View {
     @Environment(AppModel.self) private var app
@@ -224,6 +138,30 @@ extension Tile {
         self.init(
             title: playlist.name, subtitle: playlist.owner.display_name ?? "Spotify", images: playlist.images,
             route: .playlist(id: playlist.id), playURI: playlist.uri, openTitle: "Open Playlist", size: size)
+    }
+}
+
+/// Computes an even column count and cover size so cover grids fill the pane
+/// cleanly without orphan gaps or horizontal clipping when the pane narrows.
+struct CoverGridMetrics {
+    let columns: Int
+    let tileSize: CGFloat
+    let gap: CGFloat = 18
+    let padding: CGFloat
+
+    var gridColumns: [GridItem] {
+        Array(repeating: GridItem(.fixed(tileSize), spacing: gap, alignment: .top), count: columns)
+    }
+
+    static func compute(width: CGFloat) -> CoverGridMetrics {
+        let gap: CGFloat = 18
+        let padding: CGFloat = width < 320 ? 14 : 22
+        let minTile: CGFloat = 136
+        let maxTile: CGFloat = 172
+        let inner = max(80, width - padding * 2)
+        let columns = max(1, Int((inner + gap) / (minTile + gap)))
+        let rawTile = floor((inner - gap * CGFloat(columns - 1)) / CGFloat(columns))
+        return CoverGridMetrics(columns: columns, tileSize: min(maxTile, max(80, rawTile)), padding: padding)
     }
 }
 
@@ -327,7 +265,7 @@ extension Artwork where Fallback == EmptyView {
     }
 }
 
-private struct LibraryToggleButton: View {
+struct LibraryToggleButton: View {
     let status: LibraryStatus
     let addedTitle: String
     let addTitle: String

@@ -274,6 +274,18 @@ final class PlaybackSession {
         try await request(.madeForYou(timezone: TimeZone.current.identifier, force: force))
     }
 
+    /// Monthly listeners, follower count and popular-track play counts for an
+    /// artist, read through Pathfinder on the playback session.
+    func readArtistOverview(artistID: String) async throws -> CoreArtistOverview {
+        try await request(.artistOverview(artistID: artistID))
+    }
+
+    /// Related artists ("Fans also like"), read through Pathfinder on the
+    /// playback session (Development Mode Web API grants cannot read them).
+    func readRelatedArtists(artistID: String) async throws -> [Artist] {
+        try await request(.relatedArtists(artistID: artistID))
+    }
+
     private func request<T: Decodable>(_ ask: CoreAsk) async throws -> T {
         try await untilReady()
         guard let engine else { throw ReadError.notConnected }

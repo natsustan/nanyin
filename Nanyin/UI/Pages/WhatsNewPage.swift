@@ -85,7 +85,7 @@ struct WhatsNewPage: View {
                 PlaceholderText(message: "Nothing new to show yet.") { model.refresh() }
             }
         } else {
-            let layout = GridMetrics.compute(width: contentWidth)
+            let layout = CoverGridMetrics.compute(width: contentWidth)
             let sections = visibleSections
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
@@ -124,7 +124,7 @@ struct WhatsNewPage: View {
         return result
     }
 
-    @ViewBuilder private func sectionView(for section: SectionID, layout: GridMetrics) -> some View {
+    @ViewBuilder private func sectionView(for section: SectionID, layout: CoverGridMetrics) -> some View {
         switch section {
         case .newReleases:
             coverSection(id: .newReleases, title: "New Releases", items: model.newReleases, collapsedRows: 2, layout: layout) {
@@ -150,17 +150,13 @@ struct WhatsNewPage: View {
         title: String,
         items: [Item],
         collapsedRows: Int,
-        layout: GridMetrics,
+        layout: CoverGridMetrics,
         @ViewBuilder cell: @escaping (Item) -> Cell
     ) -> some View {
         let collapsedLimit = layout.columns * collapsedRows
         let hasMore = items.count > collapsedLimit
         let isExpanded = expanded.contains(id)
         let displayed = (hasMore && !isExpanded) ? Array(items.prefix(collapsedLimit)) : items
-        let columns = Array(
-            repeating: GridItem(.fixed(layout.tileSize), spacing: layout.gap, alignment: .top),
-            count: layout.columns
-        )
 
         return VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center, spacing: 8) {
@@ -181,7 +177,7 @@ struct WhatsNewPage: View {
                     .help(isExpanded ? "Show fewer items" : "Show all \(items.count) items")
                 }
             }
-            LazyVGrid(columns: columns, alignment: .leading, spacing: 18) {
+            LazyVGrid(columns: layout.gridColumns, alignment: .leading, spacing: 18) {
                 ForEach(displayed) { item in
                     cell(item)
                 }
@@ -206,27 +202,6 @@ struct WhatsNewPage: View {
 
     private func releaseSubtitle(_ album: AlbumSummary) -> String {
         [album.artists.names, album.releaseYear ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
-    }
-}
-
-/// Computes an even column count and cover size so collapsed rows fill the
-/// pane cleanly without orphan gaps, oversized covers, or horizontal clipping
-/// when the pane narrows (e.g. with Lyrics open).
-private struct GridMetrics {
-    let columns: Int
-    let tileSize: CGFloat
-    let gap: CGFloat = 18
-    let padding: CGFloat
-
-    static func compute(width: CGFloat) -> GridMetrics {
-        let gap: CGFloat = 18
-        let padding: CGFloat = width < 320 ? 14 : 22
-        let minTile: CGFloat = 136
-        let maxTile: CGFloat = 172
-        let inner = max(80, width - padding * 2)
-        let columns = max(1, Int((inner + gap) / (minTile + gap)))
-        let rawTile = floor((inner - gap * CGFloat(columns - 1)) / CGFloat(columns))
-        return GridMetrics(columns: columns, tileSize: min(maxTile, max(80, rawTile)), padding: padding)
     }
 }
 
