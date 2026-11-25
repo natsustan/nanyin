@@ -41,6 +41,9 @@ final class Player {
     private(set) var track: CoreTrack?
     /// The URI asked for, shown as playing until the core confirms.
     private(set) var requestedURI: String?
+    /// The track URI reported by playback state events (`loading`/`playing`/`paused`),
+    /// which stays on the original playlist/context URI even when Spotify relinks audio.
+    private(set) var activeTrackURI: String?
     /// The Spotify context currently playing (playlist, album, artist, collection).
     private(set) var contextURI: String?
     private(set) var isPlaying = false
@@ -90,7 +93,21 @@ final class Player {
         session.onPlayerEvent = { [weak self] event in self?.handle(event) }
     }
 
-    var playingURI: String? { requestedURI ?? track?.uri }
+    /// Every track URI that identifies the currently playing song (the context
+    /// URI plus any Spotify-relinked alternative URI). While a new track is
+    /// still loading (`activeTrackURI` differs from the previous `track`), only
+    /// the loading track's URI is returned so two rows never highlight at once.
+    var playingURIs: Set<String> {
+        if let requestedURI { return [requestedURI] }
+        if let activeTrackURI {
+            return if let track, track.matches(uri: activeTrackURI) {
+                track.allURIs
+            } else {
+                [activeTrackURI]
+            }
+        }
+        return track?.allURIs ?? []
+    }
 
     // MARK: Commands
 
@@ -261,6 +278,7 @@ final class Player {
         resumePoint = nil
         loadingURI = nil
         requestedURI = nil
+        activeTrackURI = nil
         contextURI = nil
         track = nil
         upNext = TrackList(rows: [])
@@ -284,25 +302,29 @@ final class Player {
         switch event {
         case .trackChanged(let track):
             self.track = track
-            if requestedURI == track.uri { requestedURI = nil }
+            if let requestedURI, track.matches(uri: requestedURI) { self.requestedURI = nil }
             noteTrackChanged(track)
         case .loading(let uri, let ms):
             loadingURI = uri
+            activeTrackURI = uri
             isLoading = true
             position = Position(ms: ms, at: .now, advancing: false)
             resetListen()
         case .playing(let uri, let ms):
             resumePoint = nil
             loadingURI = nil
+            activeTrackURI = uri
             isPlaying = true
             isLoading = false
             playingElsewhere = false
             if requestedURI == uri { requestedURI = nil }
             position = Position(ms: ms, at: .now, advancing: true)
             notePlaying(uri: uri)
-        case .position(_, let ms):
+        case .position(let uri, let ms):
+            activeTrackURI = uri
             position = Position(ms: ms, at: .now, advancing: isPlaying)
-        case .paused(_, let ms):
+        case .paused(let uri, let ms):
+            activeTrackURI = uri
             isPlaying = false
             isLoading = false
             position = Position(ms: ms, at: .now, advancing: false)
@@ -311,6 +333,7 @@ final class Player {
             isPlaying = false
             isLoading = false
             requestedURI = nil
+            activeTrackURI = nil
             contextURI = nil
             position = position.continued(advancing: false)
             resetListen()
@@ -397,6 +420,13 @@ final class Player {
     }
 
     private func noteTrackChanged(_ track: CoreTrack) {
+        if let listenURI = listen.uri, track.matches(uri: listenURI) {
+            listen.uri = track.uri
+            if !listen.recorded, isPlaying, !isLoading {
+                scheduleCountTimer(for: track)
+            }
+            return
+        }
         listen.timer?.cancel()
         listen = ListenState(uri: track.uri)
         if isPlaying && !isLoading {
@@ -406,7 +436,9 @@ final class Player {
     }
 
     private func notePlaying(uri: String) {
-        if listen.uri != uri {
+        let sameTrack = listen.uri == uri
+            || (listen.uri.map { track?.matches(uri: $0) == true } == true && track?.matches(uri: uri) == true)
+        if !sameTrack {
             listen.timer?.cancel()
             listen = ListenState(uri: uri)
         }
@@ -414,7 +446,8 @@ final class Player {
         if listen.startedAt == nil {
             listen.startedAt = .now
         }
-        if let track, track.uri == uri, listen.timer == nil {
+        if let track, track.matches(uri: uri), listen.timer == nil {
+            listen.uri = track.uri
             scheduleCountTimer(for: track)
         }
     }

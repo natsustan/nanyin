@@ -253,6 +253,11 @@ impl Reads {
         track.album.covers.first().map(|cover| cover.id.to_string())
     }
 
+    /// Returns a track already in the session metadata cache, without network I/O.
+    pub fn cached_track(&self, uri: &str) -> Option<Track> {
+        self.known.lock().ok()?.get(uri).cloned()
+    }
+
     /// The tracks at `uris`, in order; none where Spotify has no song.
     /// Known tracks are not asked for again; the rest go in one request.
     pub async fn tracks(&self, uris: &[SpotifyUri]) -> Result<Vec<Option<Track>>, Error> {

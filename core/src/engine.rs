@@ -9,8 +9,8 @@ use std::{
 
 use librespot_connect::{ConnectConfig, PlaybackSnapshot, RestoreOutcome, Spirc};
 use librespot_core::{
-    Error, Session, SessionConfig, authentication::Credentials, cache::Cache, config::DeviceType,
-    error::ErrorKind,
+    Error, Session, SessionConfig, SpotifyUri, authentication::Credentials, cache::Cache,
+    config::DeviceType, error::ErrorKind,
 };
 use librespot_playback::{
     audio_backend,
@@ -21,7 +21,7 @@ use librespot_playback::{
 use serde::Deserialize;
 
 use crate::{
-    events::{Event, FailureReason},
+    events::{Event, FailureReason, Track},
     queue::QueueResolver,
     reads::Reads,
 };
@@ -95,10 +95,11 @@ pub struct Deck {
     now: Arc<Mutex<Now>>,
 }
 
-/// The session the player's events are judged against and the queue
-/// resolver reading through it; swapped when a new session takes over.
+/// The session the player's events are judged against, its metadata cache,
+/// and the queue resolver reading through it; swapped when a new session takes over.
 struct Route {
     session: Session,
+    reads: Arc<Reads>,
     queue: QueueResolver,
 }
 
@@ -292,6 +293,7 @@ impl Engine {
         let reads = Arc::new(Reads::new(session.clone()));
         let route = || Route {
             session: session.clone(),
+            reads: reads.clone(),
             queue: QueueResolver::new(reads.clone()),
         };
         let bitrate = parse_bitrate(config.bitrate);
@@ -469,38 +471,110 @@ impl Deck {
         let route = self.route.clone();
         let now = self.now.clone();
         tokio::spawn(async move {
-            while let Some(event) = events.recv().await {
+            let mut pairer = RelinkPairer::default();
+            let mut relink_gen: u64 = 0;
+            let (relink_tx, mut relink_rx) =
+                tokio::sync::mpsc::unbounded_channel::<(u64, Track)>();
+            loop {
+                let event = tokio::select! {
+                    biased;
+                    maybe_event = events.recv() => match maybe_event {
+                        Some(event) => event,
+                        None => break,
+                    },
+                    Some((generation, track)) = relink_rx.recv() => {
+                        if generation == relink_gen {
+                            emit(Event::TrackChanged { track });
+                        }
+                        continue;
+                    }
+                };
                 now.lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner())
                     .note(&event);
-                let route = route
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
-                if route.session.is_invalid()
-                    && matches!(
-                        event,
-                        PlayerEvent::SessionDisconnected { .. } | PlayerEvent::Unavailable { .. }
-                    )
-                {
-                    // Our own connection dropped: Spirc reports it as a
-                    // disconnect, and a track loading meanwhile fails for
-                    // want of its key. Neither is another device taking
-                    // over or a missing song; `SessionEnded` follows.
-                    continue;
+                let reads = {
+                    let route = route
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    if route.session.is_invalid()
+                        && matches!(
+                            event,
+                            PlayerEvent::SessionDisconnected { .. }
+                                | PlayerEvent::Unavailable { .. }
+                        )
+                    {
+                        // Our own connection dropped: Spirc reports it as a
+                        // disconnect, and a track loading meanwhile fails for
+                        // want of its key. Neither is another device taking
+                        // over or a missing song; `SessionEnded` follows.
+                        continue;
+                    }
+                    if let PlayerEvent::SetQueue {
+                        context_uri,
+                        next_tracks,
+                        ..
+                    } = event
+                    {
+                        let emit = emit.clone();
+                        route
+                            .queue
+                            .update(context_uri, next_tracks, move |event| emit(event));
+                        continue;
+                    }
+                    route.reads.clone()
+                };
+                match event {
+                    PlayerEvent::TrackChanged { audio_item } => {
+                        relink_gen = relink_gen.wrapping_add(1);
+                        if let Some(track) = pairer.on_track_changed(Track::from_item(&audio_item))
+                        {
+                            emit(Event::TrackChanged { track });
+                        }
+                        continue;
+                    }
+                    PlayerEvent::Playing { ref track_id, .. }
+                    | PlayerEvent::Paused { ref track_id, .. } => {
+                        let context_uri = track_id.to_uri();
+                        match pairer
+                            .on_playing_or_paused(&context_uri, |uri| reads.cached_track(uri))
+                        {
+                            Some(PairedTrack::Ready(track)) => emit(Event::TrackChanged { track }),
+                            Some(PairedTrack::NeedsLookup {
+                                context_uri,
+                                playable,
+                                provisional,
+                            }) => {
+                                emit(Event::TrackChanged { track: provisional });
+                                relink_gen = relink_gen.wrapping_add(1);
+                                spawn_relink_lookup(
+                                    reads,
+                                    context_uri,
+                                    playable,
+                                    relink_gen,
+                                    relink_tx.clone(),
+                                );
+                            }
+                            None => {}
+                        }
+                    }
+                    PlayerEvent::Loading { .. }
+                    | PlayerEvent::Stopped { .. }
+                    | PlayerEvent::Unavailable { .. }
+                    | PlayerEvent::EndOfTrack { .. }
+                    | PlayerEvent::SessionDisconnected { .. } => {
+                        relink_gen = relink_gen.wrapping_add(1);
+                        if let Some(track) = pairer.flush() {
+                            emit(Event::TrackChanged { track });
+                        }
+                    }
+                    _ => {}
                 }
-                if let PlayerEvent::SetQueue {
-                    context_uri,
-                    next_tracks,
-                    ..
-                } = event
-                {
-                    let emit = emit.clone();
-                    route
-                        .queue
-                        .update(context_uri, next_tracks, move |event| emit(event));
-                } else if let Some(event) = Event::from_player(event) {
+                if let Some(event) = Event::from_player(event) {
                     emit(event);
                 }
+            }
+            if let Some(track) = pairer.flush() {
+                emit(Event::TrackChanged { track });
             }
         });
     }
@@ -529,6 +603,83 @@ impl Deck {
         self.player.stop();
         crate::RUNTIME.spawn_blocking(move || drop(self));
     }
+}
+
+/// Pairs `PlayerEvent::TrackChanged { audio_item }` with the immediately
+/// following `Playing { track_id }` or `Paused { track_id }` emitted by
+/// librespot's `start_playback`, so relinked tracks (`track_id != audio_item.uri`)
+/// keep the requested/context track's identity and display metadata.
+#[derive(Default)]
+struct RelinkPairer {
+    pending: Option<Track>,
+}
+
+#[derive(Debug, PartialEq)]
+enum PairedTrack {
+    Ready(Track),
+    NeedsLookup {
+        context_uri: String,
+        playable: Track,
+        provisional: Track,
+    },
+}
+
+impl RelinkPairer {
+    fn on_track_changed(&mut self, track: Track) -> Option<Track> {
+        self.pending.replace(track)
+    }
+
+    fn on_playing_or_paused(
+        &mut self,
+        track_uri: &str,
+        cached: impl FnOnce(&str) -> Option<Track>,
+    ) -> Option<PairedTrack> {
+        let playable = self.pending.take()?;
+        if track_uri == playable.uri {
+            return Some(PairedTrack::Ready(playable));
+        }
+        if let Some(original) = cached(track_uri) {
+            return Some(PairedTrack::Ready(Track::relinked_from(
+                original, &playable,
+            )));
+        }
+        let provisional = Track::with_context_uri(track_uri.to_owned(), &playable);
+        Some(PairedTrack::NeedsLookup {
+            context_uri: track_uri.to_owned(),
+            playable,
+            provisional,
+        })
+    }
+
+    fn flush(&mut self) -> Option<Track> {
+        self.pending.take()
+    }
+}
+
+/// Resolves the original track metadata for a relinked song when it was not
+/// already in `Reads`'s cache and sends the result back to `forward_events`
+/// so generation checks and `TrackChanged` emissions stay strictly serialized.
+fn spawn_relink_lookup(
+    reads: Arc<Reads>,
+    context_uri: String,
+    playable: Track,
+    generation: u64,
+    tx: tokio::sync::mpsc::UnboundedSender<(u64, Track)>,
+) {
+    let Ok(uri) = SpotifyUri::from_uri(&context_uri) else {
+        return;
+    };
+    if !matches!(uri, SpotifyUri::Track { .. }) {
+        return;
+    }
+    tokio::spawn(async move {
+        let Ok(mut found) = reads.tracks(&[uri]).await else {
+            return;
+        };
+        if let Some(Some(original)) = found.pop() {
+            let _ = tx.send((generation, Track::relinked_from(original, &playable)));
+        }
+    });
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -757,5 +908,75 @@ mod tests {
         let cfg: Config = serde_json::from_str(raw).unwrap();
         assert_eq!(cfg.bitrate, None);
         assert!(!cfg.normalisation);
+    }
+
+    #[test]
+    fn relink_pairer_resolves_cached_and_uncached_relinked_tracks() {
+        let mut pairer = RelinkPairer::default();
+        let playable = Track {
+            uri: "spotify:track:alt".into(),
+            linked_uri: None,
+            name: "Wordless Groans".into(),
+            artists: vec![],
+            album: "王".into(),
+            album_uri: Some("spotify:album:lord".into()),
+            cover_url: Some("https://i.scdn.co/image/lord".into()),
+            duration_ms: 298_000,
+            explicit: false,
+        };
+        let original = Track {
+            uri: "spotify:track:orig".into(),
+            linked_uri: None,
+            name: "我不是神，我只是平凡卻直拗愛著你的人".into(),
+            artists: vec![],
+            album: "我不是神，我只是平凡卻直拗愛著你的人".into(),
+            album_uri: Some("spotify:album:single".into()),
+            cover_url: Some("https://i.scdn.co/image/single".into()),
+            duration_ms: 300_000,
+            explicit: false,
+        };
+
+        // Normal track passes straight through without linked_uri.
+        assert_eq!(pairer.on_track_changed(playable.clone()), None);
+        assert_eq!(
+            pairer.on_playing_or_paused("spotify:track:alt", |_| None),
+            Some(PairedTrack::Ready(playable.clone()))
+        );
+        // Subsequent Playing/Paused (e.g. pause/resume) does not re-emit TrackChanged.
+        assert_eq!(
+            pairer.on_playing_or_paused("spotify:track:alt", |_| None),
+            None
+        );
+
+        // Relinked track with cached metadata resolves immediately without network lookup.
+        assert_eq!(pairer.on_track_changed(playable.clone()), None);
+        let expected = Track::relinked_from(original.clone(), &playable);
+        assert_eq!(
+            pairer.on_playing_or_paused("spotify:track:orig", |uri| {
+                (uri == "spotify:track:orig").then(|| original.clone())
+            }),
+            Some(PairedTrack::Ready(expected))
+        );
+
+        // Relinked track without cache emits provisional track with both URIs and requests lookup.
+        assert_eq!(pairer.on_track_changed(playable.clone()), None);
+        match pairer.on_playing_or_paused("spotify:track:orig", |_| None) {
+            Some(PairedTrack::NeedsLookup {
+                context_uri,
+                playable: got_playable,
+                provisional,
+            }) => {
+                assert_eq!(context_uri, "spotify:track:orig");
+                assert_eq!(got_playable, playable);
+                assert_eq!(provisional.uri, "spotify:track:orig");
+                assert_eq!(provisional.linked_uri.as_deref(), Some("spotify:track:alt"));
+            }
+            other => panic!("expected NeedsLookup, got {other:?}"),
+        }
+
+        // Flush returns any dangling pending track when playback stops early.
+        assert_eq!(pairer.on_track_changed(playable.clone()), None);
+        assert_eq!(pairer.flush(), Some(playable));
+        assert_eq!(pairer.flush(), None);
     }
 }

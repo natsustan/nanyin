@@ -93,6 +93,10 @@ pub enum FailureReason {
 #[derive(Debug, Serialize, PartialEq, Clone)]
 pub struct Track {
     pub uri: String,
+    /// When Spotify relinked playback to an alternative track, the URI of the
+    /// playable audio item actually being streamed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub linked_uri: Option<String>,
     pub name: String,
     pub artists: Vec<Artist>,
     pub album: String,
@@ -149,6 +153,7 @@ impl Track {
             .map(|cover| cover.url.clone());
         Self {
             uri: item.uri.clone(),
+            linked_uri: None,
             name: item.name.clone(),
             artists,
             album,
@@ -164,6 +169,7 @@ impl Track {
     pub fn from_metadata(track: &librespot_metadata::Track, images: &str) -> Self {
         Self {
             uri: track.id.to_uri(),
+            linked_uri: None,
             name: track.name.clone(),
             artists: track
                 .artists
@@ -183,6 +189,51 @@ impl Track {
                 .map(|cover| images.replace("{file_id}", &cover.id.to_base16())),
             duration_ms: u32::try_from(track.duration).unwrap_or_default(),
             explicit: track.is_explicit,
+        }
+    }
+
+    /// Combines the requested/context track's display metadata (`original`)
+    /// with the relinked playable audio item's actual stream duration and URI.
+    pub fn relinked_from(original: Self, playable: &Self) -> Self {
+        let pick = |preferred: String, fallback: &str| {
+            if preferred.is_empty() {
+                fallback.to_owned()
+            } else {
+                preferred
+            }
+        };
+        Self {
+            linked_uri: (original.uri != playable.uri).then(|| playable.uri.clone()),
+            uri: original.uri,
+            name: pick(original.name, &playable.name),
+            artists: if original.artists.is_empty() {
+                playable.artists.clone()
+            } else {
+                original.artists
+            },
+            album: pick(original.album, &playable.album),
+            album_uri: original.album_uri.or_else(|| playable.album_uri.clone()),
+            cover_url: original.cover_url.or_else(|| playable.cover_url.clone()),
+            duration_ms: if playable.duration_ms > 0 {
+                playable.duration_ms
+            } else {
+                original.duration_ms
+            },
+            explicit: original.explicit || playable.explicit,
+        }
+    }
+
+    /// Provisional relinked track while `context_uri`'s own metadata is still
+    /// being fetched: keeps the playable metadata for display while exposing
+    /// both URIs so track tables and star state align immediately.
+    pub fn with_context_uri(context_uri: String, playable: &Self) -> Self {
+        if context_uri == playable.uri {
+            return playable.clone();
+        }
+        Self {
+            uri: context_uri,
+            linked_uri: Some(playable.uri.clone()),
+            ..playable.clone()
         }
     }
 }
@@ -279,5 +330,55 @@ mod tests {
             json,
             r#"{"type":"connect_failed","reason":"auth_rejected","message":"no"}"#
         );
+    }
+
+    #[test]
+    fn relinked_track_keeps_original_display_and_playable_duration() {
+        let original = Track {
+            uri: "spotify:track:orig".into(),
+            linked_uri: None,
+            name: "我不是神，我只是平凡卻直拗愛著你的人".into(),
+            artists: vec![Artist {
+                uri: "spotify:artist:yoga".into(),
+                name: "Yoga Lin".into(),
+            }],
+            album: "我不是神，我只是平凡卻直拗愛著你的人".into(),
+            album_uri: Some("spotify:album:single".into()),
+            cover_url: Some("https://i.scdn.co/image/single".into()),
+            duration_ms: 300_000,
+            explicit: false,
+        };
+        let playable = Track {
+            uri: "spotify:track:alt".into(),
+            linked_uri: None,
+            name: "Wordless Groans".into(),
+            artists: vec![Artist {
+                uri: "spotify:artist:yoga".into(),
+                name: "Yoga Lin".into(),
+            }],
+            album: "王".into(),
+            album_uri: Some("spotify:album:lord".into()),
+            cover_url: Some("https://i.scdn.co/image/lord".into()),
+            duration_ms: 298_000,
+            explicit: false,
+        };
+
+        let merged = Track::relinked_from(original, &playable);
+        assert_eq!(merged.uri, "spotify:track:orig");
+        assert_eq!(merged.linked_uri.as_deref(), Some("spotify:track:alt"));
+        assert_eq!(merged.name, "我不是神，我只是平凡卻直拗愛著你的人");
+        assert_eq!(merged.album, "我不是神，我只是平凡卻直拗愛著你的人");
+        assert_eq!(merged.duration_ms, 298_000);
+
+        let provisional = Track::with_context_uri("spotify:track:orig".into(), &playable);
+        assert_eq!(provisional.uri, "spotify:track:orig");
+        assert_eq!(provisional.linked_uri.as_deref(), Some("spotify:track:alt"));
+        assert_eq!(provisional.name, "Wordless Groans");
+
+        // Non-relinked track omits `linked_uri` from JSON.
+        let json = serde_json::to_string(&playable).unwrap();
+        assert!(!json.contains("linked_uri"));
+        let relinked_json = serde_json::to_string(&merged).unwrap();
+        assert!(relinked_json.contains(r#""linked_uri":"spotify:track:alt""#));
     }
 }
