@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "NanyinKit",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v15)],
     products: [
         .library(name: "NanyinKit", targets: ["NanyinKit"]),
     ],

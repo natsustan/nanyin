@@ -6,7 +6,7 @@ A native macOS Spotify client inspired by the 2010 Aqua-era Spotify for Mac: bru
 
 ## Requirements
 
-- **macOS 14.0 (Sonoma) or later** on Apple Silicon (`arm64`)
+- **macOS 15.0 (Sequoia) or later** on Apple Silicon (`arm64`)
 - A **Spotify Premium** account (required by Spotify both for creating a personal Web API app and for playback via librespot)
 
 ## Download & Install
