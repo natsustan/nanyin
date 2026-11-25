@@ -1,10 +1,10 @@
 import NanyinKit
 import SwiftUI
 
-/// The Snow Leopard brushed-metal transport bar along the bottom of the window.
+/// The dark graphite transport bar along the bottom of the window, matching
+/// 2010 Spotify-for-Mac.
 struct PlayerBar: View {
     @Environment(AppModel.self) private var app
-    @Environment(\.appearsActive) private var appearsActive
     @State private var showDevices = false
     static let height: CGFloat = 46
 
@@ -26,22 +26,22 @@ struct PlayerBar: View {
             ProgressScrubber()
             HStack(spacing: 2) {
                 Button(action: player.toggleShuffle) { Image(systemName: "shuffle") }
-                    .buttonStyle(MetalBarToggleStyle(isOn: player.shuffle))
+                    .buttonStyle(GraphiteToggleStyle(isOn: player.shuffle))
                     .help("Shuffle")
                 Button(action: player.cycleRepeat) {
                     Image(systemName: player.repeatMode == .track ? "repeat.1" : "repeat")
                 }
-                .buttonStyle(MetalBarToggleStyle(isOn: player.repeatMode != .off))
+                .buttonStyle(GraphiteToggleStyle(isOn: player.repeatMode != .off))
                 .help("Repeat")
                 Button { app.showLyrics.toggle() } label: {
                     Image(systemName: "quote.bubble.fill")
                 }
-                .buttonStyle(MetalBarToggleStyle(isOn: app.showLyrics))
+                .buttonStyle(GraphiteToggleStyle(isOn: app.showLyrics))
                 .help(app.showLyrics ? "Hide Lyrics" : "Show Lyrics")
                 Button { showDevices.toggle() } label: {
                     Image(systemName: "hifispeaker.2.fill")
                 }
-                .buttonStyle(MetalBarToggleStyle(isOn: player.playingElsewhere || showDevices))
+                .buttonStyle(GraphiteToggleStyle(isOn: player.playingElsewhere || showDevices))
                 .help("Connect to a Device")
                 .popover(isPresented: $showDevices, arrowEdge: .top) {
                     ConnectDevicesPopover(isPresented: $showDevices)
@@ -50,10 +50,10 @@ struct PlayerBar: View {
         }
         .padding(.horizontal, 12)
         .frame(height: Self.height)
-        .background(Theme.playerBar(active: appearsActive))
-        .hairline(.top, Theme.playerBarHighlight)
+        .background(Theme.graphite)
+        .hairline(.top, Theme.graphiteHighlight)
         .padding(.top, 1)
-        .hairline(.top, Theme.playerBarEdge)
+        .hairline(.top, Theme.graphiteEdge)
     }
 }
 
@@ -114,22 +114,19 @@ private struct PositionSchedule: TimelineSchedule {
 }
 
 private struct TimeLabel: View {
-    @Environment(\.appearsActive) private var appearsActive
     let ms: Int
 
     var body: some View {
         Text(TrackRow.format(ms: ms))
             .font(AquaFont.regular(11))
             .monospacedDigit()
-            .foregroundStyle(Theme.metalText.opacity(appearsActive ? 0.9 : 0.55))
-            .embossed()
+            .foregroundStyle(Theme.hex(0xD6D6D6))
             .frame(width: 38)
     }
 }
 
 private struct VolumeSlider: View {
     @Environment(AppModel.self) private var app
-    @Environment(\.appearsActive) private var appearsActive
 
     var body: some View {
         let player = app.player
@@ -138,11 +135,7 @@ private struct VolumeSlider: View {
             Button(action: player.toggleMute) {
                 Image(systemName: speakerSymbol(muted: player.isMuted, fraction: fraction))
                     .font(.system(size: 10.5, weight: .semibold))
-                    .foregroundStyle(
-                        (player.isMuted ? Theme.metalSecondaryText : Theme.metalText)
-                            .opacity(appearsActive ? 0.9 : 0.55)
-                    )
-                    .embossed()
+                    .foregroundStyle(player.isMuted ? Theme.secondaryText : Theme.hex(0xC8C8C8))
                     .frame(width: 15, height: 15)
             }
             .buttonStyle(.plain)
@@ -299,8 +292,8 @@ private struct ConnectDevicesPopover: View {
     }
 }
 
-/// A recessed dark groove filled in green up to `fraction`, with a glossy
-/// knob. Reports drags as fractions; `ended` is true on release.
+/// A recessed dark groove filled in muted metallic grey up to `fraction`, with
+/// a glossy knob. Reports drags as fractions; `ended` is true on release.
 struct AquaTrack: View {
     let fraction: Double
     var knob = true
@@ -312,21 +305,21 @@ struct AquaTrack: View {
             let clamped = min(max(fraction, 0), 1)
             let groove = Capsule()
             ZStack(alignment: .leading) {
-                groove.fill(.white.opacity(0.45))
+                groove.fill(.white.opacity(0.10))
                     .frame(height: 6)
                     .offset(y: 1)
-                groove.fill(LinearGradient(colors: [Theme.hex(0x2A2A2A), Theme.hex(0x4E4E4E)], startPoint: .top, endPoint: .bottom))
+                groove.fill(LinearGradient(colors: [Theme.hex(0x181818), Theme.hex(0x323232)], startPoint: .top, endPoint: .bottom))
                     .frame(height: 6)
-                    .overlay(groove.strokeBorder(.black.opacity(0.55), lineWidth: 0.75))
-                groove.fill(LinearGradient(colors: [Theme.hex(0xA6D82E), Theme.hex(0x6E9E00)], startPoint: .top, endPoint: .bottom))
+                    .overlay(groove.strokeBorder(.black.opacity(0.65), lineWidth: 0.75))
+                groove.fill(LinearGradient(colors: [Theme.hex(0x787878), Theme.hex(0x5A5A5A)], startPoint: .top, endPoint: .bottom))
                     .frame(width: max(6, width * clamped), height: 6)
-                    .overlay(groove.strokeBorder(Theme.hex(0x3D5900, 0.7), lineWidth: 0.5))
+                    .overlay(groove.strokeBorder(.black.opacity(0.45), lineWidth: 0.5))
                     .opacity(clamped > 0 ? 1 : 0)
                 if knob {
                     Circle()
-                        .fill(LinearGradient(colors: [Theme.hex(0xFAFAFA), Theme.hex(0xB5B5B5)], startPoint: .top, endPoint: .bottom))
-                        .overlay(Circle().strokeBorder(.black.opacity(0.6), lineWidth: 0.75))
-                        .shadow(color: .black.opacity(0.45), radius: 1, y: 1)
+                        .fill(LinearGradient(colors: [Theme.hex(0xFAFAFA), Theme.hex(0xB8B8B8)], startPoint: .top, endPoint: .bottom))
+                        .overlay(Circle().strokeBorder(.black.opacity(0.65), lineWidth: 0.75))
+                        .shadow(color: .black.opacity(0.5), radius: 1, y: 1)
                         .frame(width: 11, height: 11)
                         .offset(x: (width - 11) * clamped)
                 }

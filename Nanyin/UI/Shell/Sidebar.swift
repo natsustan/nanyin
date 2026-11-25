@@ -283,7 +283,6 @@ private struct SidebarLibraryHeader: View {
                 .lineLimit(1)
             Spacer(minLength: 0)
         }
-        .shadow(color: .black.opacity(0.35), radius: 0, y: 1)
         .padding(.horizontal, 10)
         .frame(height: 22)
     }
@@ -316,13 +315,11 @@ private struct SidebarHeaderBar: View {
                     Text(app.account.profile?.name ?? "Library")
                         .font(AquaFont.bold(12))
                         .foregroundStyle(Theme.metalText.opacity(appearsActive ? 1 : 0.65))
-                        .embossed()
                         .lineLimit(1)
                     if hoveringAccount {
                         Image(systemName: "chevron.down")
                             .font(.system(size: 7.5, weight: .bold))
                             .foregroundStyle(Theme.metalSecondaryText)
-                            .embossed()
                     }
                 }
             }
@@ -443,11 +440,6 @@ private struct SidebarRow: View {
                     .foregroundStyle(isSelected ? selectedInk : Theme.green)
             }
         }
-        .shadow(
-            color: isSelected ? .white.opacity(0.45) : .black.opacity(0.35),
-            radius: 0,
-            y: 1
-        )
         .padding(.leading, 10 + indent)
         .padding(.trailing, 10)
         .frame(height: 22)
@@ -506,13 +498,11 @@ private struct NowPlayingCover: View {
                     VStack(alignment: .leading, spacing: 1) {
                         LinkText(parts: [(track.name, track.albumURI.flatMap(Route.init(uri:)))], color: primaryInk)
                             .font(AquaFont.bold(11.5))
-                            .embossed()
                         if app.player.playingElsewhere {
                             HStack(spacing: 4) {
                                 Text("Playing elsewhere")
                                     .font(AquaFont.regular(10.5))
                                     .foregroundStyle(secondaryInk)
-                                    .embossed()
                                 if app.session.isReady {
                                     Button("Play Here") { app.connect.transferToThisMac() }
                                         .buttonStyle(.link)
@@ -523,7 +513,6 @@ private struct NowPlayingCover: View {
                         } else {
                             LinkText(parts: track.artists.map { ($0.name, Route(uri: $0.uri)) }, color: secondaryInk)
                                 .font(AquaFont.regular(10.5))
-                                .embossed()
                         }
                     }
                     .lineLimit(1)
@@ -537,11 +526,6 @@ private struct NowPlayingCover: View {
                                     isStarred
                                         ? Theme.star
                                         : Theme.metalSecondaryText.opacity(starred == nil ? 0.35 : 0.8)
-                                )
-                                .shadow(
-                                    color: isStarred ? .black.opacity(0.55) : .white.opacity(0.55),
-                                    radius: 0,
-                                    y: isStarred ? -0.5 : 1
                                 )
                                 .frame(width: 22, height: 22)
                                 .contentShape(Rectangle())

@@ -163,7 +163,6 @@ struct WhatsNewPage: View {
                 Text(title)
                     .font(AquaFont.bold(14))
                     .foregroundStyle(Theme.green)
-                    .engraved()
                 Spacer(minLength: 8)
                 if hasMore {
                     Button(isExpanded ? "Show Less" : "More") {
@@ -230,11 +229,6 @@ private struct MetalTabButton: View {
                             ? Color.white
                             : Theme.metalText.opacity(activeWindow ? 1 : 0.65)
                     )
-                    .shadow(
-                        color: isSelected ? .black.opacity(0.65) : .white.opacity(0.6),
-                        radius: 0,
-                        y: isSelected ? -1 : 1
-                    )
                     .padding(.horizontal, 14)
                     .frame(height: Theme.subBarHeight)
                 if isSelected {
@@ -271,11 +265,6 @@ private struct MetalRangePill: View {
             Text(title)
                 .font(isSelected ? AquaFont.bold(10.5) : AquaFont.regular(10.5))
                 .foregroundStyle(isSelected ? .white : Theme.metalText)
-                .shadow(
-                    color: isSelected ? .black.opacity(0.55) : .white.opacity(0.55),
-                    radius: 0,
-                    y: isSelected ? -1 : 1
-                )
                 .padding(.horizontal, 7)
                 .frame(height: 16)
                 .background {

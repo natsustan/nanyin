@@ -369,7 +369,6 @@ struct PageHeader<Artwork: View, Accessory: View>: View {
                         .padding(.top, 2)
                 }
             }
-            .engraved()
             Spacer(minLength: 0)
             accessory
         }
