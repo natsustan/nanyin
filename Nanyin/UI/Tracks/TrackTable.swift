@@ -31,7 +31,8 @@ struct TrackTable: NSViewRepresentable {
     static let reorderPasteboardType = NSPasteboard.PasteboardType("com.cosmoss.nanyin.track-row")
 
     let rows: [TrackRow]
-    let playingURI: String?
+    let playingURIs: Set<String>
+    var isPlaybackActive = true
     /// Changes whenever any star changes.
     var starsVersion = 0
     var columns = Column.standard
@@ -94,10 +95,12 @@ struct TrackTable: NSViewRepresentable {
         coordinator.actions = actions
         guard let table = coordinator.table else { return }
         let old = coordinator.rows
-        let wasPlaying = coordinator.playingURI
+        let wasPlaying = coordinator.playingURIs
+        let wasActive = coordinator.isPlaybackActive
         let starsChanged = coordinator.starsVersion != starsVersion
         coordinator.rows = rows
-        coordinator.playingURI = playingURI
+        coordinator.playingURIs = playingURIs
+        coordinator.isPlaybackActive = isPlaybackActive
         coordinator.starsVersion = starsVersion
         if old != rows {
             // Rows read through the session carry no popularity.
@@ -110,9 +113,14 @@ struct TrackTable: NSViewRepresentable {
         // Redraw the rows on screen that changed: every column of the rows
         // that start or stop playing (green), the stars of all of them.
         let visible = table.rows(in: table.visibleRect)
-        let onScreen = IndexSet(integersIn: visible.location ..< visible.location + visible.length)
-        if wasPlaying != playingURI {
-            let changed = onScreen.filter { [wasPlaying, playingURI].contains(rows[$0].uri) }
+        let start = max(0, visible.location)
+        let end = min(rows.count, visible.location + visible.length)
+        let onScreen = start < end ? IndexSet(integersIn: start ..< end) : IndexSet()
+        if wasPlaying != playingURIs || wasActive != isPlaybackActive {
+            let affected = wasActive != isPlaybackActive
+                ? wasPlaying.union(playingURIs)
+                : wasPlaying.symmetricDifference(playingURIs)
+            let changed = onScreen.filter { affected.contains(rows[$0].uri) }
             table.reloadData(forRowIndexes: IndexSet(changed), columnIndexes: IndexSet(integersIn: 0 ..< table.numberOfColumns))
         }
         if starsChanged, let star = columns.firstIndex(of: .star) {
@@ -123,7 +131,8 @@ struct TrackTable: NSViewRepresentable {
     @MainActor
     final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSMenuDelegate {
         var rows: [TrackRow] = []
-        var playingURI: String?
+        var playingURIs: Set<String> = []
+        var isPlaybackActive = true
         var starsVersion = 0
         var actions = Actions(play: { _ in }, open: { _ in })
         weak var table: TrackTableView?
@@ -141,7 +150,7 @@ struct TrackTable: NSViewRepresentable {
         func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
             guard let tableColumn, let column = Column(rawValue: tableColumn.identifier.rawValue) else { return nil }
             let track = rows[row]
-            let isPlaying = track.uri == playingURI
+            let isPlaying = playingURIs.contains(track.uri)
             let hover = (tableView as? TrackTableView)?.hovered
             let hovered = hover?.row == row && hover?.column == tableView.column(withIdentifier: tableColumn.identifier)
             switch column {
@@ -150,7 +159,8 @@ struct TrackTable: NSViewRepresentable {
                 // client; the star shows again under the pointer to be clicked.
                 let view = reuse(tableView, "symbol") { SymbolCell() }
                 let star = actions.isStarred(track).flatMap { $0 ? SymbolCell.starred : SymbolCell.unstarred }
-                view.image = isPlaying && !hovered ? SymbolCell.speaker : star
+                let indicator = isPlaybackActive ? SymbolCell.speaker : SymbolCell.pausedSpeaker
+                view.image = isPlaying && !hovered ? indicator : star
                 return view
             case .popularity:
                 let view = reuse(tableView, "popularity") { PopularityCell() }
@@ -599,6 +609,7 @@ private final class SymbolCell: NSView {
     }
 
     static let speaker = symbol("speaker.wave.2.fill", Theme.nsGreen)
+    static let pausedSpeaker = symbol("speaker.fill", Theme.nsGreen)
     /// The 2010 star: an outline until starred, then filled in gold.
     static let starred = symbol("star.fill", Theme.nsStar)
     static let unstarred = symbol("star", Theme.nsSecondaryText.withAlphaComponent(0.5))

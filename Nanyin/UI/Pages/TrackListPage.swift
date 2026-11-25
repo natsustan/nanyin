@@ -233,7 +233,8 @@ struct TrackListTable: View {
         let stars = app.stars
         TrackTable(
             rows: rowsOverride ?? list.rows,
-            playingURI: player.playingURI,
+            playingURIs: player.playingURIs,
+            isPlaybackActive: player.isPlaying,
             starsVersion: stars.version,
             columns: columns,
             actions: .init(

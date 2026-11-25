@@ -44,7 +44,7 @@ enum DemoContent {
             pages: [.whatsNew: .whatsNew(whatsNew), .likedSongs: .tracks(list)])
         app.player.showDemo(
             CoreTrack(
-                uri: rows[4].uri, name: rows[4].name, artists: [.init(uri: "", name: rows[4].artistNames)],
+                uri: rows[4].uri, linkedURI: nil, name: rows[4].name, artists: [.init(uri: "", name: rows[4].artistNames)],
                 album: rows[4].album, albumURI: nil, coverURL: nil, durationMs: 206_000, explicit: false),
             positionMs: 112_000,
             upNext: TrackList(rows: Array(rows.dropFirst(5))))

@@ -51,8 +51,9 @@ final class LyricsModel {
         trackURI = track.uri
         state = .loading
 
-        let trackID = Route.trackID(track.uri)
-        let coverFileID = Self.extractCoverFileID(from: track.coverURL)
+        let spotifyURI = track.linkedURI ?? track.uri
+        let trackID = Route.trackID(spotifyURI)
+        let coverFileID = track.linkedURI == nil ? Self.extractCoverFileID(from: track.coverURL) : nil
         let query = LyricsQuery(
             trackURI: track.uri,
             title: track.name,

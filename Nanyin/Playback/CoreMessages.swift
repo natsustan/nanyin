@@ -86,6 +86,9 @@ struct CoreTrack: Decodable, Equatable, Sendable {
     }
 
     let uri: String
+    /// When Spotify relinked playback to an alternative track, the playable
+    /// audio item's URI.
+    let linkedURI: String?
     let name: String
     let artists: [Artist]
     let album: String
@@ -96,12 +99,19 @@ struct CoreTrack: Decodable, Equatable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case uri, name, artists, album, explicit
+        case linkedURI = "linked_uri"
         case albumURI = "album_uri"
         case coverURL = "cover_url"
         case durationMs = "duration_ms"
     }
 
     var artistNames: String { artists.map(\.name).joined(separator: ", ") }
+    var isTrack: Bool { uri.hasPrefix("spotify:track:") }
+    var allURIs: Set<String> { linkedURI.map { [uri, $0] } ?? [uri] }
+
+    func matches(uri target: String) -> Bool {
+        uri == target || linkedURI == target
+    }
 }
 
 /// A page of a playlist read through the playback session.
