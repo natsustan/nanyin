@@ -156,6 +156,86 @@ struct GraphiteHeader<Content: View>: View {
     }
 }
 
+/// Vertical etched separator inside a 24-pt brushed-metal sub-bar.
+struct MetalSubBarDivider: View {
+    var body: some View {
+        HStack(spacing: 0) {
+            Rectangle().fill(Theme.subBarDividerDark).frame(width: 1)
+            Rectangle().fill(Theme.subBarDividerLight).frame(width: 1)
+        }
+    }
+}
+
+/// Subtle etched horizontal groove on charcoal surfaces (sidebar & What's New).
+struct EtchedDivider: View {
+    var body: some View {
+        VStack(spacing: 0) {
+            Rectangle().fill(Theme.grooveDark).frame(height: 1)
+            Rectangle().fill(Theme.grooveLight).frame(height: 1)
+        }
+    }
+}
+
+/// A flat brushed-metal button inside a 24-pt sub-bar (e.g. Sidebar `+`,
+/// What's New Refresh, Lyrics close), recessed darker while pressed.
+struct MetalSubBarButtonStyle: ButtonStyle {
+    var width: CGFloat? = 26
+
+    func makeBody(configuration: Configuration) -> some View {
+        BodyView(configuration: configuration, width: width)
+    }
+
+    private struct BodyView: View {
+        let configuration: Configuration
+        let width: CGFloat?
+        @Environment(\.isEnabled) private var isEnabled
+        @Environment(\.appearsActive) private var appearsActive
+        @State private var hovering = false
+
+        var body: some View {
+            configuration.label
+                .foregroundStyle(Theme.metalText.opacity(isEnabled ? (appearsActive ? 1 : 0.65) : 0.35))
+                .embossed()
+                .frame(width: width, height: Theme.subBarHeight)
+                .padding(.horizontal, width == nil ? 8 : 0)
+                .background {
+                    if configuration.isPressed {
+                        Theme.subBarPressed
+                    } else if hovering && isEnabled {
+                        Theme.subBarHover
+                    }
+                }
+                .contentShape(Rectangle())
+                .onHover { hovering = $0 }
+        }
+    }
+}
+
+/// A compact light-metal Aqua pill button on dark charcoal content
+/// (matching the 2010 "More" button on What's New).
+struct MetalPillButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        let shape = Capsule()
+        configuration.label
+            .font(AquaFont.bold(11))
+            .foregroundStyle(Theme.metalText)
+            .embossed()
+            .padding(.horizontal, 11)
+            .frame(height: 20)
+            .background {
+                shape.fill(LinearGradient(
+                    colors: configuration.isPressed
+                        ? [Theme.pillPressedTop, Theme.pillPressedBottom]
+                        : [Theme.pillTop, Theme.pillBottom],
+                    startPoint: .top, endPoint: .bottom))
+            }
+            .overlay(shape.strokeBorder(Theme.pillEdge, lineWidth: 1))
+            .shadow(color: .black.opacity(0.4), radius: 1, y: 1)
+            .contentShape(shape)
+            .environment(\.colorScheme, .light)
+    }
+}
+
 /// Rectangular Aqua text input (white inset field with focus halo), for forms
 /// like sign-in and proxy settings rather than the toolbar search capsule.
 struct AquaTextField: View {

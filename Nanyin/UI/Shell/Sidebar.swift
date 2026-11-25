@@ -2,8 +2,9 @@ import NanyinKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The source list: fixed destinations, the library, the playlists, and the
-/// cover of what is playing at the bottom, as the 2010 client had it.
+/// The source list: brushed-metal account & new-playlist header, fixed
+/// destinations, the library, the playlists, and the cover of what is playing
+/// at the bottom, following the 2010 Spotify-for-Mac layout.
 struct Sidebar: View {
     @Environment(AppModel.self) private var app
 
@@ -13,86 +14,109 @@ struct Sidebar: View {
         let current = app.navigator.current
         let go = app.navigator.go
         VStack(spacing: 0) {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(Self.fixed, id: \.route) { item in
-                        if let heading = item.heading { SidebarHeading(title: heading) }
-                        SidebarRow(title: item.title, icon: item.icon, isSelected: current == item.route) {
-                            go(item.route, false)
+            SidebarHeaderBar()
+            ScrollViewReader { scrollProxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(Self.fixed, id: \.route) { item in
+                            if let heading = item.heading { SidebarHeading(title: heading) }
+                            SidebarRow(
+                                title: item.title,
+                                icon: item.icon,
+                                iconTint: item.tint,
+                                isSelected: current == item.route
+                            ) {
+                                go(item.route, false)
+                            }
                         }
-                    }
-                    SidebarHeading(title: "Playlists")
-                        .contextMenu { newPlaylistButton }
-                    if library.edit == .new {
-                        SidebarNameField(initial: "New Playlist") { name in
-                            library.edit = nil
-                            guard let name else { return }
-                            let navigator = app.navigator
-                            let from = navigator.current
-                            Task {
-                                // Opened unless the listener has moved on meanwhile.
-                                if let playlist = await library.createPlaylist(named: name), navigator.current == from {
-                                    go(.playlist(id: playlist.id), false)
+                        EtchedDivider()
+                            .padding(.top, 8)
+                            .padding(.bottom, 2)
+                        SidebarHeading(title: "Playlists")
+                            .id("new-playlist-anchor")
+                            .contextMenu { newPlaylistButton }
+                        if library.edit == .new {
+                            SidebarNameField(initial: "New Playlist") { name in
+                                library.edit = nil
+                                guard let name else { return }
+                                let navigator = app.navigator
+                                let from = navigator.current
+                                Task {
+                                    // Opened unless the listener has moved on meanwhile.
+                                    if let playlist = await library.createPlaylist(named: name), navigator.current == from {
+                                        go(.playlist(id: playlist.id), false)
+                                    }
                                 }
                             }
+                        } else if let creating = library.creating {
+                            SidebarRow(title: creating, icon: "music.note.list", isSelected: false) {}
+                                .opacity(0.5)
                         }
-                    } else if let creating = library.creating {
-                        SidebarRow(title: creating, icon: "music.note.list", isSelected: false) {}
-                            .opacity(0.5)
-                    }
-                    ForEach(library.playlists) { playlist in
-                        let route = Route.playlist(id: playlist.id)
-                        if library.edit == .rename(id: playlist.id) {
-                            SidebarNameField(initial: playlist.name) { name in
-                                library.edit = nil
-                                if let name { library.rename(playlist.id, to: name) }
-                            }
-                        } else {
-                            let rowView = SidebarRow(
-                                title: playlist.name,
-                                icon: "music.note.list",
-                                isSelected: current == route,
-                                isDropTargeted: dropTargetPlaylistID == playlist.id
-                            ) {
-                                go(route, false)
-                            }
-                            .contextMenu { playlistMenu(playlist) }
-
-                            if library.canEditTracks(playlist) {
-                                rowView.onDrop(
-                                    of: [.utf8PlainText, .plainText, .url],
-                                    isTargeted: Binding(
-                                        get: { dropTargetPlaylistID == playlist.id },
-                                        set: { targeted in
-                                            if targeted {
-                                                dropTargetPlaylistID = playlist.id
-                                            } else if dropTargetPlaylistID == playlist.id {
-                                                dropTargetPlaylistID = nil
-                                            }
-                                        }
-                                    )
-                                ) { providers in
-                                    handleTrackDrop(providers, onto: playlist)
+                        ForEach(library.playlists) { playlist in
+                            let route = Route.playlist(id: playlist.id)
+                            if library.edit == .rename(id: playlist.id) {
+                                SidebarNameField(initial: playlist.name) { name in
+                                    library.edit = nil
+                                    if let name { library.rename(playlist.id, to: name) }
                                 }
                             } else {
-                                rowView
+                                let rowView = SidebarRow(
+                                    title: playlist.name,
+                                    icon: "music.note.list",
+                                    isSelected: current == route,
+                                    isDropTargeted: dropTargetPlaylistID == playlist.id
+                                ) {
+                                    go(route, false)
+                                }
+                                .contextMenu { playlistMenu(playlist) }
+
+                                if library.canEditTracks(playlist) {
+                                    rowView.onDrop(
+                                        of: [.utf8PlainText, .plainText, .url],
+                                        isTargeted: Binding(
+                                            get: { dropTargetPlaylistID == playlist.id },
+                                            set: { targeted in
+                                                if targeted {
+                                                    dropTargetPlaylistID = playlist.id
+                                                } else if dropTargetPlaylistID == playlist.id {
+                                                    dropTargetPlaylistID = nil
+                                                }
+                                            }
+                                        )
+                                    ) { providers in
+                                        handleTrackDrop(providers, onto: playlist)
+                                    }
+                                } else {
+                                    rowView
+                                }
                             }
                         }
+                        if let error = app.library.playlistsError {
+                            Text(error)
+                                .font(AquaFont.regular(11))
+                                .foregroundStyle(Theme.secondaryText)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 4)
+                        }
+                        Color.clear
+                            .frame(minHeight: 36)
+                            .contentShape(Rectangle())
+                            .contextMenu { newPlaylistButton }
                     }
-                    if let error = app.library.playlistsError {
-                        Text(error)
-                            .font(AquaFont.regular(11))
-                            .foregroundStyle(Theme.secondaryText)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 4)
+                    .padding(.top, 5)
+                    .padding(.bottom, 6)
+                }
+                .onChange(of: library.edit) { _, edit in
+                    if edit == .new {
+                        withAnimation(.easeOut(duration: 0.15)) {
+                            scrollProxy.scrollTo("new-playlist-anchor", anchor: .top)
+                        }
                     }
                 }
-                .padding(.vertical, 6)
             }
             NowPlayingCover()
         }
         .background(Theme.sidebar)
-        .contextMenu { newPlaylistButton }
         .alert(
             "Delete “\(deleting?.name ?? "")”?",
             isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
@@ -209,16 +233,87 @@ struct Sidebar: View {
         var heading: String?
         let title: String
         let icon: String
+        var tint: Color? = nil
         let route: Route
     }
 
     private static let fixed = [
         Item(title: "What's New", icon: "house", route: .whatsNew),
         Item(title: "Play Queue", icon: "list.bullet", route: .queue),
-        Item(heading: "Library", title: "Starred", icon: "star", route: .likedSongs),
+        Item(heading: "Library", title: "Starred", icon: "star.fill", tint: Theme.star, route: .likedSongs),
         Item(title: "Albums", icon: "square.stack", route: .albums),
         Item(title: "Artists", icon: "music.mic", route: .artists),
     ]
+}
+
+/// The 24-pt brushed-metal bar at the top of the sidebar (matching the 2010
+/// Spotify-for-Mac mockup): the listener's name as an account menu on the
+/// left, and a recessed square retro `+` button on the right to create a
+/// playlist directly.
+private struct SidebarHeaderBar: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.appearsActive) private var appearsActive
+    @Environment(\.openSettings) private var openSettings
+    @State private var hoveringAccount = false
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Menu {
+                if let profile = app.account.profile {
+                    Text(profile.isPremium ? "\(profile.name) · Premium" : profile.name)
+                }
+                Divider()
+                Button("New Playlist") { app.library.begin(.new) }
+                    .disabled(!app.library.canEditPlaylists)
+                Button("Settings…") { openSettings() }
+                Divider()
+                Button("Sign Out") { Task { await app.signOut() } }
+            } label: {
+                Text(app.account.profile?.name ?? "Library")
+                    .font(AquaFont.bold(12))
+                    .foregroundStyle(Theme.metalText.opacity(appearsActive ? 1 : 0.65))
+                    .embossed()
+                    .lineLimit(1)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.leading, 9)
+            .padding(.trailing, 6)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .background(hoveringAccount ? Theme.subBarHover : Color.clear)
+            .contentShape(Rectangle())
+            .environment(\.colorScheme, .light)
+            .onHover { hoveringAccount = $0 }
+            .help("Account & Settings")
+
+            MetalSubBarDivider()
+
+            Button {
+                app.library.begin(.new)
+            } label: {
+                RetroPlusGlyph()
+            }
+            .buttonStyle(MetalSubBarButtonStyle(width: 26))
+            .disabled(!app.library.canEditPlaylists)
+            .help("New Playlist (⌘N)")
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: Theme.subBarHeight)
+        .background(Theme.subBar(active: appearsActive))
+        .hairline(.top, Theme.subBarHighlight)
+        .hairline(.bottom, Theme.divider)
+    }
+}
+
+/// Chunky, pixel-crisp 2010 Aqua `+` glyph drawn as two perpendicular bars.
+private struct RetroPlusGlyph: View {
+    var body: some View {
+        ZStack {
+            Rectangle().frame(width: 10, height: 2.5)
+            Rectangle().frame(width: 2.5, height: 10)
+        }
+    }
 }
 
 /// A playlist's name being typed in place of its row: Return keeps it,
@@ -250,7 +345,7 @@ private struct SidebarNameField: View {
                 .onExitCommand { finish(nil) }
         }
         .padding(.horizontal, 10)
-        .frame(height: 20)
+        .frame(height: 22)
         .onAppear {
             text = initial
             focused = true
@@ -272,11 +367,11 @@ private struct SidebarHeading: View {
 
     var body: some View {
         Text(title.uppercased())
-            .font(AquaFont.bold(11))
+            .font(AquaFont.bold(10.5))
             .foregroundStyle(Theme.sidebarHeading)
             .shadow(color: .black.opacity(0.5), radius: 0, y: 1)
             .padding(.horizontal, 10)
-            .padding(.top, 12)
+            .padding(.top, 10)
             .padding(.bottom, 3)
     }
 }
@@ -284,6 +379,7 @@ private struct SidebarHeading: View {
 private struct SidebarRow: View {
     let title: String
     let icon: String
+    var iconTint: Color? = nil
     let isSelected: Bool
     var isDropTargeted = false
     let action: () -> Void
@@ -294,7 +390,7 @@ private struct SidebarRow: View {
                 Image(systemName: icon)
                     .font(.system(size: 11))
                     .frame(width: 14)
-                    .foregroundStyle(isSelected ? .white : Theme.sidebarHeading)
+                    .foregroundStyle(isSelected ? .white : (iconTint ?? Theme.sidebarHeading))
                 Text(title)
                     .font(isSelected ? AquaFont.bold(12) : AquaFont.regular(12))
                     .foregroundStyle(isSelected ? .white : Theme.sidebarText)
@@ -303,7 +399,7 @@ private struct SidebarRow: View {
             }
             .shadow(color: .black.opacity(isSelected ? 0.5 : 0.3), radius: 0, y: 1)
             .padding(.horizontal, 10)
-            .frame(height: 20)
+            .frame(height: 22)
             .background {
                 if isSelected {
                     Theme.selection

@@ -32,12 +32,43 @@ enum Theme {
 
     // Metal (title bar, unified toolbar, buttons on it)
     static let metalText = hex(0x262626)
+    static let metalSecondaryText = hex(0x525252)
     static let metalEdge = hex(0x4E4E4E)
     static func metal(active: Bool) -> LinearGradient {
         LinearGradient(
             colors: active ? [hex(0xDCDCDC), hex(0xA9A9A9)] : [hex(0xEDEDED), hex(0xD3D3D3)],
             startPoint: .top, endPoint: .bottom)
     }
+
+    // Sub-bar (the 24-pt brushed metal header shared by the sidebar, What's New tabs, and lyrics pane)
+    static let subBarHeight: CGFloat = 24
+    static let subBarDividerDark = hex(0x6E6E6E)
+    static let subBarDividerLight = hex(0xFFFFFF, 0.38)
+    static let subBarHighlight = hex(0xFFFFFF, 0.45)
+    static let subBarHover = hex(0xFFFFFF, 0.16)
+    static let subBarPressed = LinearGradient(
+        colors: [hex(0x888888), hex(0xA4A4A4)],
+        startPoint: .top, endPoint: .bottom)
+    static let subBarActiveTab = LinearGradient(
+        colors: [hex(0x323232), hex(0x2A2A2A)],
+        startPoint: .top, endPoint: .bottom)
+    static let subBarActiveTabHighlight = hex(0x3E3E3E)
+    static func subBar(active: Bool) -> LinearGradient {
+        LinearGradient(
+            colors: active ? [hex(0xC9C9C9), hex(0x9E9E9E)] : [hex(0xDEDEDE), hex(0xC6C6C6)],
+            startPoint: .top, endPoint: .bottom)
+    }
+
+    // Compact metallic pill button (e.g. "More" on dark charcoal pages)
+    static let pillTop = hex(0xEDEDED)
+    static let pillBottom = hex(0xBABABA)
+    static let pillPressedTop = hex(0x9E9E9E)
+    static let pillPressedBottom = hex(0xBDBDBD)
+    static let pillEdge = hex(0x161616)
+
+    // Etched horizontal grooves on charcoal surfaces
+    static let grooveDark = hex(0x1E1E1E)
+    static let grooveLight = hex(0xFFFFFF, 0.06)
 
     // Graphite (player bar, pane and column headers)
     static let nsGraphiteTop = ns(0x585858)

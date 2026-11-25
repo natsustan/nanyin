@@ -6,6 +6,7 @@ import SwiftUI
 /// ticks stay local to this pane and stop completely while paused.
 struct LyricsPanel: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.appearsActive) private var appearsActive
     static let width: CGFloat = 300
 
     var body: some View {
@@ -23,31 +24,43 @@ struct LyricsPanel: View {
     }
 
     private func header(track: CoreTrack?, state: LyricsModel.State) -> some View {
-        GraphiteHeader {
-            Text("Lyrics")
-            if case .loaded(let lyrics) = state {
-                Text("· \(lyrics.source)")
-                    .font(AquaFont.regular(11))
-                    .foregroundStyle(Theme.secondaryText)
+        HStack(spacing: 0) {
+            HStack(spacing: 5) {
+                Text("Lyrics")
+                    .font(AquaFont.bold(12))
+                    .foregroundStyle(Theme.metalText.opacity(appearsActive ? 1 : 0.65))
+                    .embossed()
+                if case .loaded(let lyrics) = state {
+                    Text("· \(lyrics.source)")
+                        .font(AquaFont.regular(10.5))
+                        .foregroundStyle(Theme.metalSecondaryText.opacity(appearsActive ? 1 : 0.65))
+                        .embossed()
+                        .lineLimit(1)
+                }
             }
-            Spacer()
+            .padding(.leading, 9)
+            Spacer(minLength: 4)
             if let track {
+                MetalSubBarDivider()
                 Button { app.lyrics.load(for: track, force: true) } label: {
                     Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(Theme.hex(0xC8C8C8))
+                        .font(.system(size: 10, weight: .bold))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(MetalSubBarButtonStyle(width: 24))
                 .help("Reload Lyrics")
             }
+            MetalSubBarDivider()
             Button { app.showLyrics = false } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(Theme.hex(0xC8C8C8))
+                    .font(.system(size: 9.5, weight: .bold))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(MetalSubBarButtonStyle(width: 24))
             .help("Close Lyrics")
         }
+        .frame(height: Theme.subBarHeight)
+        .background(Theme.subBar(active: appearsActive))
+        .hairline(.top, Theme.subBarHighlight)
+        .hairline(.bottom, Theme.divider)
     }
 
     @ViewBuilder
