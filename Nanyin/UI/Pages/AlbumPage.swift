@@ -70,22 +70,50 @@ struct ArtistPage: View {
                 }
             }
             if let message = detail.albumsError {
-                GraphiteHeader { Text("Albums and Singles") }
-                PlaceholderText(message: message)
-                    .frame(height: 60)
-            } else if !detail.albums.isEmpty {
-                GraphiteHeader { Text("Albums and Singles") }
-                ScrollView(.horizontal) {
-                    LazyHStack(alignment: .top, spacing: 12) {
-                        ForEach(detail.albums) { Tile(album: $0, subtitle: $0.releaseYear ?? "", size: 110) }
-                    }
-                    .padding(10)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Albums and Singles")
+                        .font(AquaFont.bold(13.5))
+                        .foregroundStyle(Theme.green)
+                        .engraved()
+                        .padding(.horizontal, 18)
+                        .padding(.top, 14)
+                    PlaceholderText(message: message)
+                        .frame(height: 54)
                 }
-                .scrollIndicators(.hidden)
-                .frame(height: 156)
                 .background(Theme.content)
+                EtchedDivider()
+            } else if !detail.albums.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Albums and Singles")
+                        .font(AquaFont.bold(13.5))
+                        .foregroundStyle(Theme.green)
+                        .engraved()
+                        .padding(.horizontal, 18)
+                        .padding(.top, 14)
+                    ScrollView(.horizontal) {
+                        LazyHStack(alignment: .top, spacing: 16) {
+                            ForEach(detail.albums) { Tile(album: $0, subtitle: $0.releaseYear ?? "", size: 120) }
+                        }
+                        .padding(.horizontal, 18)
+                        .padding(.bottom, 14)
+                    }
+                    .scrollIndicators(.hidden)
+                    .frame(height: 174)
+                }
+                .background(Theme.content)
+                EtchedDivider()
             }
-            GraphiteHeader { Text("Popular") }
+            HStack {
+                Text("Popular")
+                    .font(AquaFont.bold(13.5))
+                    .foregroundStyle(Theme.green)
+                    .engraved()
+                Spacer()
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 12)
+            .padding(.bottom, 8)
+            .background(Theme.content)
             popular
         }
     }

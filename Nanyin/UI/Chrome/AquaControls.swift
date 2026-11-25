@@ -2,21 +2,36 @@ import SwiftUI
 
 /// The "textured rounded" button of Snow Leopard toolbars: a light metal
 /// gradient with a dark rim, pressed darker. Always drawn light, wherever
-/// it sits.
+/// it sits. Pass `segment` to join adjacent controls into one segmented pill.
 struct TexturedButtonStyle: ButtonStyle {
+    enum Segment {
+        case standalone, leading, middle, trailing
+
+        var radii: RectangleCornerRadii {
+            switch self {
+            case .standalone: .init(topLeading: 4, bottomLeading: 4, bottomTrailing: 4, topTrailing: 4)
+            case .leading: .init(topLeading: 4, bottomLeading: 4, bottomTrailing: 0, topTrailing: 0)
+            case .middle: .init(topLeading: 0, bottomLeading: 0, bottomTrailing: 0, topTrailing: 0)
+            case .trailing: .init(topLeading: 0, bottomLeading: 0, bottomTrailing: 4, topTrailing: 4)
+            }
+        }
+    }
+
     var width: CGFloat? = nil
+    var segment: Segment = .standalone
 
     func makeBody(configuration: Configuration) -> some View {
-        TexturedButtonBody(configuration: configuration, width: width)
+        TexturedButtonBody(configuration: configuration, width: width, segment: segment)
     }
 
     private struct TexturedButtonBody: View {
         let configuration: Configuration
         let width: CGFloat?
+        let segment: Segment
         @Environment(\.isEnabled) private var isEnabled
 
         var body: some View {
-            let shape = RoundedRectangle(cornerRadius: 4)
+            let shape = UnevenRoundedRectangle(cornerRadii: segment.radii, style: .continuous)
             configuration.label
                 .font(.system(size: 11, weight: .bold))
                 .foregroundStyle(Theme.hex(0x3A3A3A).opacity(isEnabled ? 1 : 0.35))
@@ -135,6 +150,123 @@ struct GraphiteToggleStyle: ButtonStyle {
             .engraved()
             .frame(width: 24, height: 22)
             .contentShape(Rectangle())
+    }
+}
+
+/// A toggle glyph sitting on the light brushed-metal player bar: embossed dark
+/// metal when off, recessed charcoal pill with glowing lime-green glyph when on.
+struct MetalBarToggleStyle: ButtonStyle {
+    var isOn: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        BodyView(configuration: configuration, isOn: isOn)
+    }
+
+    private struct BodyView: View {
+        let configuration: Configuration
+        let isOn: Bool
+        @Environment(\.appearsActive) private var appearsActive
+
+        var body: some View {
+            let pill = RoundedRectangle(cornerRadius: 4)
+            configuration.label
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundStyle(isOn ? Theme.green : Theme.metalText.opacity(appearsActive ? 0.88 : 0.55))
+                .shadow(
+                    color: isOn ? .black.opacity(0.65) : .white.opacity(0.55),
+                    radius: 0,
+                    y: isOn ? -1 : 1
+                )
+                .opacity(configuration.isPressed ? 0.65 : 1)
+                .frame(width: 26, height: 22)
+                .background {
+                    if isOn {
+                        pill.fill(LinearGradient(
+                            colors: [Theme.hex(0x3A3A3A), Theme.hex(0x4E4E4E)],
+                            startPoint: .top, endPoint: .bottom))
+                        .overlay(pill.strokeBorder(Theme.hex(0x282828), lineWidth: 1))
+                        .background(pill.fill(.white.opacity(0.35)).offset(y: 1))
+                    } else if configuration.isPressed {
+                        pill.fill(Theme.hex(0x000000, 0.12))
+                    }
+                }
+                .contentShape(Rectangle())
+        }
+    }
+}
+
+/// A recessed dark filter capsule for charcoal/graphite bars (so in-page
+/// filtering blends naturally without a glaring white box over dark chrome).
+struct DarkFilterField: View {
+    @Binding var text: String
+    var prompt = "Filter"
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        let shape = Capsule()
+        HStack(spacing: 4) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Theme.secondaryText)
+            TextField(prompt, text: $text)
+                .textFieldStyle(.plain)
+                .font(AquaFont.regular(11.5))
+                .foregroundStyle(Theme.text)
+                .focused($focused)
+            if !text.isEmpty {
+                Button { text = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(Theme.secondaryText)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 20)
+        .background(shape.fill(Theme.hex(0x222222)))
+        .overlay(shape.strokeBorder(focused ? Theme.green.opacity(0.85) : Theme.hex(0x141414), lineWidth: 1))
+        .background(shape.fill(.white.opacity(0.1)).offset(y: 1))
+    }
+}
+
+/// Compact graphite action button for dark in-page toolbars (Play, Sort).
+struct GraphiteActionButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        BodyView(configuration: configuration)
+    }
+
+    private struct BodyView: View {
+        let configuration: Configuration
+        @Environment(\.isEnabled) private var isEnabled
+
+        var body: some View {
+            let shape = RoundedRectangle(cornerRadius: 4)
+            configuration.label
+                .font(AquaFont.bold(11))
+                .foregroundStyle(Theme.text.opacity(isEnabled ? 1 : 0.4))
+                .engraved()
+                .frame(height: 20)
+                .padding(.horizontal, 9)
+                .background {
+                    shape.fill(LinearGradient(
+                        colors: configuration.isPressed
+                            ? [Theme.hex(0x2E2E2E), Theme.hex(0x3D3D3D)]
+                            : [Theme.hex(0x555555), Theme.hex(0x393939)],
+                        startPoint: .top, endPoint: .bottom))
+                }
+                .overlay(shape.strokeBorder(Theme.hex(0x1C1C1C), lineWidth: 1))
+                .overlay(alignment: .top) {
+                    if !configuration.isPressed {
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(.white.opacity(0.14))
+                            .frame(height: 1)
+                            .padding(.horizontal, 2)
+                            .padding(.top, 1)
+                    }
+                }
+                .contentShape(shape)
+        }
     }
 }
 

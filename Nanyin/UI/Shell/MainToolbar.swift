@@ -18,10 +18,10 @@ struct MainToolbar: View {
         ZStack(alignment: .top) {
             TitleBarDragArea()
             Text("Nanyin")
-                .font(AquaFont.regular(14))
+                .font(AquaFont.regular(13))
                 .foregroundStyle(Theme.metalText.opacity(appearsActive ? 1 : 0.5))
                 .embossed()
-                .padding(.top, 3)
+                .padding(.top, 4)
                 .allowsHitTesting(false)
             TrafficLights()
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -31,16 +31,16 @@ struct MainToolbar: View {
                 HStack(spacing: 10) {
                     HStack(spacing: -1) {
                         Button(action: navigator.goBack) { Image(systemName: "chevron.left") }
-                            .buttonStyle(TexturedButtonStyle(width: 28))
+                            .buttonStyle(TexturedButtonStyle(width: 27, segment: .leading))
                             .disabled(!navigator.canGoBack)
                             .keyboardShortcut("[", modifiers: .command)
                         Button(action: navigator.goForward) { Image(systemName: "chevron.right") }
-                            .buttonStyle(TexturedButtonStyle(width: 28))
+                            .buttonStyle(TexturedButtonStyle(width: 27, segment: .trailing))
                             .disabled(!navigator.canGoForward)
                             .keyboardShortcut("]", modifiers: .command)
                     }
                     AquaSearchField(text: $query, onSubmit: { search(replacing: false) }, focusRequest: navigator.searchFocusRequests)
-                        .frame(width: 220)
+                        .frame(width: 204)
                         .help("Search songs, artists, albums, playlists, or paste a Spotify link")
                         .onChange(of: query) { scheduleSearch() }
                     Spacer()

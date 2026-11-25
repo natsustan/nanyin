@@ -21,13 +21,24 @@ struct Sidebar: View {
             ScrollViewReader { scrollProxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(Self.fixed, id: \.route) { item in
-                            if let heading = item.heading { SidebarHeading(title: heading) }
+                        ForEach(Self.topItems, id: \.route) { item in
+                            SidebarRow(
+                                title: item.title,
+                                icon: item.icon,
+                                iconTint: item.tint,
+                                isSelected: current == item.route
+                            ) {
+                                go(item.route, false)
+                            }
+                        }
+                        SidebarLibraryHeader()
+                        ForEach(Self.libraryItems, id: \.route) { item in
                             let itemPlaying = item.route == .likedSongs && starredURI != nil && activeContext == starredURI
                             SidebarRow(
                                 title: item.title,
                                 icon: item.icon,
                                 iconTint: item.tint,
+                                indent: 12,
                                 isSelected: current == item.route,
                                 isPlayingContext: itemPlaying,
                                 isPlaybackActive: isPlaying,
@@ -39,11 +50,8 @@ struct Sidebar: View {
                             }
                         }
                         EtchedDivider()
-                            .padding(.top, 8)
-                            .padding(.bottom, 2)
-                        SidebarHeading(title: "Playlists")
                             .id("new-playlist-anchor")
-                            .contextMenu { newPlaylistButton }
+                            .padding(.vertical, 6)
                         if library.edit == .new {
                             SidebarNameField(initial: "New Playlist") { name in
                                 library.edit = nil
@@ -58,7 +66,7 @@ struct Sidebar: View {
                                 }
                             }
                         } else if let creating = library.creating {
-                            SidebarRow(title: creating, icon: "music.note.list", isSelected: false) {}
+                            SidebarRow(title: creating, icon: "music.note", isSelected: false) {}
                                 .opacity(0.5)
                         }
                         ForEach(library.playlists) { playlist in
@@ -71,7 +79,7 @@ struct Sidebar: View {
                             } else {
                                 let rowView = SidebarRow(
                                     title: playlist.name,
-                                    icon: "music.note.list",
+                                    icon: "music.note",
                                     isSelected: current == route,
                                     isDropTargeted: dropTargetPlaylistID == playlist.id,
                                     isPlayingContext: activeContext == playlist.uri,
@@ -242,20 +250,43 @@ struct Sidebar: View {
     }
 
     private struct Item {
-        var heading: String?
         let title: String
         let icon: String
         var tint: Color? = nil
         let route: Route
     }
 
-    private static let fixed = [
-        Item(title: "What's New", icon: "house", route: .whatsNew),
-        Item(title: "Play Queue", icon: "list.bullet", route: .queue),
-        Item(heading: "Library", title: "Starred", icon: "star.fill", tint: Theme.star, route: .likedSongs),
-        Item(title: "Albums", icon: "square.stack", route: .albums),
+    private static let topItems = [
+        Item(title: "What's New", icon: "newspaper.fill", route: .whatsNew),
+        Item(title: "Play Queue", icon: "text.justify", route: .queue),
+    ]
+
+    private static let libraryItems = [
+        Item(title: "Starred", icon: "star.fill", tint: Theme.star, route: .likedSongs),
+        Item(title: "Albums", icon: "opticaldisc.fill", route: .albums),
         Item(title: "Artists", icon: "music.mic", route: .artists),
     ]
+}
+
+/// The non-interactive "Library" parent row with the 2010 rsms sky-blue house
+/// icon, sitting above indented Starred / Albums / Artists rows.
+private struct SidebarLibraryHeader: View {
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "house.fill")
+                .font(.system(size: 11, weight: .semibold))
+                .frame(width: 14)
+                .foregroundStyle(Theme.sidebarLibraryTint)
+            Text("Library")
+                .font(AquaFont.regular(12))
+                .foregroundStyle(Theme.sidebarText)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .shadow(color: .black.opacity(0.35), radius: 0, y: 1)
+        .padding(.horizontal, 10)
+        .frame(height: 22)
+    }
 }
 
 /// The 24-pt brushed-metal bar at the top of the sidebar (matching the 2010
@@ -344,8 +375,8 @@ private struct SidebarNameField: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: "music.note.list")
-                .font(.system(size: 11))
+            Image(systemName: "music.note")
+                .font(.system(size: 11, weight: .semibold))
                 .frame(width: 14)
                 .foregroundStyle(Theme.sidebarHeading)
             TextField("", text: $text)
@@ -377,25 +408,12 @@ private struct SidebarNameField: View {
     }
 }
 
-private struct SidebarHeading: View {
-    let title: String
-
-    var body: some View {
-        Text(title.uppercased())
-            .font(AquaFont.bold(10.5))
-            .foregroundStyle(Theme.sidebarHeading)
-            .shadow(color: .black.opacity(0.5), radius: 0, y: 1)
-            .padding(.horizontal, 10)
-            .padding(.top, 10)
-            .padding(.bottom, 3)
-    }
-}
-
 private struct SidebarRow: View {
     @Environment(\.appearsActive) private var appearsActive
     let title: String
     let icon: String
     var iconTint: Color? = nil
+    var indent: CGFloat = 0
     let isSelected: Bool
     var isDropTargeted = false
     var isPlayingContext = false
@@ -407,12 +425,12 @@ private struct SidebarRow: View {
         let selectedInk = Theme.sidebarSelectionText
         let row = HStack(spacing: 6) {
             Image(systemName: icon)
-                .font(.system(size: 11))
+                .font(.system(size: 11, weight: .semibold))
                 .frame(width: 14)
                 .foregroundStyle(
                     isSelected
                         ? (iconTint ?? selectedInk)
-                        : (iconTint ?? Theme.sidebarHeading)
+                        : (iconTint ?? Theme.sidebarText.opacity(0.72))
                 )
             Text(title)
                 .font(isSelected ? AquaFont.bold(12) : AquaFont.regular(12))
@@ -430,7 +448,8 @@ private struct SidebarRow: View {
             radius: 0,
             y: 1
         )
-        .padding(.horizontal, 10)
+        .padding(.leading, 10 + indent)
+        .padding(.trailing, 10)
         .frame(height: 22)
         .background {
             if isSelected {
@@ -464,6 +483,7 @@ private struct SidebarRow: View {
 /// album, each artist their page.
 private struct NowPlayingCover: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.appearsActive) private var appearsActive
     @AppStorage("NowPlayingArtworkLarge") private var large = true
     @State private var hovering = false
 
@@ -471,34 +491,39 @@ private struct NowPlayingCover: View {
         let _ = app.stars.version
         if let track = app.player.track {
             let starred = track.isTrack ? app.stars.isStarred(track.uri) : nil
+            let primaryInk = Theme.metalText.opacity(appearsActive ? 1 : 0.65)
+            let secondaryInk = Theme.metalSecondaryText.opacity(appearsActive ? 1 : 0.65)
             VStack(spacing: 0) {
                 HStack(spacing: 7) {
                     if !large {
                         Button { large = true } label: {
-                            CoverImage(url: track.coverURL, size: 32)
+                            CoverImage(url: track.coverURL, size: 30)
                                 .overlay { if hovering { ArtworkToggle(symbol: "arrow.up.left.and.arrow.down.right") } }
                         }
                         .buttonStyle(.plain)
                         .help("Show Large Artwork")
                     }
                     VStack(alignment: .leading, spacing: 1) {
-                        LinkText(parts: [(track.name, track.albumURI.flatMap(Route.init(uri:)))], color: Theme.text)
-                            .font(AquaFont.bold(12))
+                        LinkText(parts: [(track.name, track.albumURI.flatMap(Route.init(uri:)))], color: primaryInk)
+                            .font(AquaFont.bold(11.5))
+                            .embossed()
                         if app.player.playingElsewhere {
                             HStack(spacing: 4) {
                                 Text("Playing elsewhere")
-                                    .font(AquaFont.regular(11))
-                                    .foregroundStyle(Theme.secondaryText)
+                                    .font(AquaFont.regular(10.5))
+                                    .foregroundStyle(secondaryInk)
+                                    .embossed()
                                 if app.session.isReady {
                                     Button("Play Here") { app.connect.transferToThisMac() }
                                         .buttonStyle(.link)
-                                        .font(AquaFont.bold(11))
-                                        .foregroundStyle(Theme.green)
+                                        .font(AquaFont.bold(10.5))
+                                        .foregroundStyle(Theme.hex(0x3B6600))
                                 }
                             }
                         } else {
-                            LinkText(parts: track.artists.map { ($0.name, Route(uri: $0.uri)) }, color: Theme.secondaryText)
-                                .font(AquaFont.regular(11))
+                            LinkText(parts: track.artists.map { ($0.name, Route(uri: $0.uri)) }, color: secondaryInk)
+                                .font(AquaFont.regular(10.5))
+                                .embossed()
                         }
                     }
                     .lineLimit(1)
@@ -507,9 +532,17 @@ private struct NowPlayingCover: View {
                         let isStarred = starred == true
                         Button { app.stars.toggle(track.uri) } label: {
                             Image(systemName: isStarred ? "star.fill" : "star")
-                                .font(.system(size: 12))
-                                .foregroundStyle(isStarred ? Theme.star : Theme.secondaryText.opacity(starred == nil ? 0.35 : 0.75))
-                                .engraved()
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(
+                                    isStarred
+                                        ? Theme.star
+                                        : Theme.metalSecondaryText.opacity(starred == nil ? 0.35 : 0.8)
+                                )
+                                .shadow(
+                                    color: isStarred ? .black.opacity(0.55) : .white.opacity(0.55),
+                                    radius: 0,
+                                    y: isStarred ? -0.5 : 1
+                                )
                                 .frame(width: 22, height: 22)
                                 .contentShape(Rectangle())
                         }
@@ -519,9 +552,12 @@ private struct NowPlayingCover: View {
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 5)
-                .background(Theme.graphite)
-                .hairline(.top, Theme.graphiteEdge)
+                .background(Theme.subBar(active: appearsActive))
+                .hairline(.top, Theme.subBarHighlight)
+                .padding(.top, 1)
+                .hairline(.top, Theme.divider)
                 .hairline(.bottom, Theme.divider)
+                .environment(\.colorScheme, .light)
                 if large {
                     Artwork(url: track.coverURL, placeholder: Theme.vinylBackground) {
                         VinylPlaceholder(insetRatio: 0.09)

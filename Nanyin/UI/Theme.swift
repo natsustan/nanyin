@@ -24,6 +24,8 @@ enum Theme {
     /// A starred song's star.
     static let nsStar = ns(0xF2C230)
     static let star = Color(nsColor: nsStar)
+    /// The Library house tint in the 2010 rsms sidebar.
+    static let sidebarLibraryTint = hex(0x76C4E8)
 
     // The small button laid over artwork
     static let artworkButton = hex(0x000000, 0.6)
@@ -116,8 +118,18 @@ enum Theme {
     /// Zebra stripe colour of row `index`.
     static func row(_ index: Int) -> NSColor { nsRows[index & 1] }
 
-    static let nsSelectionTop = ns(0x767676)
-    static let nsSelectionBottom = ns(0x5C5C5C)
+    // Bottom player bar (Snow Leopard / 2010 Spotify brushed aluminum)
+    static let playerBarEdge = hex(0x464646)
+    static let playerBarHighlight = hex(0xFFFFFF, 0.55)
+    static func playerBar(active: Bool) -> LinearGradient {
+        LinearGradient(
+            colors: active ? [hex(0xCECECE), hex(0x9C9C9C)] : [hex(0xE4E4E4), hex(0xC9C9C9)],
+            startPoint: .top, endPoint: .bottom)
+    }
+
+    // Track table selection (2010 Snow Leopard / Spotify deep Aqua steel-blue)
+    static let nsSelectionTop = ns(0x4F7CB6)
+    static let nsSelectionBottom = ns(0x375E94)
     static let selection = LinearGradient(
         colors: [Color(nsColor: nsSelectionTop), Color(nsColor: nsSelectionBottom)], startPoint: .top, endPoint: .bottom)
 }
